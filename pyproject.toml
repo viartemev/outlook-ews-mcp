@@ -1,0 +1,43 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "outlook-mcp"
+version = "0.1.0"
+description = "MCP server for on-premise Microsoft Exchange"
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+    "mcp>=1.0",
+    "exchangelib>=5.0",
+    "pydantic>=2.7",
+    "pydantic-settings>=2.2",
+    "email-validator>=2.0",
+    "requests-ntlm>=1.3",
+    "python-dateutil>=2.9",
+    "uvicorn>=0.30",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0",
+    "ruff>=0.5",
+]
+
+[project.scripts]
+outlook-mcp = "outlook_mcp.server:main"
+outlook-mcp-smoke = "outlook_mcp.smoke:main"
+
+[tool.setuptools]
+package-dir = {"" = "src"}
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+pythonpath = ["src"]
+testpaths = ["tests"]
+
+[tool.ruff]
+line-length = 100

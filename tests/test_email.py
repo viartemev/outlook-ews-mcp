@@ -1,0 +1,71 @@
+from __future__ import annotations
+
+from pathlib import Path
+
+import pytest
+
+from outlook_mcp.errors import APIError
+from outlook_mcp.tools.email import get_email, list_emails, send_email
+
+
+def test_list_emails(client) -> None:
+    result = list_emails(client, {"folder": "inbox", "limit": 5, "unread_only": True})
+    assert result[0]["id"] == "email-1"
+    assert result[0]["is_read"] is False
+
+
+def test_get_email(client) -> None:
+    result = get_email(client, {"id": "email-1"})
+    assert result["id"] == "email-1"
+    assert result["body_text"] == "Body"
+
+
+def test_send_email_checks_attachment_exists(client, tmp_path: Path) -> None:
+    existing = tmp_path / "ok.txt"
+    existing.write_text("hello", encoding="utf-8")
+
+    result = send_email(
+        client,
+        {
+            "to": ["user@example.com"],
+            "subject": "Test",
+            "body": "Hello",
+            "attachments": [str(existing)],
+        },
+    )
+    assert result["status"] == "sent"
+
+
+def test_send_email_rejects_missing_attachment(client) -> None:
+    with pytest.raises(APIError) as excinfo:
+        send_email(
+            client,
+            {
+                "to": ["user@example.com"],
+                "subject": "Test",
+                "body": "Hello",
+                "attachments": ["/no/such/file.txt"],
+            },
+        )
+
+    assert excinfo.value.code == "validation_error"
+
+
+def test_send_email_rejects_attachment_over_limit(client, tmp_path: Path) -> None:
+    client.settings.attachment_max_size_mb = 1
+    oversized = tmp_path / "big.bin"
+    oversized.write_bytes(b"x" * (1024 * 1024 + 1))
+
+    with pytest.raises(APIError) as excinfo:
+        send_email(
+            client,
+            {
+                "to": ["user@example.com"],
+                "subject": "Test",
+                "body": "Hello",
+                "attachments": [str(oversized)],
+            },
+        )
+
+    assert excinfo.value.code == "validation_error"
+    assert "ATTACHMENT_MAX_SIZE_MB=1" in excinfo.value.details[0]["reason"]
