@@ -1,8 +1,34 @@
 # outlook-mcp
 
-MCP server for on-premise Microsoft Exchange via EWS (`exchangelib`).
+![Python](https://img.shields.io/badge/python-3.11%2B-blue)
+![MCP](https://img.shields.io/badge/MCP-server-7c3aed)
+![Exchange](https://img.shields.io/badge/Microsoft%20Exchange-EWS-0a7ea4)
+![Status](https://img.shields.io/badge/status-beta-orange)
 
-## What it can do
+`outlook-mcp` is an MCP server for on-prem Microsoft Exchange via EWS (`exchangelib`).
+It gives MCP-compatible clients access to email, calendar, contacts, folders, attachments, and availability data through a single, testable Python service.
+
+## Short description
+
+Secure MCP server for on-prem Microsoft Exchange (EWS) with tools for email, calendar, contacts, folders, attachments, and free/busy availability.
+
+## Suggested repository topics / tags
+
+`mcp`, `model-context-protocol`, `exchange`, `microsoft-exchange`, `ews`, `outlook`, `email`, `calendar`, `contacts`, `python`, `automation`, `exchangelib`
+
+## Highlights
+
+- email operations: list, search, read, send, reply, forward, move, copy, delete, mark
+- calendar operations: list, create, update, delete, respond to invites, find free slots
+- contacts operations: search, read, create, update, delete
+- folder operations and attachment download
+- Exchange auth via `NTLM` and `Basic`
+- MCP transport via `stdio` and `SSE`
+- centralized error mapping and a single `ExchangeClient` abstraction
+- privacy-safer smoke check output by default
+- Docker support and GitLab CI/CD pipeline included
+
+## Tool catalog
 
 ### System
 - `ping_exchange`
@@ -43,6 +69,16 @@ MCP server for on-premise Microsoft Exchange via EWS (`exchangelib`).
 - `update_contact`
 - `delete_contact`
 
+## Typical use cases
+
+- connect Claude Desktop or another MCP client to on-prem Exchange
+- search inbox messages and fetch full email content
+- send or draft emails from AI workflows
+- inspect calendars and create meetings
+- check free/busy windows for scheduling
+- search personal contacts or the GAL
+- expose Exchange operations through a controlled MCP boundary instead of direct mailbox scripting
+
 ## Security notes
 
 What the current code does:
@@ -51,14 +87,16 @@ What the current code does:
 - keeps secrets in environment variables / `.env`
 - ignores local secret files via `.gitignore` (`.env`, `.env.*`, while keeping `.env.example`)
 - logs only tool name, status, duration, and error code; it does **not** log message bodies, attachment contents, or passwords
+- excludes `.env`, tests, caches, and VCS metadata from Docker build context via `.dockerignore`
 
 What you should still be careful with:
 - `EXCHANGE_VERIFY_SSL=false` disables TLS certificate verification and should be used only for trusted internal/self-signed environments
 - `get_attachment` writes files to disk, so choose a safe destination directory
 - `outlook-mcp-smoke` is privacy-safe by default and prints only masked mailbox info plus counts; set `OUTLOOK_MCP_SMOKE_INCLUDE_DATA=true` only if you explicitly want real inbox/event data in stdout
 - if you enable file logging with `LOG_FILE`, protect that file with OS permissions
+- if you publish Docker images from CI, protect GitLab/GitHub project access and registry permissions
 
-## Local run
+## Quick start
 
 ```bash
 uv venv
@@ -98,6 +136,7 @@ Notes:
 - set `EXCHANGE_EMAIL_ADDRESS` when `EXCHANGE_USERNAME` is not an SMTP address
 - `OAuth2` is reserved in config, but this build currently supports live auth with `NTLM` or `Basic`
 - `EXCHANGE_IMPERSONATE_AS` enables mailbox impersonation when Exchange permissions are configured accordingly
+- `ATTACHMENT_MAX_SIZE_MB` is enforced before sending/replying/forwarding/drafting with local attachments
 
 ## Claude Desktop example
 
@@ -139,11 +178,30 @@ docker build -t outlook-mcp .
 docker run --rm --env-file .env outlook-mcp
 ```
 
+## GitLab CI/CD
+
+The repository includes `.gitlab-ci.yml` with these stages:
+
+- `lint` — runs `ruff`
+- `test` — runs `pytest`
+- `build` — builds Python package artifacts into `dist/`
+- `release` — builds and pushes a Docker image to the GitLab Container Registry on the default branch and on tags
+
+Default image tagging behavior:
+- default branch: pushes `:$CI_COMMIT_SHORT_SHA` and `:latest`
+- git tag: pushes `:$CI_COMMIT_TAG`
+
+GitLab built-in registry variables are used:
+- `CI_REGISTRY`
+- `CI_REGISTRY_USER`
+- `CI_REGISTRY_PASSWORD`
+- `CI_REGISTRY_IMAGE`
+
 ## Development
 
 ```bash
-uv run --python 3.12 --with '.[dev]' pytest -q
 uv run --python 3.12 --with '.[dev]' ruff check .
+uv run --python 3.12 --with '.[dev]' pytest -q
 ```
 
 ## Project notes

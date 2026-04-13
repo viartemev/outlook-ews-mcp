@@ -5,9 +5,30 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "outlook-mcp"
 version = "0.1.0"
-description = "MCP server for on-premise Microsoft Exchange"
+description = "MCP server for on-prem Microsoft Exchange via EWS with email, calendar, contacts, and availability tools"
 readme = "README.md"
 requires-python = ">=3.11"
+keywords = [
+    "mcp",
+    "model-context-protocol",
+    "exchange",
+    "microsoft-exchange",
+    "ews",
+    "outlook",
+    "email",
+    "calendar",
+    "contacts",
+    "automation",
+]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Developers",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Communications :: Email",
+    "Topic :: Office/Business :: Groupware",
+]
 dependencies = [
     "mcp>=1.0",
     "exchangelib>=5.0",
@@ -24,6 +45,11 @@ dev = [
     "pytest>=8.0",
     "ruff>=0.5",
 ]
+
+[project.urls]
+Homepage = "https://github.com/viartemev/outlook-mcp"
+Repository = "https://github.com/viartemev/outlook-mcp"
+Issues = "https://github.com/viartemev/outlook-mcp/issues"
 
 [project.scripts]
 outlook-mcp = "outlook_mcp.server:main"
