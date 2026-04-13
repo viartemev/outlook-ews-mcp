@@ -27,6 +27,7 @@ from exchangelib import (
     Message,
     NTLM,
 )
+from exchangelib.ewsdatetime import EWSDateTime
 from exchangelib.errors import (
     ErrorItemSavePropertyError,
     ErrorFolderSavePropertyError,
@@ -910,9 +911,20 @@ class EWSExchangeBackend:
                 return candidate
             index += 1
 
+    def _to_ews_datetime(self, value: datetime) -> EWSDateTime:
+        if value.tzinfo is None:
+            value = value.replace(tzinfo=self.account.default_timezone)
+        else:
+            value = value.astimezone(self.account.default_timezone)
+        if isinstance(value, EWSDateTime):
+            return value
+        return EWSDateTime.from_datetime(value)
+
     def list_events(self, request: ListEventsRequest) -> list[CalendarEvent]:
         folder = self.account.calendar if not request.calendar_id else self._resolve_folder(request.calendar_id)
-        qs = folder.view(start=request.start, end=request.end)
+        start = self._to_ews_datetime(request.start)
+        end = self._to_ews_datetime(request.end)
+        qs = folder.view(start=start, end=end)
         try:
             items = list(qs)
         except Exception as exc:  # noqa: BLE001
@@ -925,12 +937,14 @@ class EWSExchangeBackend:
 
     def create_event(self, request: CreateEventRequest) -> CreateEventResult:
         folder = self.account.calendar if not request.calendar_id else self._resolve_folder(request.calendar_id)
+        start = self._to_ews_datetime(request.start)
+        end = self._to_ews_datetime(request.end)
         item = CalendarItem(
             account=self.account,
             folder=folder,
             subject=request.subject,
-            start=request.start,
-            end=request.end,
+            start=start,
+            end=end,
             location=request.location,
             body=request.body,
             required_attendees=[Attendee(mailbox=self._mailbox(address)) for address in request.attendees],
@@ -945,8 +959,8 @@ class EWSExchangeBackend:
                 id=item.id or "",
                 status="created",
                 subject=request.subject,
-                start=request.start,
-                end=request.end,
+                start=start,
+                end=end,
                 invite_sent=bool(request.attendees),
             )
         except Exception as exc:  # noqa: BLE001
@@ -958,6 +972,8 @@ class EWSExchangeBackend:
         for field in ["subject", "start", "end", "location", "body", "reminder_minutes"]:
             value = getattr(request, field)
             if value is not None:
+                if field in {"start", "end"}:
+                    value = self._to_ews_datetime(value)
                 target = "reminder_minutes_before_start" if field == "reminder_minutes" else field
                 setattr(item, target, value)
                 updated_fields.append(field)
@@ -1010,6 +1026,8 @@ class EWSExchangeBackend:
 
     def find_free_slots(self, request: FindFreeSlotsRequest) -> list[FreeSlot]:
         tz = self.account.default_timezone
+        start = self._to_ews_datetime(request.start)
+        end = self._to_ews_datetime(request.end)
         service = GetUserAvailability(protocol=self.account.protocol)
         mailbox_data = [
             MailboxData(email=self._mailbox(address), attendee_type="Required", exclude_conflicts=False)
@@ -1021,7 +1039,7 @@ class EWSExchangeBackend:
                 mailbox_data=mailbox_data,
                 timezone=tz,
                 free_busy_view_options=FreeBusyViewOptions(
-                    time_window=TimeWindow(start=request.start, end=request.end),
+                    time_window=TimeWindow(start=start, end=end),
                     merged_free_busy_interval=request.duration,
                     requested_view="DetailedMerged",
                 ),
@@ -1033,14 +1051,14 @@ class EWSExchangeBackend:
             return []
         merged = getattr(views[0], "merged", "") or ""
         slots: list[FreeSlot] = []
-        cursor = request.start
+        cursor = start
         interval = timedelta(minutes=request.duration)
         for symbol in merged:
             slot_end = cursor + interval
             if symbol == "0":
                 slots.append(FreeSlot(start=cursor, end=slot_end, all_available=True, busy_attendees=[]))
             cursor = slot_end
-            if cursor >= request.end:
+            if cursor >= end:
                 break
         return slots
 
