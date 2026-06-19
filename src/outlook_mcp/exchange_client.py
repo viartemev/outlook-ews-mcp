@@ -29,6 +29,7 @@ from exchangelib import (
 )
 from exchangelib.ewsdatetime import EWSDateTime
 from exchangelib.errors import (
+    ErrorFolderNotFound,
     ErrorItemSavePropertyError,
     ErrorFolderSavePropertyError,
     RateLimitError,
@@ -42,6 +43,7 @@ from exchangelib.indexed_properties import PhoneNumber as IndexedPhoneNumber
 from exchangelib.items import Contact
 from exchangelib.properties import FreeBusyViewOptions, ItemId, MailboxData, TimeWindow
 from exchangelib.protocol import BaseProtocol, FailFast, FaultTolerance
+from exchangelib.folders.queryset import SHALLOW as SHALLOW_FOLDERS, SingleFolderQuerySet
 from exchangelib.services import GetUserAvailability, ResolveNames
 from urllib3.exceptions import InsecureRequestWarning
 
@@ -479,19 +481,23 @@ class EWSExchangeBackend:
         }
         if normalized in builtin:
             return builtin[normalized]
-        for folder in account.root.walk():
-            if getattr(folder, "id", None) == value:
-                return folder
 
-        current = account.root
-        for part in [segment for segment in value.strip("/").split("/") if segment]:
-            next_folder = next(
-                (child for child in current.children if child.name.lower() == part.lower()),
-                None,
-            )
-            if next_folder is None:
+        parts = [segment for segment in value.strip("/").split("/") if segment]
+        if not parts:
+            return account.root
+
+        # First segment must be a known built-in — never traverse root.children
+        # as it contains hundreds of Exchange system folders with numeric names.
+        first = parts[0].lower()
+        if first not in builtin:
+            raise NotFoundError(value)
+
+        current = builtin[first]
+        for part in parts[1:]:
+            try:
+                current = current // part  # targeted FindFolder with DisplayName restriction — never fetches all siblings
+            except ErrorFolderNotFound:
                 raise NotFoundError(value)
-            current = next_folder
         return current
 
     def _fetch_item(self, item_id: str, folder: Folder | None = None) -> Any:
@@ -656,10 +662,14 @@ class EWSExchangeBackend:
                 message.attach(FileAttachment(name=Path(path).name, content=handle.read()))
         return message
 
+    def _direct_children(self, folder: Folder):
+        """Fetch immediate children via a single shallow FindFolder with no _folders_map traversal."""
+        return SingleFolderQuerySet(account=self.account, folder=folder).depth(SHALLOW_FOLDERS).all()
+
     def _to_folder_info(self, folder: Folder, depth: int) -> FolderInfo:
         children = []
         if depth > 0:
-            children = [self._to_folder_info(child, depth - 1) for child in folder.children]
+            children = [self._to_folder_info(child, depth - 1) for child in self._direct_children(folder)]
         return FolderInfo(
             id=getattr(folder, "id", None),
             name=folder.name,
@@ -849,8 +859,21 @@ class EWSExchangeBackend:
             raise self._map_exception(exc, item_id=request.id) from exc
 
     def list_folders(self, request: ListFoldersRequest) -> list[FolderInfo]:
+        if request.parent is None:
+            # Return well-known mail folders directly — never traverse account.root
+            # which contains hundreds of Exchange system folders with numeric names.
+            top_folders = [
+                self.account.inbox,
+                self.account.sent,
+                self.account.drafts,
+                self.account.trash,
+                self.account.junk,
+            ]
+            return [self._to_folder_info(f, request.depth) for f in top_folders]
         folder = self._resolve_folder(request.parent)
-        return [self._to_folder_info(child, request.depth - 1) for child in folder.children] if request.depth != 0 else [self._to_folder_info(folder, 0)]
+        if request.depth == 0:
+            return [self._to_folder_info(folder, 0)]
+        return [self._to_folder_info(child, request.depth - 1) for child in self._direct_children(folder)]
 
     def create_folder(self, request: CreateFolderRequest) -> ActionResult:
         parent = self._resolve_folder(request.parent)

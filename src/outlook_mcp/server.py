@@ -5,7 +5,7 @@ import logging
 import sys
 import time
 from collections.abc import Callable
-from typing import Any
+from typing import Any, Literal
 
 from .config import Settings, get_settings
 from .errors import APIError, normalize_exception
@@ -156,45 +156,356 @@ def build_mcp_server(settings: Settings | None = None, client: ExchangeClient | 
     registry = build_registry(settings=settings, client=client)
     server = FastMCP("outlook-mcp")
 
-    def register_tool(name: str, description: str) -> None:
-        @server.tool(name=name, description=description)
-        def _tool(**kwargs: Any) -> str:
-            payload, is_error = registry.call(name, kwargs)
-            if is_error:
-                raise RuntimeError(json.dumps(payload, ensure_ascii=False))
-            return json.dumps(payload, ensure_ascii=False)
+    def _call(name: str, args: dict) -> str:
+        payload, is_error = registry.call(name, args)
+        if is_error:
+            raise RuntimeError(json.dumps(payload, ensure_ascii=False))
+        return json.dumps(payload, ensure_ascii=False)
 
-    register_tool("ping_exchange", "Check connectivity to Exchange")
-    register_tool("get_mailbox_info", "Get mailbox metadata")
-    register_tool("list_emails", "List emails in a folder")
-    register_tool("get_email", "Get a full email by ID")
-    register_tool("search_emails", "Search emails")
-    register_tool("send_email", "Send a new email")
-    register_tool("reply_email", "Reply to an email")
-    register_tool("forward_email", "Forward an email")
-    register_tool("move_email", "Move email to another folder")
-    register_tool("copy_email", "Copy email to another folder")
-    register_tool("delete_email", "Delete an email")
-    register_tool("mark_email", "Update email flags")
-    register_tool("list_folders", "List mailbox folders")
-    register_tool("create_folder", "Create a mailbox folder")
-    register_tool("create_draft", "Create an email draft")
-    register_tool("send_draft", "Send a draft email")
-    register_tool("get_attachment", "Save an attachment to disk")
-    register_tool("list_events", "List calendar events in a time range")
-    register_tool("get_event", "Get a calendar event by ID")
-    register_tool("create_event", "Create a calendar event")
-    register_tool("update_event", "Update a calendar event")
-    register_tool("delete_event", "Delete a calendar event")
-    register_tool("respond_to_invite", "Respond to a calendar invite")
-    register_tool("find_free_slots", "Find meeting time slots")
-    register_tool("get_my_availability", "Get free and busy slots")
-    register_tool("list_calendars", "List calendars")
-    register_tool("search_contacts", "Search contacts")
-    register_tool("get_contact", "Get a contact by ID")
-    register_tool("create_contact", "Create a personal contact")
-    register_tool("update_contact", "Update a personal contact")
-    register_tool("delete_contact", "Delete a personal contact")
+    # --- System ---
+
+    @server.tool(name="ping_exchange", description="Check connectivity to Exchange")
+    def _ping_exchange() -> str:
+        return _call("ping_exchange", {})
+
+    @server.tool(name="get_mailbox_info", description="Get mailbox metadata")
+    def _get_mailbox_info() -> str:
+        return _call("get_mailbox_info", {})
+
+    # --- Email ---
+
+    @server.tool(
+        name="list_emails",
+        description='List emails in a folder. folder: "inbox"|"sent"|"drafts"|"deleted" or custom path. since/before: YYYY-MM-DD.',
+    )
+    def _list_emails(
+        folder: str = "inbox",
+        limit: int = 20,
+        offset: int = 0,
+        from_address: str | None = None,
+        subject: str | None = None,
+        since: str | None = None,
+        before: str | None = None,
+        unread_only: bool = False,
+        has_attachments: bool | None = None,
+    ) -> str:
+        return _call("list_emails", {
+            "folder": folder, "limit": limit, "offset": offset,
+            "from_address": from_address, "subject": subject,
+            "since": since, "before": before,
+            "unread_only": unread_only, "has_attachments": has_attachments,
+        })
+
+    @server.tool(name="get_email", description="Get a full email by its EWS item ID")
+    def _get_email(id: str) -> str:
+        return _call("get_email", {"id": id})
+
+    @server.tool(
+        name="search_emails",
+        description="Search emails by full text, subject, or sender. folder: optional folder path to restrict search.",
+    )
+    def _search_emails(query: str, folder: str | None = None, limit: int = 20) -> str:
+        return _call("search_emails", {"query": query, "folder": folder, "limit": limit})
+
+    @server.tool(
+        name="send_email",
+        description='Send a new email. to/cc/bcc: lists of email addresses. body_type: "text"|"html". importance: "low"|"normal"|"high". attachments: local file paths.',
+    )
+    def _send_email(
+        to: list[str],
+        subject: str,
+        body: str,
+        body_type: Literal["text", "html"] = "text",
+        cc: list[str] = [],
+        bcc: list[str] = [],
+        reply_to: str | None = None,
+        attachments: list[str] = [],
+        importance: Literal["low", "normal", "high"] = "normal",
+    ) -> str:
+        return _call("send_email", {
+            "to": to, "subject": subject, "body": body, "body_type": body_type,
+            "cc": cc, "bcc": bcc, "reply_to": reply_to,
+            "attachments": attachments, "importance": importance,
+        })
+
+    @server.tool(name="reply_email", description="Reply to an email. reply_all: reply to all recipients. attachments: local file paths.")
+    def _reply_email(
+        id: str,
+        body: str,
+        reply_all: bool = False,
+        attachments: list[str] = [],
+    ) -> str:
+        return _call("reply_email", {"id": id, "body": body, "reply_all": reply_all, "attachments": attachments})
+
+    @server.tool(name="forward_email", description="Forward an email to new recipients. attachments: additional local file paths.")
+    def _forward_email(
+        id: str,
+        to: list[str],
+        comment: str | None = None,
+        attachments: list[str] = [],
+    ) -> str:
+        return _call("forward_email", {"id": id, "to": to, "comment": comment, "attachments": attachments})
+
+    @server.tool(
+        name="move_email",
+        description=(
+            'Move an email to another folder. '
+            'For built-in folders use: "inbox", "sent", "drafts", "deleted", "junk", "archive". '
+            'For subfolders use the full path as returned by list_folders, e.g. "inbox/_Claude/Support". '
+            'If the target folder is not a built-in, call list_folders first to get the exact path.'
+        ),
+    )
+    def _move_email(id: str, folder: str) -> str:
+        return _call("move_email", {"id": id, "folder": folder})
+
+    @server.tool(
+        name="copy_email",
+        description=(
+            'Copy an email to another folder. '
+            'For built-in folders use: "inbox", "sent", "drafts", "deleted", "junk", "archive". '
+            'For subfolders use the full path as returned by list_folders, e.g. "inbox/_Claude/Support". '
+            'If the target folder is not a built-in, call list_folders first to get the exact path.'
+        ),
+    )
+    def _copy_email(id: str, folder: str) -> str:
+        return _call("copy_email", {"id": id, "folder": folder})
+
+    @server.tool(
+        name="delete_email",
+        description="Delete an email. hard_delete=true permanently deletes; default moves to Deleted Items.",
+    )
+    def _delete_email(id: str, hard_delete: bool = False) -> str:
+        return _call("delete_email", {"id": id, "hard_delete": hard_delete})
+
+    @server.tool(
+        name="mark_email",
+        description='Update email flags. read: true/false. flag: "flagged"|"complete"|"none". importance: "low"|"normal"|"high". At least one field required.',
+    )
+    def _mark_email(
+        id: str,
+        read: bool | None = None,
+        flag: Literal["flagged", "complete", "none"] | None = None,
+        importance: Literal["low", "normal", "high"] | None = None,
+    ) -> str:
+        return _call("mark_email", {"id": id, "read": read, "flag": flag, "importance": importance})
+
+    @server.tool(name="list_folders", description="List mailbox folder tree. depth: nesting levels to return (default 2). The path field of each folder can be used directly as the folder parameter in move_email and copy_email.")
+    def _list_folders(parent: str | None = None, depth: int = 2) -> str:
+        return _call("list_folders", {"parent": parent, "depth": depth})
+
+    @server.tool(name="create_folder", description='Create a new mailbox folder. parent: parent folder path (default: "inbox").')
+    def _create_folder(name: str, parent: str | None = "inbox") -> str:
+        return _call("create_folder", {"name": name, "parent": parent})
+
+    @server.tool(name="create_draft", description='Save an email as draft without sending. body_type: "text"|"html".')
+    def _create_draft(
+        to: list[str],
+        subject: str,
+        body: str,
+        body_type: Literal["text", "html"] = "text",
+        cc: list[str] = [],
+        bcc: list[str] = [],
+        attachments: list[str] = [],
+    ) -> str:
+        return _call("create_draft", {
+            "to": to, "subject": subject, "body": body, "body_type": body_type,
+            "cc": cc, "bcc": bcc, "attachments": attachments,
+        })
+
+    @server.tool(name="send_draft", description="Send a previously saved draft email by its ID.")
+    def _send_draft(id: str) -> str:
+        return _call("send_draft", {"id": id})
+
+    @server.tool(
+        name="get_attachment",
+        description="Save an email attachment to disk. save_path: optional destination file path (default: temp directory).",
+    )
+    def _get_attachment(email_id: str, attachment_id: str, save_path: str | None = None) -> str:
+        return _call("get_attachment", {"email_id": email_id, "attachment_id": attachment_id, "save_path": save_path})
+
+    # --- Calendar ---
+
+    @server.tool(
+        name="list_events",
+        description="List calendar events in a time range. start/end: ISO 8601 datetime. calendar_id: optional, use list_calendars to get IDs.",
+    )
+    def _list_events(
+        start: str,
+        end: str,
+        calendar_id: str | None = None,
+        include_recurring: bool = True,
+    ) -> str:
+        return _call("list_events", {
+            "start": start, "end": end,
+            "calendar_id": calendar_id, "include_recurring": include_recurring,
+        })
+
+    @server.tool(name="get_event", description="Get a calendar event by its ID.")
+    def _get_event(id: str) -> str:
+        return _call("get_event", {"id": id})
+
+    @server.tool(
+        name="create_event",
+        description=(
+            'Create a calendar event. start/end: ISO 8601 datetime. attendees: list of email addresses. '
+            'recurrence: {"type":"daily"|"weekly"|"monthly"|"yearly","interval":1,"end_date":"YYYY-MM-DD"}. '
+            'importance: "low"|"normal"|"high".'
+        ),
+    )
+    def _create_event(
+        subject: str,
+        start: str,
+        end: str,
+        calendar_id: str | None = None,
+        location: str | None = None,
+        body: str | None = None,
+        attendees: list[str] = [],
+        is_all_day: bool = False,
+        reminder_minutes: int | None = 15,
+        recurrence: dict | None = None,
+        categories: list[str] = [],
+        importance: Literal["low", "normal", "high"] = "normal",
+        online_meeting: bool = False,
+    ) -> str:
+        return _call("create_event", {
+            "subject": subject, "start": start, "end": end,
+            "calendar_id": calendar_id, "location": location, "body": body,
+            "attendees": attendees, "is_all_day": is_all_day,
+            "reminder_minutes": reminder_minutes, "recurrence": recurrence,
+            "categories": categories, "importance": importance, "online_meeting": online_meeting,
+        })
+
+    @server.tool(
+        name="update_event",
+        description='Update a calendar event. Only provide fields to change. send_updates: "none"|"all"|"modified".',
+    )
+    def _update_event(
+        id: str,
+        subject: str | None = None,
+        start: str | None = None,
+        end: str | None = None,
+        location: str | None = None,
+        body: str | None = None,
+        add_attendees: list[str] = [],
+        remove_attendees: list[str] = [],
+        reminder_minutes: int | None = None,
+        send_updates: Literal["none", "all", "modified"] = "all",
+    ) -> str:
+        return _call("update_event", {
+            "id": id, "subject": subject, "start": start, "end": end,
+            "location": location, "body": body,
+            "add_attendees": add_attendees, "remove_attendees": remove_attendees,
+            "reminder_minutes": reminder_minutes, "send_updates": send_updates,
+        })
+
+    @server.tool(
+        name="delete_event",
+        description="Delete a calendar event. notify_attendees: send cancellation notice (default true).",
+    )
+    def _delete_event(
+        id: str,
+        notify_attendees: bool = True,
+        cancel_message: str | None = None,
+    ) -> str:
+        return _call("delete_event", {"id": id, "notify_attendees": notify_attendees, "cancel_message": cancel_message})
+
+    @server.tool(
+        name="respond_to_invite",
+        description='Respond to a calendar invite. response: "accept"|"tentative"|"decline". message: optional reply text.',
+    )
+    def _respond_to_invite(
+        id: str,
+        response: Literal["accept", "tentative", "decline"],
+        message: str | None = None,
+    ) -> str:
+        return _call("respond_to_invite", {"id": id, "response": response, "message": message})
+
+    @server.tool(
+        name="find_free_slots",
+        description='Find available meeting time slots. attendees: email addresses. duration: minutes. start/end: ISO 8601. work_hours: {"start":"09:00","end":"18:00"}.',
+    )
+    def _find_free_slots(
+        attendees: list[str],
+        duration: int,
+        start: str,
+        end: str,
+        work_hours: dict | None = None,
+    ) -> str:
+        return _call("find_free_slots", {
+            "attendees": attendees, "duration": duration,
+            "start": start, "end": end, "work_hours": work_hours,
+        })
+
+    @server.tool(name="get_my_availability", description="Get my free and busy time slots. start/end: ISO 8601 datetime.")
+    def _get_my_availability(
+        start: str,
+        end: str,
+        calendar_id: str | None = None,
+        include_recurring: bool = True,
+    ) -> str:
+        return _call("get_my_availability", {
+            "start": start, "end": end,
+            "calendar_id": calendar_id, "include_recurring": include_recurring,
+        })
+
+    @server.tool(name="list_calendars", description="List all available calendars. Use returned id values as calendar_id in other tools.")
+    def _list_calendars() -> str:
+        return _call("list_calendars", {})
+
+    # --- Contacts ---
+
+    @server.tool(
+        name="search_contacts",
+        description='Search contacts by name, email, company, or job title. source: "personal"|"gal"|"all".',
+    )
+    def _search_contacts(
+        query: str,
+        source: Literal["personal", "gal", "all"] = "all",
+        limit: int = 10,
+    ) -> str:
+        return _call("search_contacts", {"query": query, "source": source, "limit": limit})
+
+    @server.tool(name="get_contact", description="Get full contact details by ID.")
+    def _get_contact(id: str) -> str:
+        return _call("get_contact", {"id": id})
+
+    @server.tool(name="create_contact", description="Create a new personal contact.")
+    def _create_contact(
+        display_name: str,
+        first_name: str | None = None,
+        last_name: str | None = None,
+        email: str | None = None,
+        phone: str | None = None,
+        company: str | None = None,
+        job_title: str | None = None,
+        notes: str | None = None,
+    ) -> str:
+        return _call("create_contact", {
+            "display_name": display_name, "first_name": first_name, "last_name": last_name,
+            "email": email, "phone": phone, "company": company, "job_title": job_title, "notes": notes,
+        })
+
+    @server.tool(name="update_contact", description="Update an existing personal contact. display_name is required; all other fields are optional.")
+    def _update_contact(
+        id: str,
+        display_name: str,
+        first_name: str | None = None,
+        last_name: str | None = None,
+        email: str | None = None,
+        phone: str | None = None,
+        company: str | None = None,
+        job_title: str | None = None,
+        notes: str | None = None,
+    ) -> str:
+        return _call("update_contact", {
+            "id": id, "display_name": display_name, "first_name": first_name, "last_name": last_name,
+            "email": email, "phone": phone, "company": company, "job_title": job_title, "notes": notes,
+        })
+
+    @server.tool(name="delete_contact", description="Delete a personal contact by its ID.")
+    def _delete_contact(id: str) -> str:
+        return _call("delete_contact", {"id": id})
+
     return server
 
 
