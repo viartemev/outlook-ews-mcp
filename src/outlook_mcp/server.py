@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import json
 import logging
 import sys
 import time
@@ -10,6 +9,35 @@ from typing import Any
 from .config import Settings, get_settings
 from .errors import APIError, normalize_exception
 from .exchange_client import ExchangeClient, build_default_backend
+from .mcp_tools import normalize_tool_arguments, register_mcp_tools
+from .models import (
+    CreateContactRequest,
+    CreateEventRequest,
+    CreateFolderRequest,
+    DeleteContactRequest,
+    DeleteEmailRequest,
+    DeleteEventRequest,
+    DraftEmailRequest,
+    FindFreeSlotsRequest,
+    FolderActionRequest,
+    ForwardEmailRequest,
+    GetAttachmentRequest,
+    GetContactRequest,
+    GetEmailRequest,
+    GetEventRequest,
+    ListEmailsRequest,
+    ListEventsRequest,
+    ListFoldersRequest,
+    MarkEmailRequest,
+    ReplyEmailRequest,
+    RespondToInviteRequest,
+    SearchContactsRequest,
+    SearchEmailsRequest,
+    SendDraftRequest,
+    SendEmailRequest,
+    UpdateContactRequest,
+    UpdateEventRequest,
+)
 from .tools.calendar import (
     create_event,
     delete_event,
@@ -94,7 +122,7 @@ class ToolRegistry:
         }
 
     def call(self, name: str, arguments: dict[str, Any] | None = None) -> tuple[dict[str, Any], bool]:
-        arguments = arguments or {}
+        arguments = normalize_tool_arguments(arguments)
         if name == "ping_exchange":
             return ping_exchange(self.client), False
         if name == "get_mailbox_info":
@@ -156,45 +184,43 @@ def build_mcp_server(settings: Settings | None = None, client: ExchangeClient | 
     registry = build_registry(settings=settings, client=client)
     server = FastMCP("outlook-mcp")
 
-    def register_tool(name: str, description: str) -> None:
-        @server.tool(name=name, description=description)
-        def _tool(**kwargs: Any) -> str:
-            payload, is_error = registry.call(name, kwargs)
-            if is_error:
-                raise RuntimeError(json.dumps(payload, ensure_ascii=False))
-            return json.dumps(payload, ensure_ascii=False)
-
-    register_tool("ping_exchange", "Check connectivity to Exchange")
-    register_tool("get_mailbox_info", "Get mailbox metadata")
-    register_tool("list_emails", "List emails in a folder")
-    register_tool("get_email", "Get a full email by ID")
-    register_tool("search_emails", "Search emails")
-    register_tool("send_email", "Send a new email")
-    register_tool("reply_email", "Reply to an email")
-    register_tool("forward_email", "Forward an email")
-    register_tool("move_email", "Move email to another folder")
-    register_tool("copy_email", "Copy email to another folder")
-    register_tool("delete_email", "Delete an email")
-    register_tool("mark_email", "Update email flags")
-    register_tool("list_folders", "List mailbox folders")
-    register_tool("create_folder", "Create a mailbox folder")
-    register_tool("create_draft", "Create an email draft")
-    register_tool("send_draft", "Send a draft email")
-    register_tool("get_attachment", "Save an attachment to disk")
-    register_tool("list_events", "List calendar events in a time range")
-    register_tool("get_event", "Get a calendar event by ID")
-    register_tool("create_event", "Create a calendar event")
-    register_tool("update_event", "Update a calendar event")
-    register_tool("delete_event", "Delete a calendar event")
-    register_tool("respond_to_invite", "Respond to a calendar invite")
-    register_tool("find_free_slots", "Find meeting time slots")
-    register_tool("get_my_availability", "Get free and busy slots")
-    register_tool("list_calendars", "List calendars")
-    register_tool("search_contacts", "Search contacts")
-    register_tool("get_contact", "Get a contact by ID")
-    register_tool("create_contact", "Create a personal contact")
-    register_tool("update_contact", "Update a personal contact")
-    register_tool("delete_contact", "Delete a personal contact")
+    register_mcp_tools(
+        server,
+        registry,
+        [
+            ("ping_exchange", "Check connectivity to Exchange", None),
+            ("get_mailbox_info", "Get mailbox metadata", None),
+            ("list_emails", "List emails in a folder", ListEmailsRequest),
+            ("get_email", "Get a full email by ID", GetEmailRequest),
+            ("search_emails", "Search emails", SearchEmailsRequest),
+            ("send_email", "Send a new email", SendEmailRequest),
+            ("reply_email", "Reply to an email", ReplyEmailRequest),
+            ("forward_email", "Forward an email", ForwardEmailRequest),
+            ("move_email", "Move email to another folder", FolderActionRequest),
+            ("copy_email", "Copy email to another folder", FolderActionRequest),
+            ("delete_email", "Delete an email", DeleteEmailRequest),
+            ("mark_email", "Update email flags", MarkEmailRequest),
+            ("list_folders", "List mailbox folders", ListFoldersRequest),
+            ("create_folder", "Create a mailbox folder", CreateFolderRequest),
+            ("create_draft", "Create an email draft", DraftEmailRequest),
+            ("send_draft", "Send a draft email", SendDraftRequest),
+            ("get_attachment", "Save an attachment to disk", GetAttachmentRequest),
+            ("list_events", "List calendar events in a time range", ListEventsRequest),
+            ("get_event", "Get a calendar event by ID", GetEventRequest),
+            ("create_event", "Create a calendar event", CreateEventRequest),
+            ("update_event", "Update a calendar event", UpdateEventRequest),
+            ("delete_event", "Delete a calendar event", DeleteEventRequest),
+            ("respond_to_invite", "Respond to a calendar invite", RespondToInviteRequest),
+            ("find_free_slots", "Find meeting time slots", FindFreeSlotsRequest),
+            ("get_my_availability", "Get free and busy slots", ListEventsRequest),
+            ("list_calendars", "List calendars", None),
+            ("search_contacts", "Search contacts", SearchContactsRequest),
+            ("get_contact", "Get a contact by ID", GetContactRequest),
+            ("create_contact", "Create a personal contact", CreateContactRequest),
+            ("update_contact", "Update a personal contact", UpdateContactRequest),
+            ("delete_contact", "Delete a personal contact", DeleteContactRequest),
+        ],
+    )
     return server
 
 
