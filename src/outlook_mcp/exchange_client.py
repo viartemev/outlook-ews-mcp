@@ -757,6 +757,8 @@ class EWSExchangeBackend:
         try:
             qs = folder.filter(subject__icontains=request.query).order_by("-datetime_received")
             items = list(qs[: request.limit])
+        except (RateLimitError, TransportError, TimeoutError, UnauthorizedError) as exc:
+            raise self._map_exception(exc) from exc
         except Exception:
             items = []
         if not items:
@@ -877,6 +879,12 @@ class EWSExchangeBackend:
         except Exception as exc:  # noqa: BLE001
             raise self._map_exception(exc, item_id=request.id) from exc
 
+    def _sanitize_attachment_filename(self, name: str | None) -> str:
+        candidate = Path((name or "attachment.bin").replace("\\", "/")).name.strip()
+        if not candidate or candidate in {".", ".."}:
+            candidate = "attachment.bin"
+        return candidate
+
     def get_attachment(self, request: GetAttachmentRequest) -> AttachmentResult:
         item = self._fetch_item(request.email_id)
         target_dir = Path(request.save_path) if request.save_path else Path(tempfile.gettempdir())
@@ -884,7 +892,7 @@ class EWSExchangeBackend:
         for attachment in getattr(item, "attachments", None) or []:
             attachment_id = getattr(getattr(attachment, "attachment_id", None), "id", None)
             if attachment_id == request.attachment_id:
-                filename = getattr(attachment, "name", "attachment.bin")
+                filename = self._sanitize_attachment_filename(getattr(attachment, "name", None))
                 path = self._unique_path(target_dir / filename)
                 content = getattr(attachment, "content", None)
                 if content is None:
@@ -1065,7 +1073,32 @@ class EWSExchangeBackend:
     def get_my_availability(self, request: ListEventsRequest) -> AvailabilityResult:
         events = self.list_events(request)
         busy_slots = [{"start": event.start, "end": event.end, "subject": event.subject} for event in events]
-        return AvailabilityResult(free_slots=[], busy_slots=busy_slots)
+        start = self._to_ews_datetime(request.start)
+        end = self._to_ews_datetime(request.end)
+        free_slots = self._compute_free_slots(start, end, events)
+        return AvailabilityResult(free_slots=free_slots, busy_slots=busy_slots)
+
+    def _compute_free_slots(
+        self, start: datetime, end: datetime, events: list[CalendarEvent]
+    ) -> list[FreeSlot]:
+        busy_intervals = sorted(
+            (
+                (max(event.start, start), min(event.end, end))
+                for event in events
+                if event.end > start and event.start < end
+            ),
+            key=lambda interval: interval[0],
+        )
+        free_slots: list[FreeSlot] = []
+        cursor = start
+        for busy_start, busy_end in busy_intervals:
+            if busy_start > cursor:
+                free_slots.append(FreeSlot(start=cursor, end=busy_start, all_available=True))
+            if busy_end > cursor:
+                cursor = busy_end
+        if cursor < end:
+            free_slots.append(FreeSlot(start=cursor, end=end, all_available=True))
+        return free_slots
 
     def list_calendars(self) -> list[CalendarInfo]:
         return [
