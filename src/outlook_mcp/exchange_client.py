@@ -825,9 +825,11 @@ class EWSExchangeBackend:
 
     def delete_email(self, request: DeleteEmailRequest) -> ActionResult:
         item = self._fetch_item(request.id)
-        delete_type = "HardDelete" if request.hard_delete else "MoveToDeletedItems"
         try:
-            item.delete(delete_type=delete_type)
+            if request.hard_delete:
+                item.delete()
+            else:
+                item.move_to_trash()
             return ActionResult(id=request.id, status="deleted")
         except Exception as exc:  # noqa: BLE001
             raise self._map_exception(exc, item_id=request.id) from exc
@@ -1246,7 +1248,7 @@ class EWSExchangeBackend:
     def delete_contact(self, request: DeleteContactRequest) -> ActionResult:
         contact = self._fetch_item(request.id, folder=self.account.contacts)
         try:
-            contact.delete(delete_type="MoveToDeletedItems")
+            contact.move_to_trash()
             return ActionResult(id=request.id, status="deleted")
         except Exception as exc:  # noqa: BLE001
             raise self._map_exception(exc, item_id=request.id) from exc
