@@ -4,7 +4,6 @@ from types import SimpleNamespace
 
 from exchangelib.ewsdatetime import EWSDateTime, EWSTimeZone
 
-import outlook_mcp.exchange_client as exchange_client_module
 from outlook_mcp.exchange_client import EWSExchangeBackend
 from outlook_mcp.models import FindFreeSlotsRequest, ListEventsRequest
 
@@ -46,22 +45,17 @@ def test_list_events_normalizes_pydantic_tzinfo(settings) -> None:
     assert folder.end.tzinfo.key == "Europe/Moscow"
 
 
-def test_find_free_slots_normalizes_pydantic_tzinfo(settings, monkeypatch) -> None:
+def test_find_free_slots_normalizes_pydantic_tzinfo(settings) -> None:
     backend = EWSExchangeBackend(settings)
     captured: dict = {}
 
-    class FakeAvailabilityService:
-        def __init__(self, protocol) -> None:
-            self.protocol = protocol
+    def get_free_busy_info(**kwargs):
+        captured.update(kwargs)
+        yield SimpleNamespace(merged="0")
 
-        def call(self, **kwargs):
-            captured.update(kwargs)
-            return [SimpleNamespace(merged="0")]
-
-    monkeypatch.setattr(exchange_client_module, "GetUserAvailability", FakeAvailabilityService)
     backend._account = SimpleNamespace(
         default_timezone=EWSTimeZone("Europe/Moscow"),
-        protocol=object(),
+        protocol=SimpleNamespace(get_free_busy_info=get_free_busy_info),
     )
 
     request = FindFreeSlotsRequest.model_validate(
@@ -76,12 +70,11 @@ def test_find_free_slots_normalizes_pydantic_tzinfo(settings, monkeypatch) -> No
     assert type(request.start.tzinfo).__module__.startswith("pydantic_core")
 
     result = backend.find_free_slots(request)
-    time_window = captured["free_busy_view_options"].time_window
 
     assert len(result) == 1
-    assert isinstance(time_window.start, EWSDateTime)
-    assert isinstance(time_window.end, EWSDateTime)
-    assert time_window.start.tzinfo.key == "Europe/Moscow"
-    assert time_window.end.tzinfo.key == "Europe/Moscow"
+    assert isinstance(captured["start"], EWSDateTime)
+    assert isinstance(captured["end"], EWSDateTime)
+    assert captured["start"].tzinfo.key == "Europe/Moscow"
+    assert captured["end"].tzinfo.key == "Europe/Moscow"
     assert result[0].start.tzinfo.key == "Europe/Moscow"
     assert result[0].end.tzinfo.key == "Europe/Moscow"

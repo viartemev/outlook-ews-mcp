@@ -40,9 +40,9 @@ from exchangelib.errors import (
 from exchangelib.indexed_properties import EmailAddress as IndexedEmailAddress
 from exchangelib.indexed_properties import PhoneNumber as IndexedPhoneNumber
 from exchangelib.items import Contact
-from exchangelib.properties import FreeBusyViewOptions, ItemId, MailboxData, TimeWindow
+from exchangelib.properties import ItemId
 from exchangelib.protocol import BaseProtocol, FailFast, FaultTolerance
-from exchangelib.services import GetUserAvailability, ResolveNames
+from exchangelib.services import ResolveNames
 from urllib3.exceptions import InsecureRequestWarning
 
 from .auth import build_auth_context
@@ -62,6 +62,7 @@ from .models import (
     AvailabilityResult,
     CalendarInfo,
     CalendarEvent,
+    ContactEmailAddress,
     ContactFull,
     ContactSummary,
     CreateEventRequest,
@@ -496,11 +497,14 @@ class EWSExchangeBackend:
 
     def _fetch_item(self, item_id: str, folder: Folder | None = None) -> Any:
         try:
-            return next(self.account.fetch(ids=[ItemId(id=item_id, changekey=None)], folder=folder))
+            item = next(self.account.fetch(ids=[ItemId(id=item_id, changekey=None)], folder=folder))
         except StopIteration as exc:
             raise NotFoundError(item_id) from exc
         except Exception as exc:  # noqa: BLE001
             raise self._map_exception(exc, item_id=item_id) from exc
+        if isinstance(item, Exception):
+            raise self._map_exception(item, item_id=item_id)
+        return item
 
     def _mailbox(self, address: str) -> Mailbox:
         return Mailbox(email_address=address)
@@ -685,12 +689,9 @@ class EWSExchangeBackend:
             return AuthFailedError()
         if isinstance(exc, RateLimitError):
             return ExchangeUnavailableError("exchange throttling or rate limit encountered")
-        if isinstance(exc, (TransportError, TimeoutError)):
-            if "timed out" in message.lower():
-                return TimeoutAPIError(self.settings.exchange_timeout)
-            return ExchangeUnavailableError(message)
         if isinstance(exc, (ErrorItemSavePropertyError, ErrorFolderSavePropertyError)):
             return ConflictError(message)
+        # ResponseMessageError subclasses TransportError, so it has to be matched first.
         if isinstance(exc, ResponseMessageError):
             lowered = message.lower()
             if "not found" in lowered and item_id:
@@ -698,6 +699,10 @@ class EWSExchangeBackend:
             if "access is denied" in lowered or "permission" in lowered:
                 return PermissionDeniedError()
             return APIError("exchange_error", message)
+        if isinstance(exc, (TransportError, TimeoutError)):
+            if "timed out" in message.lower():
+                return TimeoutAPIError(self.settings.exchange_timeout)
+            return ExchangeUnavailableError(message)
         return ExchangeUnavailableError(message)
 
     def ping(self) -> PingResult:
@@ -1035,28 +1040,24 @@ class EWSExchangeBackend:
             raise self._map_exception(exc, item_id=request.id) from exc
 
     def find_free_slots(self, request: FindFreeSlotsRequest) -> list[FreeSlot]:
-        tz = self.account.default_timezone
         start = self._to_ews_datetime(request.start)
         end = self._to_ews_datetime(request.end)
-        service = GetUserAvailability(protocol=self.account.protocol)
-        mailbox_data = [
-            MailboxData(email=self._mailbox(address), attendee_type="Required", exclude_conflicts=False)
-            for address in request.attendees
-        ]
         try:
-            views = service.call(
-                tzinfo=tz,
-                mailbox_data=mailbox_data,
-                timezone=tz,
-                free_busy_view_options=FreeBusyViewOptions(
-                    time_window=TimeWindow(start=start, end=end),
+            views = list(
+                self.account.protocol.get_free_busy_info(
+                    accounts=[(str(address), "Required", False) for address in request.attendees],
+                    start=start,
+                    end=end,
                     merged_free_busy_interval=request.duration,
                     requested_view="DetailedMerged",
-                ),
+                )
             )
         except Exception as exc:  # noqa: BLE001
             raise self._map_exception(exc) from exc
 
+        for view in views:
+            if isinstance(view, Exception):
+                raise self._map_exception(view)
         if not views:
             return []
         merged = getattr(views[0], "merged", "") or ""
@@ -1162,16 +1163,64 @@ class EWSExchangeBackend:
         return results[: request.limit]
 
     def get_contact(self, request: GetContactRequest) -> ContactFull:
+        if "@" in request.id:
+            return self._get_gal_contact(request.id)
         item = self._fetch_item(request.id, folder=self.account.contacts)
+        return self._contact_full_from_item(item, item_id=item.id, source="personal")
+
+    def _get_gal_contact(self, address: str) -> ContactFull:
+        try:
+            resolved = list(
+                ResolveNames(protocol=self.account.protocol).call(
+                    unresolved_entries=[address],
+                    return_full_contact_data=True,
+                    search_scope="ActiveDirectory",
+                    contact_data_shape="AllProperties",
+                )
+            )
+        except Exception as exc:  # noqa: BLE001
+            raise self._map_exception(exc, item_id=address) from exc
+
+        for entry in resolved:
+            if isinstance(entry, Exception):
+                raise self._map_exception(entry, item_id=address)
+            mailbox, contact = entry
+            primary = self._smtp_address(getattr(mailbox, "email_address", None)) if mailbox is not None else None
+            if contact is not None:
+                full = self._contact_full_from_item(contact, item_id=address, source="gal")
+                if primary and all(str(known.address).lower() != primary.lower() for known in full.email_addresses):
+                    full.email_addresses.insert(0, ContactEmailAddress(type="SMTP", address=primary))
+                return full
+            if mailbox is not None:
+                return ContactFull(
+                    id=address,
+                    display_name=getattr(mailbox, "name", None) or primary or address,
+                    email_addresses=[{"type": "SMTP", "address": primary}] if primary else [],
+                    source="gal",
+                )
+        raise NotFoundError(address)
+
+    @staticmethod
+    def _smtp_address(value: str | None) -> str | None:
+        """Drop non-SMTP proxy addresses (X500, EX, ...) and strip the `SMTP:` prefix the GAL adds."""
+        address = (value or "").strip()
+        prefix, separator, remainder = address.partition(":")
+        if separator:
+            if prefix.lower() != "smtp":
+                return None
+            address = remainder.strip()
+        return address or None
+
+    def _contact_full_from_item(self, item: Any, *, item_id: str, source: str) -> ContactFull:
         return ContactFull(
-            id=item.id,
-            display_name=item.display_name or item.file_as or "",
+            id=item_id,
+            display_name=getattr(item, "display_name", None) or getattr(item, "file_as", None) or "",
             first_name=getattr(item, "given_name", None),
             last_name=getattr(item, "surname", None),
             email_addresses=[
-                {"type": entry.label, "address": entry.email}
+                {"type": entry.label, "address": self._smtp_address(entry.email)}
                 for entry in getattr(item, "email_addresses", None) or []
-                if getattr(entry, "email", None)
+                if self._smtp_address(getattr(entry, "email", None))
             ],
             phone_numbers=[
                 {"type": entry.label, "number": entry.phone_number}
@@ -1195,7 +1244,7 @@ class EWSExchangeBackend:
             manager=getattr(item, "manager", None),
             notes=getattr(item, "notes", None),
             birthday=getattr(item, "birthday", None),
-            source="personal",
+            source=source,
         )
 
     def create_contact(self, request: CreateContactRequest) -> ActionResult:
