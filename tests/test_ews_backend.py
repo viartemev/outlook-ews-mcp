@@ -9,7 +9,14 @@ from exchangelib.ewsdatetime import EWSTimeZone
 import outlook_mcp.exchange_client as exchange_client_module
 from outlook_mcp.errors import APIError
 from outlook_mcp.exchange_client import EWSExchangeBackend
-from outlook_mcp.models import FindFreeSlotsRequest, GetContactRequest, GetEmailRequest
+from outlook_mcp.models import (
+    FindFreeSlotsRequest,
+    FolderActionRequest,
+    GetContactRequest,
+    GetEmailRequest,
+    MarkEmailRequest,
+    UpdateContactRequest,
+)
 
 
 def _free_slots_request() -> FindFreeSlotsRequest:
@@ -174,3 +181,128 @@ def test_get_contact_raises_not_found_when_gal_has_no_match(settings, monkeypatc
         backend.get_contact(GetContactRequest(id="nobody@example.com"))
 
     assert excinfo.value.code == "not_found"
+
+
+class _RecordingItem(SimpleNamespace):
+    """Item stand-in that records what save()/move()/copy() were asked to do."""
+
+    def __init__(self, **kwargs) -> None:
+        super().__init__(**kwargs)
+        self.saved_update_fields: list[str] | None = None
+        self.moved_to = None
+        self.copied_to = None
+
+    def save(self, update_fields=None):
+        self.saved_update_fields = update_fields
+
+    def move(self, to_folder):
+        self.moved_to = to_folder
+        # exchangelib rewrites the id in place and returns None
+        self.id = "id-after-move"
+        return None
+
+    def copy(self, to_folder):
+        self.copied_to = to_folder
+        # exchangelib returns an (id, changekey) tuple, not an object with .id
+        return ("id-of-copy", "changekey-of-copy")
+
+
+def _account_with_item(item) -> SimpleNamespace:
+    folders = {name: SimpleNamespace(name=name) for name in
+               ("root", "inbox", "sent", "drafts", "trash", "junk", "calendar", "contacts")}
+    return SimpleNamespace(fetch=lambda ids, folder=None: iter([item]), **folders)
+
+
+def test_mark_email_saves_using_exchangelib_field_names(settings) -> None:
+    """save(update_fields=...) wants model field names; the API response keeps its own."""
+    backend = EWSExchangeBackend(settings)
+    item = _RecordingItem(id="email-1")
+    backend._account = _account_with_item(item)
+
+    result = backend.mark_email(
+        MarkEmailRequest(id="email-1", read=True, flag="flagged", importance="high")
+    )
+
+    assert item.saved_update_fields == ["is_read", "importance", "categories"]
+    assert result.updated_fields == ["read", "importance", "flag"]
+
+
+def test_update_contact_saves_using_exchangelib_field_names(settings) -> None:
+    backend = EWSExchangeBackend(settings)
+    item = _RecordingItem(id="contact-1")
+    backend._account = _account_with_item(item)
+
+    result = backend.update_contact(
+        UpdateContactRequest(
+            id="contact-1",
+            display_name="Ivan Ivanov",
+            first_name="Ivan",
+            company="Example",
+            email="ivan@example.com",
+            phone="+79990000000",
+        )
+    )
+
+    assert item.saved_update_fields == [
+        "display_name",
+        "given_name",
+        "company_name",
+        "email_addresses",
+        "phone_numbers",
+    ]
+    assert result.updated_fields == ["display_name", "first_name", "company", "email", "phone"]
+
+
+def test_move_email_returns_the_id_the_item_has_after_the_move(settings) -> None:
+    """A moved item gets a new EWS id; handing back the old one yields a dead handle."""
+    backend = EWSExchangeBackend(settings)
+    item = _RecordingItem(id="email-before-move")
+    backend._account = _account_with_item(item)
+
+    result = backend.move_email(FolderActionRequest(id="email-before-move", folder="inbox"))
+
+    assert result.id == "id-after-move"
+    assert result.new_folder == "inbox"
+
+
+def test_copy_email_reports_new_id_from_exchangelib_tuple(settings) -> None:
+    backend = EWSExchangeBackend(settings)
+    item = _RecordingItem(id="email-1")
+    backend._account = _account_with_item(item)
+
+    result = backend.copy_email(FolderActionRequest(id="email-1", folder="drafts"))
+
+    assert result.id == "email-1"
+    assert result.new_id == "id-of-copy"
+
+
+def test_copy_email_tolerates_missing_result(settings) -> None:
+    """Copying into a public folder or another mailbox yields None."""
+    backend = EWSExchangeBackend(settings)
+    item = _RecordingItem(id="email-1")
+    item.copy = lambda to_folder: None
+    backend._account = _account_with_item(item)
+
+    assert backend.copy_email(FolderActionRequest(id="email-1", folder="drafts")).new_id is None
+
+
+def test_email_summary_of_a_draft_falls_back_to_the_mailbox_owner(settings) -> None:
+    """EWS omits From/Sender on unsent drafts, which used to produce an invalid address."""
+    backend = EWSExchangeBackend(settings)
+    backend._account = SimpleNamespace(primary_smtp_address="owner@example.com")
+    draft = SimpleNamespace(
+        id="draft-1", subject="Draft", author=None, sender=None, to_recipients=None,
+        datetime_received=None, datetime_sent=None, datetime_created=None,
+        is_read=False, has_attachments=False, importance=None, categories=None, text_body=None, body=None,
+    )
+
+    summary = backend._to_email_summary(draft)
+
+    assert summary.from_.email == "owner@example.com"
+
+
+def test_unknown_sender_placeholder_is_a_validatable_address(settings) -> None:
+    """The placeholder is fed into an EmailStr field, so it must survive validation."""
+    backend = EWSExchangeBackend(settings)
+
+    assert backend._email_address(None).email == exchange_client_module.UNKNOWN_EMAIL

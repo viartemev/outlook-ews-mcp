@@ -104,6 +104,10 @@ from .models import (
 )
 
 logger = logging.getLogger(__name__)
+# Placeholder for senders/recipients EWS does not resolve. Must stay a deliverable-looking
+# address: pydantic's EmailStr rejects RFC 2606 special-use TLDs such as .invalid, which
+# would make the placeholder fail validation of the very model it is substituted into.
+UNKNOWN_EMAIL = "unknown@example.com"
 _RAW_SESSION_PATCHED = False
 _TIMEZONE_FALLBACK_PATCHED = False
 _GUID_TIMEZONE_RE = re.compile(
@@ -511,10 +515,22 @@ class EWSExchangeBackend:
 
     def _email_address(self, mailbox: Any) -> EmailAddress:
         if mailbox is None:
-            return EmailAddress(email="unknown@example.invalid", name=None)
-        email = getattr(mailbox, "email_address", None) or getattr(mailbox, "email", None) or "unknown@example.invalid"
+            return EmailAddress(email=UNKNOWN_EMAIL, name=None)
+        email = getattr(mailbox, "email_address", None) or getattr(mailbox, "email", None) or UNKNOWN_EMAIL
         name = getattr(mailbox, "name", None)
         return EmailAddress(email=email, name=name)
+
+    def _sender_address(self, item: Any) -> EmailAddress:
+        """Sender of an item, falling back to the mailbox owner.
+
+        EWS omits ``From``/``Sender`` on unsent drafts, so ``author`` and ``sender`` are
+        both ``None`` there. The effective sender of a draft is the mailbox owner.
+        """
+        mailbox = getattr(item, "author", None) or getattr(item, "sender", None)
+        if mailbox is not None:
+            return self._email_address(mailbox)
+        own = getattr(self.account, "primary_smtp_address", None)
+        return EmailAddress(email=own or UNKNOWN_EMAIL, name=None)
 
     def _recipients(self, values: Iterable[Any] | None) -> list[EmailAddress]:
         return [self._email_address(value) for value in values or []]
@@ -523,7 +539,7 @@ class EWSExchangeBackend:
         return EmailSummary(
             id=item.id,
             subject=item.subject or "",
-            **{"from": self._email_address(getattr(item, "author", None) or getattr(item, "sender", None))},
+            **{"from": self._sender_address(item)},
             to=self._recipients(getattr(item, "to_recipients", None)),
             date=getattr(item, "datetime_received", None)
             or getattr(item, "datetime_sent", None)
@@ -809,24 +825,42 @@ class EWSExchangeBackend:
         item = self._fetch_item(request.id)
         destination = self._resolve_folder(request.folder)
         try:
-            result = item.move(to_folder=destination)
-            return ActionResult(id=getattr(result, "id", request.id), status="moved", new_folder=request.folder)
+            item.move(to_folder=destination)
         except Exception as exc:  # noqa: BLE001
             raise self._map_exception(exc, item_id=request.id) from exc
+        # A moved item gets a new EWS id. Item.move() returns None and rewrites item.id in
+        # place, so returning request.id would hand the caller a dead id.
+        return ActionResult(id=item.id or request.id, status="moved", new_folder=request.folder)
 
     def copy_email(self, request: FolderActionRequest) -> ActionResult:
         item = self._fetch_item(request.id)
         destination = self._resolve_folder(request.folder)
         try:
             result = item.copy(to_folder=destination)
-            return ActionResult(
-                id=request.id,
-                status="copied",
-                new_folder=request.folder,
-                new_id=getattr(result, "id", None),
-            )
         except Exception as exc:  # noqa: BLE001
             raise self._map_exception(exc, item_id=request.id) from exc
+        return ActionResult(
+            id=request.id,
+            status="copied",
+            new_folder=request.folder,
+            new_id=self._extract_item_id(result),
+        )
+
+    @staticmethod
+    def _extract_item_id(value: Any) -> str | None:
+        """Pull an item id out of whatever Item.copy() returned.
+
+        exchangelib yields an ``(id, changekey)`` tuple rather than an object with ``.id``,
+        and ``None`` when the destination is a public folder or a different mailbox.
+        """
+        if value is None:
+            return None
+        item_id = getattr(value, "id", None)
+        if item_id:
+            return str(item_id)
+        if isinstance(value, (tuple, list)) and value and value[0]:
+            return str(value[0])
+        return None
 
     def delete_email(self, request: DeleteEmailRequest) -> ActionResult:
         item = self._fetch_item(request.id)
@@ -841,18 +875,25 @@ class EWSExchangeBackend:
 
     def mark_email(self, request: MarkEmailRequest) -> ActionResult:
         item = self._fetch_item(request.id)
+        # Two vocabularies: the names we report back to the caller, and the exchangelib
+        # model field names save(update_fields=...) insists on. They are not the same.
         updated_fields: list[str] = []
+        save_fields: list[str] = []
         if request.read is not None:
             item.is_read = request.read
             updated_fields.append("read")
+            save_fields.append("is_read")
         if request.importance is not None:
             item.importance = request.importance.capitalize()
             updated_fields.append("importance")
+            save_fields.append("importance")
         if request.flag is not None:
+            # exchangelib's Message exposes no flag field, so the flag is kept as a category.
             item.categories = [] if request.flag == "none" else [request.flag]
             updated_fields.append("flag")
+            save_fields.append("categories")
         try:
-            item.save(update_fields=updated_fields or None)
+            item.save(update_fields=save_fields or None)
             return ActionResult(id=request.id, status="updated", updated_fields=updated_fields)
         except Exception as exc:  # noqa: BLE001
             raise self._map_exception(exc, item_id=request.id) from exc
@@ -1277,19 +1318,23 @@ class EWSExchangeBackend:
             "job_title": "job_title",
             "notes": "notes",
         }
+        save_fields: list[str] = []
         for request_field, item_field in field_map.items():
             value = getattr(request, request_field)
             if value is not None:
                 setattr(contact, item_field, value)
                 updated_fields.append(request_field)
+                save_fields.append(item_field)
         if request.email is not None:
             contact.email_addresses = [IndexedEmailAddress(label="EmailAddress1", email=str(request.email))]
             updated_fields.append("email")
+            save_fields.append("email_addresses")
         if request.phone is not None:
             contact.phone_numbers = [IndexedPhoneNumber(label="PrimaryPhone", phone_number=request.phone)]
             updated_fields.append("phone")
+            save_fields.append("phone_numbers")
         try:
-            contact.save(update_fields=updated_fields or None)
+            contact.save(update_fields=save_fields or None)
             return ActionResult(id=request.id, status="updated", updated_fields=updated_fields)
         except Exception as exc:  # noqa: BLE001
             raise self._map_exception(exc, item_id=request.id) from exc
