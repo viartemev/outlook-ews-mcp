@@ -30,7 +30,7 @@ classifiers = [
     "Topic :: Office/Business :: Groupware",
 ]
 dependencies = [
-    "mcp>=1.0",
+    "mcp>=1.0,<2.0",
     "exchangelib>=5.0",
     "pydantic>=2.7",
     "pydantic-settings>=2.2",
