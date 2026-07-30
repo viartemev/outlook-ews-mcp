@@ -2,9 +2,38 @@ from __future__ import annotations
 
 from datetime import date, datetime, time
 from pathlib import Path
-from typing import Any, Literal
+from typing import Annotated, Any, Literal
 
-from pydantic import BaseModel, ConfigDict, EmailStr, Field, model_validator
+from pydantic import BaseModel, BeforeValidator, ConfigDict, EmailStr, Field, model_validator
+
+
+def _server_address(value: Any) -> Any:
+    """Normalise an address reported by Exchange for an item that already exists.
+
+    Exchange does not always hand back SMTP. For internal senders, distribution
+    lists, GAL entries and migrated mailboxes it uses routing type ``EX`` and
+    returns a legacy X.500 distinguished name instead::
+
+        /o=TANDER/ou=Exchange Administrative Group (FYDIBOHF23SPDLT)/cn=Recipients/cn=<hex>-<alias>
+
+    Validating those as e-mail fails, and because a folder listing builds one
+    model per message, a single such message used to blow up the whole call.
+    Read paths must survive whatever the server reports, so the value is passed
+    through unchanged.
+
+    It is deliberately *not* rewritten into a plausible SMTP address: a
+    fabricated address could later be used as a recipient and quietly deliver
+    mail to the wrong person, or to nobody at all.
+    """
+    if isinstance(value, str):
+        return value.strip()
+    return value
+
+
+#: Address as reported by the server. Lenient on purpose — see ``_server_address``.
+#: Outgoing addresses supplied by the caller stay ``EmailStr``: garbage must be
+#: rejected before it reaches Exchange, not after.
+ServerAddress = Annotated[str, BeforeValidator(_server_address), Field(min_length=1)]
 
 
 class ExchangeModel(BaseModel):
@@ -12,7 +41,7 @@ class ExchangeModel(BaseModel):
 
 
 class EmailAddress(ExchangeModel):
-    email: EmailStr
+    email: ServerAddress
     name: str | None = None
 
 
@@ -48,7 +77,7 @@ class EmailFull(EmailSummary):
 
 
 class Attendee(ExchangeModel):
-    email: EmailStr
+    email: ServerAddress
     name: str | None = None
     response_type: Literal["accept", "tentative", "decline", "unknown"] = "unknown"
 
@@ -277,7 +306,7 @@ class FreeSlot(ExchangeModel):
     start: datetime
     end: datetime
     all_available: bool = True
-    busy_attendees: list[EmailStr] = Field(default_factory=list)
+    busy_attendees: list[ServerAddress] = Field(default_factory=list)
 
     @model_validator(mode="after")
     def validate_range(self) -> "FreeSlot":
@@ -311,7 +340,7 @@ class PingResult(ExchangeModel):
 
 
 class MailboxInfo(ExchangeModel):
-    email_address: EmailStr
+    email_address: ServerAddress
     display_name: str
     timezone: str
     mailbox_size_mb: float | None = None
@@ -350,7 +379,7 @@ class CalendarInfo(ExchangeModel):
     name: str
     is_default: bool = False
     color: str | None = None
-    owner_email: EmailStr | None = None
+    owner_email: ServerAddress | None = None
 
 
 class AvailabilityResult(ExchangeModel):
@@ -371,7 +400,7 @@ class ContactSummary(ExchangeModel):
 
 class ContactEmailAddress(ExchangeModel):
     type: str
-    address: EmailStr
+    address: ServerAddress
 
 
 class ContactPhoneNumber(ExchangeModel):
