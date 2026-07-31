@@ -244,8 +244,9 @@ class EmailOperationsMixin:
         item = self._fetch_item(request.id)
         destination = self._resolve_folder(request.folder)
         try:
-            result = item.move(to_folder=destination)
-            return ActionResult(id=getattr(result, "id", request.id), status="moved", new_folder=request.folder)
+            # item.move() returns None and mutates item.id/changekey in place.
+            item.move(to_folder=destination)
+            return ActionResult(id=item.id or request.id, status="moved", new_folder=request.folder)
         except Exception as exc:  # noqa: BLE001
             raise self._map_exception(exc, item_id=request.id) from exc
 
@@ -253,12 +254,14 @@ class EmailOperationsMixin:
         item = self._fetch_item(request.id)
         destination = self._resolve_folder(request.folder)
         try:
+            # item.copy() returns an (id, changekey) tuple for the new item, unlike item.move().
             result = item.copy(to_folder=destination)
+            new_id = result[0] if result else None
             return ActionResult(
                 id=request.id,
                 status="copied",
                 new_folder=request.folder,
-                new_id=getattr(result, "id", None),
+                new_id=new_id,
             )
         except Exception as exc:  # noqa: BLE001
             raise self._map_exception(exc, item_id=request.id) from exc

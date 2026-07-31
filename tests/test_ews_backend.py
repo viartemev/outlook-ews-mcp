@@ -11,7 +11,9 @@ import outlook_mcp.exchange_client.contacts as exchange_client_contacts
 from outlook_mcp.errors import APIError
 from outlook_mcp.exchange_client import EWSExchangeBackend
 from outlook_mcp.models import (
+    ActionResult,
     FindFreeSlotsRequest,
+    FolderActionRequest,
     ForwardEmailRequest,
     GetContactRequest,
     GetEmailRequest,
@@ -432,3 +434,71 @@ def test_forward_email_saves_draft_attaches_files_then_sends(settings, tmp_path)
         ("send",),
     ]
     assert result == SendResult(id="sent-1", status="sent")
+
+
+def test_move_email_returns_new_id_mutated_in_place_by_move(settings) -> None:
+    """exchangelib's Item.move() returns None but mutates item.id/changekey in place."""
+    backend = EWSExchangeBackend(settings)
+    account = _fake_account_for_folder_resolution(object())
+
+    class FakeItem:
+        id = "msg-1"
+
+        def move(self, to_folder):
+            assert to_folder is account.inbox
+            self.id = "msg-1-moved"
+
+    def fetch(ids, folder=None):
+        yield FakeItem()
+
+    account.fetch = fetch
+    backend._account = account
+
+    result = backend.move_email(FolderActionRequest(id="msg-1", folder="Inbox"))
+
+    assert result == ActionResult(id="msg-1-moved", status="moved", new_folder="Inbox")
+
+
+def test_copy_email_returns_new_id_from_id_changekey_tuple(settings) -> None:
+    """exchangelib's Item.copy() returns an (id, changekey) tuple, not an object with .id."""
+    backend = EWSExchangeBackend(settings)
+    account = _fake_account_for_folder_resolution(object())
+
+    class FakeItem:
+        id = "msg-1"
+
+        def copy(self, to_folder):
+            assert to_folder is account.inbox
+            return ("msg-1-copy", "changekey-abc")
+
+    def fetch(ids, folder=None):
+        yield FakeItem()
+
+    account.fetch = fetch
+    backend._account = account
+
+    result = backend.copy_email(FolderActionRequest(id="msg-1", folder="Inbox"))
+
+    assert result == ActionResult(id="msg-1", status="copied", new_folder="Inbox", new_id="msg-1-copy")
+
+
+def test_copy_email_handles_no_result_for_cross_mailbox_copy(settings) -> None:
+    """exchangelib returns None from copy() when to_folder is a public/other-mailbox folder."""
+    backend = EWSExchangeBackend(settings)
+    account = _fake_account_for_folder_resolution(object())
+
+    class FakeItem:
+        id = "msg-1"
+
+        def copy(self, to_folder):
+            return None
+
+    def fetch(ids, folder=None):
+        yield FakeItem()
+
+    account.fetch = fetch
+    backend._account = account
+
+    result = backend.copy_email(FolderActionRequest(id="msg-1", folder="Inbox"))
+
+    assert result == ActionResult(id="msg-1", status="copied", new_folder="Inbox", new_id=None)
