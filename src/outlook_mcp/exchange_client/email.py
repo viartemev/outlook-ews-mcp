@@ -91,10 +91,13 @@ class EmailOperationsMixin:
             reply_to=[self._mailbox(request.reply_to)] if getattr(request, "reply_to", None) else None,
             importance=request.importance.capitalize() if hasattr(request, "importance") else "Normal",
         )
-        for path in request.attachments:
+        self._attach_files(message, request.attachments)
+        return message
+
+    def _attach_files(self, message: Message, attachments: list[Path]) -> None:
+        for path in attachments:
             with Path(path).open("rb") as handle:
                 message.attach(FileAttachment(name=Path(path).name, content=handle.read()))
-        return message
 
     def _to_folder_info(self, folder: Folder, depth: int) -> FolderInfo:
         children = []
@@ -191,25 +194,41 @@ class EmailOperationsMixin:
     def reply_email(self, request: ReplyEmailRequest) -> SendResult:
         item = self._fetch_item(request.id)
         try:
-            if request.reply_all:
-                item.reply_all(subject=f"Re: {item.subject or ''}", body=request.body)
-            else:
-                item.reply(subject=f"Re: {item.subject or ''}", body=request.body)
-            return SendResult(id=request.id, status="sent")
+            subject = f"Re: {item.subject or ''}"
+            response = (
+                item.create_reply_all(subject=subject, body=request.body)
+                if request.reply_all
+                else item.create_reply(subject=subject, body=request.body)
+            )
+            return self._send_response_object(response, request.attachments, fallback_id=request.id)
         except Exception as exc:  # noqa: BLE001
             raise self._map_exception(exc, item_id=request.id) from exc
 
     def forward_email(self, request: ForwardEmailRequest) -> SendResult:
         item = self._fetch_item(request.id)
         try:
-            item.forward(
+            response = item.create_forward(
                 subject=f"Fwd: {item.subject or ''}",
                 body=request.comment or "",
                 to_recipients=[self._mailbox(address) for address in request.to],
             )
-            return SendResult(id=request.id, status="sent")
+            return self._send_response_object(response, request.attachments, fallback_id=request.id)
         except Exception as exc:  # noqa: BLE001
             raise self._map_exception(exc, item_id=request.id) from exc
+
+    def _send_response_object(
+        self, response: Any, attachments: list[Path], fallback_id: str
+    ) -> SendResult:
+        # create_reply/create_reply_all/create_forward response objects have no attachments
+        # field of their own, so attachments require saving as a draft first, then attaching.
+        if not attachments:
+            response.send()
+            return SendResult(id=fallback_id, status="sent")
+        draft = response.save(self.account.drafts)
+        message = self._fetch_item(draft.id)
+        self._attach_files(message, attachments)
+        message.send()
+        return SendResult(id=message.id or fallback_id, status="sent")
 
     def move_email(self, request: FolderActionRequest) -> ActionResult:
         item = self._fetch_item(request.id)

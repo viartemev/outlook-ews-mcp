@@ -10,7 +10,14 @@ import outlook_mcp.exchange_client.base as exchange_client_base
 import outlook_mcp.exchange_client.contacts as exchange_client_contacts
 from outlook_mcp.errors import APIError
 from outlook_mcp.exchange_client import EWSExchangeBackend
-from outlook_mcp.models import FindFreeSlotsRequest, GetContactRequest, GetEmailRequest
+from outlook_mcp.models import (
+    FindFreeSlotsRequest,
+    ForwardEmailRequest,
+    GetContactRequest,
+    GetEmailRequest,
+    ReplyEmailRequest,
+    SendResult,
+)
 
 
 def _free_slots_request() -> FindFreeSlotsRequest:
@@ -293,3 +300,135 @@ def test_resolve_folder_falls_back_to_name_lookup_when_id_lookup_errors(settings
     result = backend._resolve_folder("Projects")
 
     assert result is child
+
+
+def test_reply_email_sends_response_object_when_no_attachments(settings) -> None:
+    backend = EWSExchangeBackend(settings)
+    events: list[tuple] = []
+
+    class FakeResponse:
+        def send(self):
+            events.append(("send",))
+
+    class FakeItem:
+        subject = "Hello"
+
+        def create_reply(self, subject, body):
+            events.append(("create_reply", subject, body))
+            return FakeResponse()
+
+    def fetch(ids, folder=None):
+        yield FakeItem()
+
+    backend._account = SimpleNamespace(fetch=fetch)
+
+    result = backend.reply_email(ReplyEmailRequest(id="msg-1", body="Reply body"))
+
+    assert events == [("create_reply", "Re: Hello", "Reply body"), ("send",)]
+    assert result == SendResult(id="msg-1", status="sent")
+
+
+def test_reply_email_saves_draft_attaches_files_then_sends(settings, tmp_path) -> None:
+    backend = EWSExchangeBackend(settings)
+    attachment_path = tmp_path / "note.txt"
+    attachment_path.write_text("hi")
+    events: list[tuple] = []
+    drafts_folder = object()
+
+    class FakeMessage:
+        id = "sent-1"
+
+        def attach(self, attachment):
+            events.append(("attach", attachment.name))
+
+        def send(self):
+            events.append(("send",))
+
+    class FakeDraft:
+        id = "draft-1"
+
+    class FakeResponse:
+        def save(self, folder):
+            events.append(("save", folder))
+            return FakeDraft()
+
+    class FakeItem:
+        subject = "Hello"
+
+        def create_reply_all(self, subject, body):
+            events.append(("create_reply_all", subject, body))
+            return FakeResponse()
+
+    fetch_results = iter([FakeItem(), FakeMessage()])
+
+    def fetch(ids, folder=None):
+        yield next(fetch_results)
+
+    backend._account = SimpleNamespace(fetch=fetch, drafts=drafts_folder)
+
+    result = backend.reply_email(
+        ReplyEmailRequest(
+            id="msg-1", body="Reply body", reply_all=True, attachments=[attachment_path]
+        )
+    )
+
+    assert events == [
+        ("create_reply_all", "Re: Hello", "Reply body"),
+        ("save", drafts_folder),
+        ("attach", "note.txt"),
+        ("send",),
+    ]
+    assert result == SendResult(id="sent-1", status="sent")
+
+
+def test_forward_email_saves_draft_attaches_files_then_sends(settings, tmp_path) -> None:
+    backend = EWSExchangeBackend(settings)
+    attachment_path = tmp_path / "note.txt"
+    attachment_path.write_text("hi")
+    events: list[tuple] = []
+    drafts_folder = object()
+
+    class FakeMessage:
+        id = "sent-1"
+
+        def attach(self, attachment):
+            events.append(("attach", attachment.name))
+
+        def send(self):
+            events.append(("send",))
+
+    class FakeDraft:
+        id = "draft-1"
+
+    class FakeResponse:
+        def save(self, folder):
+            events.append(("save", folder))
+            return FakeDraft()
+
+    class FakeItem:
+        subject = "Hello"
+
+        def create_forward(self, subject, body, to_recipients):
+            events.append(
+                ("create_forward", subject, body, [m.email_address for m in to_recipients])
+            )
+            return FakeResponse()
+
+    fetch_results = iter([FakeItem(), FakeMessage()])
+
+    def fetch(ids, folder=None):
+        yield next(fetch_results)
+
+    backend._account = SimpleNamespace(fetch=fetch, drafts=drafts_folder)
+
+    result = backend.forward_email(
+        ForwardEmailRequest(id="msg-1", to=["dest@example.com"], attachments=[attachment_path])
+    )
+
+    assert events == [
+        ("create_forward", "Fwd: Hello", "", ["dest@example.com"]),
+        ("save", drafts_folder),
+        ("attach", "note.txt"),
+        ("send",),
+    ]
+    assert result == SendResult(id="sent-1", status="sent")
