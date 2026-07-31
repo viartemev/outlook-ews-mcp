@@ -82,8 +82,10 @@ class BaseEWSBackend:
         BaseProtocol.TIMEOUT = self.settings.exchange_timeout
         self._configure_ssl_verification()
         self._configure_timezone_fallback()
-        retry_policy = FailFast() if self.settings.exchange_max_retries == 0 else FaultTolerance(
-            max_wait=max(self.settings.exchange_timeout * self.settings.exchange_max_retries, self.settings.exchange_timeout)
+        retry_policy = (
+            FailFast()
+            if self.settings.exchange_max_retry_wait == 0
+            else FaultTolerance(max_wait=self.settings.exchange_max_retry_wait)
         )
         credentials = Credentials(username=auth.username, password=auth.password)
         auth_type = BASIC if auth.auth_type == "Basic" else NTLM
