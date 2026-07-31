@@ -270,6 +270,35 @@ def test_resolve_folder_by_id_uses_targeted_lookup_not_full_walk(settings, monke
     assert captured["folders"][0].id == "AAA="
 
 
+def test_resolve_folder_by_id_containing_slash_is_not_treated_as_path(settings, monkeypatch) -> None:
+    backend = EWSExchangeBackend(settings)
+    resolved_folder = SimpleNamespace(id="AAA=/BBB==", name="Projects")
+    captured: dict = {}
+
+    class FakeFolderCollection:
+        def __init__(self, account, folders) -> None:
+            captured["folders"] = folders
+
+        def resolve(self):
+            yield resolved_folder
+
+    class PoisonRoot:
+        def walk(self):
+            raise AssertionError("must not walk the full folder tree to resolve by id")
+
+        @property
+        def children(self):
+            raise AssertionError("must not fall back to path traversal when id lookup succeeds")
+
+    monkeypatch.setattr(exchange_client_base, "FolderCollection", FakeFolderCollection)
+    backend._account = _fake_account_for_folder_resolution(PoisonRoot())
+
+    result = backend._resolve_folder("AAA=/BBB==")
+
+    assert result is resolved_folder
+    assert captured["folders"][0].id == "AAA=/BBB=="
+
+
 def test_resolve_folder_falls_back_to_name_lookup_when_id_lookup_is_empty(settings, monkeypatch) -> None:
     backend = EWSExchangeBackend(settings)
     child = SimpleNamespace(name="Projects")
