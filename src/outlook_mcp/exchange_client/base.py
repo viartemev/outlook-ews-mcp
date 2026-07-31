@@ -191,10 +191,9 @@ class BaseEWSBackend:
         if normalized in builtin:
             return builtin[normalized]
 
-        if "/" not in value.strip("/"):
-            by_id = self._get_folder_by_id(value)
-            if by_id is not None:
-                return by_id
+        by_id = self._get_folder_by_id(value)
+        if by_id is not None:
+            return by_id
 
         current = account.root
         for part in [segment for segment in value.strip("/").split("/") if segment]:
