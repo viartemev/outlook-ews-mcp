@@ -6,7 +6,8 @@ import pytest
 from exchangelib.errors import ErrorInvalidIdMalformed
 from exchangelib.ewsdatetime import EWSTimeZone
 
-import outlook_mcp.exchange_client as exchange_client_module
+import outlook_mcp.exchange_client.base as exchange_client_base
+import outlook_mcp.exchange_client.contacts as exchange_client_contacts
 from outlook_mcp.errors import APIError
 from outlook_mcp.exchange_client import EWSExchangeBackend
 from outlook_mcp.models import FindFreeSlotsRequest, GetContactRequest, GetEmailRequest
@@ -113,7 +114,7 @@ def test_get_contact_resolves_gal_address(settings, monkeypatch) -> None:
     def fetch(ids, folder=None):
         raise AssertionError("GAL contacts must not be fetched from the personal contacts folder")
 
-    monkeypatch.setattr(exchange_client_module, "ResolveNames", FakeResolveNames)
+    monkeypatch.setattr(exchange_client_contacts, "ResolveNames", FakeResolveNames)
     backend._account = SimpleNamespace(fetch=fetch, contacts=object(), protocol=object())
 
     contact = backend.get_contact(GetContactRequest(id="ivan@example.com"))
@@ -148,7 +149,7 @@ def test_get_contact_keeps_only_smtp_addresses_of_gal_contact(settings, monkeypa
         def call(self, **kwargs):
             yield SimpleNamespace(email_address="ivan@example.com", name="Ivan Ivanov"), gal_contact
 
-    monkeypatch.setattr(exchange_client_module, "ResolveNames", FakeResolveNames)
+    monkeypatch.setattr(exchange_client_contacts, "ResolveNames", FakeResolveNames)
     backend._account = SimpleNamespace(contacts=object(), protocol=object())
 
     contact = backend.get_contact(GetContactRequest(id="ivan@example.com"))
@@ -167,10 +168,87 @@ def test_get_contact_raises_not_found_when_gal_has_no_match(settings, monkeypatc
         def call(self, **kwargs):
             return iter(())
 
-    monkeypatch.setattr(exchange_client_module, "ResolveNames", FakeResolveNames)
+    monkeypatch.setattr(exchange_client_contacts, "ResolveNames", FakeResolveNames)
     backend._account = SimpleNamespace(contacts=object(), protocol=object())
 
     with pytest.raises(APIError) as excinfo:
         backend.get_contact(GetContactRequest(id="nobody@example.com"))
 
     assert excinfo.value.code == "not_found"
+
+
+def _fake_account_for_folder_resolution(root) -> SimpleNamespace:
+    return SimpleNamespace(
+        root=root,
+        inbox=object(),
+        sent=object(),
+        drafts=object(),
+        trash=object(),
+        junk=object(),
+        calendar=object(),
+        contacts=object(),
+    )
+
+
+def test_resolve_folder_by_id_uses_targeted_lookup_not_full_walk(settings, monkeypatch) -> None:
+    backend = EWSExchangeBackend(settings)
+    resolved_folder = SimpleNamespace(id="AAA=", name="Projects")
+    captured: dict = {}
+
+    class FakeFolderCollection:
+        def __init__(self, account, folders) -> None:
+            captured["folders"] = folders
+
+        def resolve(self):
+            yield resolved_folder
+
+    class PoisonRoot:
+        def walk(self):
+            raise AssertionError("must not walk the full folder tree to resolve by id")
+
+    monkeypatch.setattr(exchange_client_base, "FolderCollection", FakeFolderCollection)
+    backend._account = _fake_account_for_folder_resolution(PoisonRoot())
+
+    result = backend._resolve_folder("AAA=")
+
+    assert result is resolved_folder
+    assert len(captured["folders"]) == 1
+    assert captured["folders"][0].id == "AAA="
+
+
+def test_resolve_folder_falls_back_to_name_lookup_when_id_lookup_is_empty(settings, monkeypatch) -> None:
+    backend = EWSExchangeBackend(settings)
+    child = SimpleNamespace(name="Projects")
+
+    class FakeFolderCollection:
+        def __init__(self, account, folders) -> None:
+            pass
+
+        def resolve(self):
+            return iter(())
+
+    monkeypatch.setattr(exchange_client_base, "FolderCollection", FakeFolderCollection)
+    backend._account = _fake_account_for_folder_resolution(SimpleNamespace(children=[child]))
+
+    result = backend._resolve_folder("Projects")
+
+    assert result is child
+
+
+def test_resolve_folder_falls_back_to_name_lookup_when_id_lookup_errors(settings, monkeypatch) -> None:
+    backend = EWSExchangeBackend(settings)
+    child = SimpleNamespace(name="Projects")
+
+    class FakeFolderCollection:
+        def __init__(self, account, folders) -> None:
+            pass
+
+        def resolve(self):
+            raise ErrorInvalidIdMalformed("Id is malformed.")
+
+    monkeypatch.setattr(exchange_client_base, "FolderCollection", FakeFolderCollection)
+    backend._account = _fake_account_for_folder_resolution(SimpleNamespace(children=[child]))
+
+    result = backend._resolve_folder("Projects")
+
+    assert result is child
