@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import datetime, timedelta
+from datetime import datetime, time, timedelta
 from typing import Any
 
 from exchangelib import Attendee, CalendarItem
@@ -20,6 +20,7 @@ from ..models import (
     ListEventsRequest,
     RespondToInviteRequest,
     UpdateEventRequest,
+    WorkHours,
 )
 
 
@@ -221,18 +222,39 @@ class CalendarOperationsMixin:
                 raise self._map_exception(view)
         if not views:
             return []
-        merged = getattr(views[0], "merged", "") or ""
+
+        merged_per_attendee = [getattr(view, "merged", "") or "" for view in views]
+        work_hours = self._parse_work_hours(request.work_hours)
         slots: list[FreeSlot] = []
         cursor = start
         interval = timedelta(minutes=request.duration)
-        for symbol in merged:
+        position = 0
+        while cursor < end:
             slot_end = cursor + interval
-            if symbol == "0":
+            all_free = all(
+                position < len(merged) and merged[position] == "0" for merged in merged_per_attendee
+            )
+            if all_free and self._within_work_hours(cursor, slot_end, work_hours):
                 slots.append(FreeSlot(start=cursor, end=slot_end, all_available=True, busy_attendees=[]))
             cursor = slot_end
-            if cursor >= end:
-                break
+            position += 1
         return slots
+
+    def _parse_work_hours(self, work_hours: WorkHours | None) -> tuple[time, time] | None:
+        if work_hours is None:
+            return None
+        return (
+            datetime.strptime(work_hours.start, "%H:%M").time(),
+            datetime.strptime(work_hours.end, "%H:%M").time(),
+        )
+
+    def _within_work_hours(
+        self, slot_start: datetime, slot_end: datetime, work_hours: tuple[time, time] | None
+    ) -> bool:
+        if work_hours is None:
+            return True
+        day_start, day_end = work_hours
+        return slot_start.time() >= day_start and slot_end.time() <= day_end
 
     def get_my_availability(self, request: ListEventsRequest) -> AvailabilityResult:
         events = self.list_events(request)

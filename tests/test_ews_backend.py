@@ -69,6 +69,47 @@ def test_find_free_slots_raises_when_exchange_returns_error(settings) -> None:
     assert excinfo.value.code == "exchange_error"
 
 
+def test_find_free_slots_requires_every_attendee_free(settings) -> None:
+    """A slot free for the first attendee but busy for a later one must not be reported."""
+    backend = EWSExchangeBackend(settings)
+    request = FindFreeSlotsRequest.model_validate(
+        {
+            "attendees": ["free@example.com", "busy@example.com"],
+            "duration": 60,
+            "start": "2026-04-13T09:00:00+03:00",
+            "end": "2026-04-13T11:00:00+03:00",
+        }
+    )
+    backend._account = _fake_account(
+        [SimpleNamespace(merged="00"), SimpleNamespace(merged="02")]
+    )
+
+    slots = backend.find_free_slots(request)
+
+    assert len(slots) == 1
+    assert slots[0].start.hour == 9
+
+
+def test_find_free_slots_filters_by_work_hours(settings) -> None:
+    backend = EWSExchangeBackend(settings)
+    request = FindFreeSlotsRequest.model_validate(
+        {
+            "attendees": ["user@example.com"],
+            "duration": 60,
+            "start": "2026-04-13T08:00:00+03:00",
+            "end": "2026-04-13T11:00:00+03:00",
+            "work_hours": {"start": "09:00", "end": "18:00"},
+        }
+    )
+    backend._account = _fake_account([SimpleNamespace(merged="000")])
+
+    slots = backend.find_free_slots(request)
+
+    assert len(slots) == 2
+    assert slots[0].start.hour == 9
+    assert slots[1].start.hour == 10
+
+
 def test_fetch_item_raises_api_error_when_exchange_returns_error(settings) -> None:
     backend = EWSExchangeBackend(settings)
 
