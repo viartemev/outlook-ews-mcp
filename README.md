@@ -124,7 +124,7 @@ EXCHANGE_VERIFY_SSL=true
 EXCHANGE_AUTH_TYPE=NTLM
 EXCHANGE_VERSION=EXCHANGE_2016
 EXCHANGE_TIMEOUT=30
-EXCHANGE_MAX_RETRIES=3
+EXCHANGE_MAX_RETRY_WAIT_SECONDS=90
 EXCHANGE_TIMEZONE=Europe/Moscow
 EXCHANGE_IMPERSONATE_AS=
 ATTACHMENT_MAX_SIZE_MB=10
@@ -140,6 +140,7 @@ Notes:
 - `OAuth2` is reserved in config, but this build currently supports live auth with `NTLM` or `Basic`
 - `EXCHANGE_IMPERSONATE_AS` enables mailbox impersonation when Exchange permissions are configured accordingly
 - `ATTACHMENT_MAX_SIZE_MB` is enforced before sending/replying/forwarding/drafting with local attachments
+- `EXCHANGE_MAX_RETRY_WAIT_SECONDS` is a total backoff time budget (exchangelib retries transient errors with exponential backoff until this many seconds have elapsed), not a retry count; set to `0` to disable retries and fail fast on the first error
 
 ## Claude Desktop example
 

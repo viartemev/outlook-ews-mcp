@@ -27,7 +27,9 @@ class Settings(BaseSettings):
     )
     exchange_version: str | None = Field(default=None, alias="EXCHANGE_VERSION")
     exchange_timeout: int = Field(default=30, alias="EXCHANGE_TIMEOUT", ge=1, le=300)
-    exchange_max_retries: int = Field(default=3, alias="EXCHANGE_MAX_RETRIES", ge=0, le=10)
+    exchange_max_retry_wait: int = Field(
+        default=90, alias="EXCHANGE_MAX_RETRY_WAIT_SECONDS", ge=0, le=3600
+    )
     exchange_timezone: str = Field(default="Europe/Moscow", alias="EXCHANGE_TIMEZONE")
     exchange_impersonate_as: str | None = Field(default=None, alias="EXCHANGE_IMPERSONATE_AS")
     attachment_max_size_mb: int = Field(default=10, alias="ATTACHMENT_MAX_SIZE_MB", ge=1, le=100)
