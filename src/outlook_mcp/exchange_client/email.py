@@ -153,7 +153,9 @@ class EmailOperationsMixin:
         qs = folder.all().order_by("-datetime_received")
         filters: dict[str, Any] = {}
         if request.from_address:
-            filters["author__email_address"] = str(request.from_address)
+            # 'author' is a MailboxField, not an IndexedField, so EWS only supports filtering the field
+            # as a whole (exact match against the address) -- '__email_address' is not a valid subfield path.
+            filters["author__iexact"] = str(request.from_address)
         if request.subject:
             filters["subject__icontains"] = request.subject
         if request.since:

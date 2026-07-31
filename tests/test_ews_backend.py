@@ -5,6 +5,9 @@ from types import SimpleNamespace
 import pytest
 from exchangelib.errors import ErrorInvalidIdMalformed
 from exchangelib.ewsdatetime import EWSTimeZone
+from exchangelib.folders import Inbox
+from exchangelib.restriction import Q, Restriction
+from exchangelib.version import EXCHANGE_2016, Version
 
 import outlook_mcp.exchange_client.base as exchange_client_base
 import outlook_mcp.exchange_client.contacts as exchange_client_contacts
@@ -17,6 +20,7 @@ from outlook_mcp.models import (
     ForwardEmailRequest,
     GetContactRequest,
     GetEmailRequest,
+    ListEmailsRequest,
     ReplyEmailRequest,
     SendResult,
 )
@@ -502,3 +506,53 @@ def test_copy_email_handles_no_result_for_cross_mailbox_copy(settings) -> None:
     result = backend.copy_email(FolderActionRequest(id="msg-1", folder="Inbox"))
 
     assert result == ActionResult(id="msg-1", status="copied", new_folder="Inbox", new_id=None)
+
+
+def _bound_inbox() -> Inbox:
+    """A real Inbox folder bound to just enough fake account to compile EWS restriction XML."""
+    account = SimpleNamespace(version=Version(build=EXCHANGE_2016))
+    root = SimpleNamespace(account=account, is_deleteable=False)
+    return Inbox(root=root)
+
+
+def test_list_emails_from_address_filter_uses_author_field_not_a_subfield(settings) -> None:
+    """'author' is a MailboxField, not an IndexedField: EWS rejects a '__email_address' subfield path
+    with 'Unknown field path', so filtering must target 'author' itself (see the __iexact lookup)."""
+    backend = EWSExchangeBackend(settings)
+    captured: dict = {}
+
+    class FakeQuerySet:
+        def order_by(self, *args):
+            return self
+
+        def filter(self, **filters):
+            captured.update(filters)
+            return self
+
+        def __getitem__(self, item):
+            return []
+
+    account = _fake_account_for_folder_resolution(object())
+    account.inbox = SimpleNamespace(all=lambda: FakeQuerySet())
+    backend._account = account
+
+    backend.list_emails(ListEmailsRequest(folder="Inbox", from_address="foo@example.com"))
+
+    assert "author__email_address" not in captured
+    assert captured["author__iexact"] == "foo@example.com"
+
+    inbox = _bound_inbox()
+    restriction = Restriction(Q(**captured), folders=[inbox], applies_to=Restriction.ITEMS)
+    xml = restriction.to_xml(version=inbox.account.version)
+    assert xml.find(".//{http://schemas.microsoft.com/exchange/services/2006/types}FieldURI").get(
+        "FieldURI"
+    ) == "message:From"
+
+
+def test_author_email_address_subfield_path_is_rejected_by_ews() -> None:
+    """Regression guard: confirms the old, buggy filter key really is invalid EWS syntax."""
+    inbox = _bound_inbox()
+    restriction = Restriction(Q(author__email_address="foo@example.com"), folders=[inbox], applies_to=Restriction.ITEMS)
+
+    with pytest.raises(Exception, match="Unknown field path 'author__email_address'"):
+        restriction.to_xml(version=inbox.account.version)
