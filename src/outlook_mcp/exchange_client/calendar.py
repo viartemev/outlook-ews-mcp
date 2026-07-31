@@ -4,6 +4,14 @@ from datetime import datetime, time, timedelta
 from typing import Any
 
 from exchangelib import Attendee, CalendarItem
+from exchangelib.recurrence import (
+    WEEKDAY_NAMES,
+    AbsoluteMonthlyPattern,
+    AbsoluteYearlyPattern,
+    DailyPattern,
+    Recurrence,
+    WeeklyPattern,
+)
 
 from ..models import (
     ActionResult,
@@ -18,6 +26,7 @@ from ..models import (
     FreeSlot,
     GetEventRequest,
     ListEventsRequest,
+    RecurrencePattern,
     RespondToInviteRequest,
     UpdateEventRequest,
     WorkHours,
@@ -106,11 +115,35 @@ class CalendarOperationsMixin:
             items = list(qs)
         except Exception as exc:  # noqa: BLE001
             raise self._map_exception(exc) from exc
+        if not request.include_recurring:
+            items = [item for item in items if not getattr(item, "is_recurring", False)]
         return [self._to_calendar_event(item) for item in items]
 
     def get_event(self, request: GetEventRequest) -> CalendarEvent:
         item = self._fetch_item(request.id, folder=self.account.calendar)
         return self._to_calendar_event(item)
+
+    def _build_recurrence(self, pattern: RecurrencePattern, start: datetime) -> Recurrence:
+        if pattern.type == "daily":
+            ews_pattern = DailyPattern(interval=pattern.interval)
+        elif pattern.type == "weekly":
+            weekdays = (
+                [day.capitalize() for day in pattern.days_of_week]
+                if pattern.days_of_week
+                else [WEEKDAY_NAMES[start.weekday()]]
+            )
+            ews_pattern = WeeklyPattern(interval=pattern.interval, weekdays=weekdays)
+        elif pattern.type == "monthly":
+            ews_pattern = AbsoluteMonthlyPattern(interval=pattern.interval, day_of_month=start.day)
+        else:
+            ews_pattern = AbsoluteYearlyPattern(day_of_month=start.day, month=start.month)
+
+        boundary: dict[str, Any] = {"start": start.date()}
+        if pattern.end_date is not None:
+            boundary["end"] = pattern.end_date
+        elif pattern.occurrences is not None:
+            boundary["number"] = pattern.occurrences
+        return Recurrence(pattern=ews_pattern, **boundary)
 
     def create_event(self, request: CreateEventRequest) -> CreateEventResult:
         folder = self.account.calendar if not request.calendar_id else self._resolve_folder(request.calendar_id)
@@ -129,6 +162,8 @@ class CalendarOperationsMixin:
             categories=request.categories,
             importance=request.importance.capitalize(),
             reminder_minutes_before_start=request.reminder_minutes,
+            recurrence=self._build_recurrence(request.recurrence, start) if request.recurrence else None,
+            is_online_meeting=request.online_meeting,
         )
         try:
             item.save(send_meeting_invitations="SendToAllAndSaveCopy" if request.attendees else "SendToNone")
@@ -181,9 +216,12 @@ class CalendarOperationsMixin:
     def delete_event(self, request: DeleteEventRequest) -> ActionResult:
         item = self._fetch_item(request.id, folder=self.account.calendar)
         try:
-            item.delete(
-                send_meeting_cancellations="SendToAllAndSaveCopy" if request.notify_attendees else "SendToNone"
-            )
+            if request.notify_attendees and request.cancel_message:
+                item.cancel(body=request.cancel_message)
+            else:
+                item.delete(
+                    send_meeting_cancellations="SendToAllAndSaveCopy" if request.notify_attendees else "SendToNone"
+                )
             return ActionResult(id=request.id, status="deleted")
         except Exception as exc:  # noqa: BLE001
             raise self._map_exception(exc, item_id=request.id) from exc
