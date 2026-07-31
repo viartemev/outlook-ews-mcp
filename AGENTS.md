@@ -18,7 +18,7 @@ MCP server exposing on-prem Exchange (EWS) to LLM clients. Source lives under `s
 - `server.py` — `FastMCP` app entrypoint (`stdio` or `sse` transport)
 - `smoke.py` — privacy-safe manual smoke check against a real mailbox (`OUTLOOK_MCP_SMOKE_INCLUDE_DATA=true` to see real data)
 
-Package/CLI is `outlook-ews-mcp` (PyPI), even though the GitHub repo stays `outlook-mcp` — `outlook-mcp` was already taken on PyPI. Don't rename the repo or the Python import path (`outlook_mcp`), only the distribution name and the two console scripts.
+Package/CLI/repo are all `outlook-ews-mcp` now — `outlook-mcp` was already taken on PyPI, so the PyPI distribution, the two console scripts, and the GitHub repo itself were renamed to match. The Python import path stays `outlook_mcp` (unrenamed, and not worth churning across every file).
 
 ## Testing
 - Dev deps are an optional extra, not a dependency-group: `uv sync --extra dev` (NOT `uv sync --group dev`, that errors).
