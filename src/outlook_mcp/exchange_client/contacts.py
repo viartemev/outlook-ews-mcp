@@ -178,6 +178,7 @@ class ContactOperationsMixin:
     def update_contact(self, request: UpdateContactRequest) -> ActionResult:
         contact = self._fetch_item(request.id, folder=self.account.contacts)
         updated_fields: list[str] = []
+        save_fields: list[str] = []
         field_map = {
             "display_name": "display_name",
             "first_name": "given_name",
@@ -191,14 +192,17 @@ class ContactOperationsMixin:
             if value is not None:
                 setattr(contact, item_field, value)
                 updated_fields.append(request_field)
+                save_fields.append(item_field)
         if request.email is not None:
             contact.email_addresses = [IndexedEmailAddress(label="EmailAddress1", email=str(request.email))]
             updated_fields.append("email")
+            save_fields.append("email_addresses")
         if request.phone is not None:
             contact.phone_numbers = [IndexedPhoneNumber(label="PrimaryPhone", phone_number=request.phone)]
             updated_fields.append("phone")
+            save_fields.append("phone_numbers")
         try:
-            contact.save(update_fields=updated_fields or None)
+            contact.save(update_fields=save_fields or None)
             return ActionResult(id=request.id, status="updated", updated_fields=updated_fields)
         except Exception as exc:  # noqa: BLE001
             raise self._map_exception(exc, item_id=request.id) from exc

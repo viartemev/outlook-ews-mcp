@@ -7,6 +7,8 @@ from typing import Any
 
 from exchangelib import FileAttachment, Folder, HTMLBody, Message
 from exchangelib.errors import RateLimitError, TransportError, UnauthorizedError
+from exchangelib.extended_properties import Flag
+from exchangelib.fields import InvalidField
 
 from ..errors import NotFoundError
 from ..models import (
@@ -32,6 +34,14 @@ from ..models import (
     SendEmailRequest,
     SendResult,
 )
+
+try:
+    Message.get_field_by_fieldname("flag_status")
+except InvalidField:
+    Message.register("flag_status", Flag)
+
+#: PidTagFlagStatus values: None = not flagged, 1 = completed, 2 = flagged.
+_FLAG_STATUS = {"flagged": 2, "complete": 1, "none": None}
 
 
 class EmailOperationsMixin:
@@ -267,17 +277,21 @@ class EmailOperationsMixin:
     def mark_email(self, request: MarkEmailRequest) -> ActionResult:
         item = self._fetch_item(request.id)
         updated_fields: list[str] = []
+        save_fields: list[str] = []
         if request.read is not None:
             item.is_read = request.read
             updated_fields.append("read")
+            save_fields.append("is_read")
         if request.importance is not None:
             item.importance = request.importance.capitalize()
             updated_fields.append("importance")
+            save_fields.append("importance")
         if request.flag is not None:
-            item.categories = [] if request.flag == "none" else [request.flag]
+            item.flag_status = _FLAG_STATUS[request.flag]
             updated_fields.append("flag")
+            save_fields.append("flag_status")
         try:
-            item.save(update_fields=updated_fields or None)
+            item.save(update_fields=save_fields or None)
             return ActionResult(id=request.id, status="updated", updated_fields=updated_fields)
         except Exception as exc:  # noqa: BLE001
             raise self._map_exception(exc, item_id=request.id) from exc
