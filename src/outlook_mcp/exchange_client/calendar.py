@@ -146,6 +146,7 @@ class CalendarOperationsMixin:
     def update_event(self, request: UpdateEventRequest) -> ActionResult:
         item = self._fetch_item(request.id, folder=self.account.calendar)
         updated_fields: list[str] = []
+        save_fields: list[str] = []
         for field in ["subject", "start", "end", "location", "body", "reminder_minutes"]:
             value = getattr(request, field)
             if value is not None:
@@ -154,11 +155,14 @@ class CalendarOperationsMixin:
                 target = "reminder_minutes_before_start" if field == "reminder_minutes" else field
                 setattr(item, target, value)
                 updated_fields.append(field)
+                save_fields.append(target)
         if request.add_attendees:
             current = list(getattr(item, "required_attendees", None) or [])
             current.extend(Attendee(mailbox=self._mailbox(address)) for address in request.add_attendees)
             item.required_attendees = current
             updated_fields.append("add_attendees")
+            if "required_attendees" not in save_fields:
+                save_fields.append("required_attendees")
         if request.remove_attendees:
             remove_set = {address.lower() for address in request.remove_attendees}
             item.required_attendees = [
@@ -167,13 +171,15 @@ class CalendarOperationsMixin:
                 if getattr(getattr(attendee, "mailbox", None), "email_address", "").lower() not in remove_set
             ]
             updated_fields.append("remove_attendees")
+            if "required_attendees" not in save_fields:
+                save_fields.append("required_attendees")
         try:
             invitations = {
                 "none": "SendToNone",
                 "all": "SendToAllAndSaveCopy",
                 "modified": "SendOnlyToChanged",
             }[request.send_updates]
-            item.save(update_fields=updated_fields or None, send_meeting_invitations=invitations)
+            item.save(update_fields=save_fields or None, send_meeting_invitations=invitations)
             return ActionResult(id=request.id, status="updated", updated_fields=updated_fields)
         except Exception as exc:  # noqa: BLE001
             raise self._map_exception(exc, item_id=request.id) from exc
