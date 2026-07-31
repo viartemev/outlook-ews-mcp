@@ -83,6 +83,17 @@ class Attendee(ExchangeModel):
 
 
 class CalendarEvent(ExchangeModel):
+    """An appointment as the server holds it, not as we would have created it.
+
+    No range check here on purpose. Exchange accepts zero-length appointments,
+    and placeholders created by external systems arrive that way routinely;
+    reversed timestamps show up in migrated mailboxes. list_events converts a
+    whole page in one pass, so refusing a single such item used to fail every
+    event around it — the user lost the day, not the bad appointment. Reporting
+    it back is also what lets them find and fix it. The range checks that
+    matter live on the request models below, where a mistake is still ours.
+    """
+
     id: str
     subject: str
     start: datetime
@@ -99,12 +110,6 @@ class CalendarEvent(ExchangeModel):
     categories: list[str] = Field(default_factory=list)
     recurrence_pattern: dict[str, Any] | None = None
     importance: Literal["low", "normal", "high"] = "normal"
-
-    @model_validator(mode="after")
-    def validate_range(self) -> "CalendarEvent":
-        if self.end <= self.start:
-            raise ValueError("end must be greater than start")
-        return self
 
 
 class RecurrencePattern(ExchangeModel):

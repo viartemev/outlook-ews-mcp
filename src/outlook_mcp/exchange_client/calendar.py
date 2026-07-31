@@ -91,7 +91,11 @@ class CalendarOperationsMixin:
             (
                 (max(event.start, start), min(event.end, end))
                 for event in events
-                if event.end > start and event.start < end
+                # An appointment that ends when it starts occupies no time, and
+                # one that ends before it starts says nothing we can trust. Both
+                # exist in real mailboxes; letting either through would split the
+                # free time around a moment nobody is actually busy.
+                if event.end > event.start and event.end > start and event.start < end
             ),
             key=lambda interval: interval[0],
         )
