@@ -7,4 +7,4 @@ COPY src /app/src
 
 RUN python -m pip install --no-cache-dir .
 
-CMD ["outlook-mcp"]
+CMD ["outlook-ews-mcp"]

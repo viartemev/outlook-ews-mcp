@@ -581,7 +581,7 @@ wheels = [
 ]
 
 [[package]]
-name = "outlook-mcp"
+name = "outlook-ews-mcp"
 version = "0.1.0"
 source = { editable = "." }
 dependencies = [
@@ -605,7 +605,7 @@ dev = [
 requires-dist = [
     { name = "email-validator", specifier = ">=2.0" },
     { name = "exchangelib", specifier = ">=5.0" },
-    { name = "mcp", specifier = ">=1.0" },
+    { name = "mcp", specifier = ">=1.0,<2.0" },
     { name = "pydantic", specifier = ">=2.7" },
     { name = "pydantic-settings", specifier = ">=2.2" },
     { name = "pytest", marker = "extra == 'dev'", specifier = ">=8.0" },

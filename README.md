@@ -1,12 +1,15 @@
-# outlook-mcp
+# outlook-ews-mcp
 
 ![Python](https://img.shields.io/badge/python-3.11%2B-blue)
 ![MCP](https://img.shields.io/badge/MCP-server-7c3aed)
 ![Exchange](https://img.shields.io/badge/Microsoft%20Exchange-EWS-0a7ea4)
 ![Status](https://img.shields.io/badge/status-beta-orange)
+![License](https://img.shields.io/badge/license-MIT-green)
 
-`outlook-mcp` is an MCP server for on-prem Microsoft Exchange via EWS (`exchangelib`).
+`outlook-ews-mcp` is an MCP server for on-prem Microsoft Exchange via EWS (`exchangelib`).
 It gives MCP-compatible clients access to email, calendar, contacts, folders, attachments, and availability data through a single, testable Python service.
+
+> Note: this project was previously referred to as `outlook-mcp`. It was renamed because that name is already taken on PyPI by an unrelated project — use `outlook-ews-mcp` for `pip`/`uvx` installs and for the CLI commands below.
 
 ## Short description
 
@@ -92,7 +95,7 @@ What the current code does:
 What you should still be careful with:
 - `EXCHANGE_VERIFY_SSL=false` disables TLS certificate verification and should be used only for trusted internal/self-signed environments
 - `get_attachment` writes files to disk, so choose a safe destination directory
-- `outlook-mcp-smoke` is privacy-safe by default and prints only masked mailbox info plus counts; set `OUTLOOK_MCP_SMOKE_INCLUDE_DATA=true` only if you explicitly want real inbox/event data in stdout
+- `outlook-ews-mcp-smoke` is privacy-safe by default and prints only masked mailbox info plus counts; set `OUTLOOK_MCP_SMOKE_INCLUDE_DATA=true` only if you explicitly want real inbox/event data in stdout
 - if you enable file logging with `LOG_FILE`, protect that file with OS permissions
 - if you publish Docker images from CI, protect GitLab/GitHub project access and registry permissions
 
@@ -103,7 +106,7 @@ uv venv
 source .venv/bin/activate
 uv pip install -e .[dev]
 cp .env.example .env
-outlook-mcp
+outlook-ews-mcp
 ```
 
 By default the server runs in `stdio` mode. Set `MCP_TRANSPORT=sse` to start an HTTP server.
@@ -144,7 +147,7 @@ Notes:
 {
   "mcpServers": {
     "outlook": {
-      "command": "outlook-mcp",
+      "command": "outlook-ews-mcp",
       "env": {
         "EXCHANGE_SERVER": "https://mail.company.com/EWS/Exchange.asmx",
         "EXCHANGE_USERNAME": "DOMAIN\\username",
@@ -162,28 +165,27 @@ Notes:
 After filling `.env`, run:
 
 ```bash
-outlook-mcp-smoke
+outlook-ews-mcp-smoke
 ```
 
 Default output is sanitized for safer verification. If you intentionally want sample mailbox/event data in the output:
 
 ```bash
-OUTLOOK_MCP_SMOKE_INCLUDE_DATA=true outlook-mcp-smoke
+OUTLOOK_MCP_SMOKE_INCLUDE_DATA=true outlook-ews-mcp-smoke
 ```
 
 ## Docker
 
 ```bash
-docker build -t outlook-mcp .
-docker run --rm --env-file .env outlook-mcp
+docker build -t outlook-ews-mcp .
+docker run --rm --env-file .env outlook-ews-mcp
 ```
 
-## GitLab CI/CD
+## CI/CD
 
-The repository includes `.gitlab-ci.yml` with these stages:
+The repository includes both a GitHub Actions workflow (`.github/workflows/ci.yml`) and a GitLab CI pipeline (`.gitlab-ci.yml`), each running the same `lint` (ruff) and `test` (pytest) stages on pushes and pull/merge requests.
 
-- `lint` — runs `ruff`
-- `test` — runs `pytest`
+GitLab CI additionally has:
 - `build` — builds Python package artifacts into `dist/`
 - `release` — builds and pushes a Docker image to the GitLab Container Registry on the default branch and on tags
 
@@ -209,3 +211,11 @@ uv run --python 3.12 --with '.[dev]' pytest -q
 - The implementation is centered around a single `ExchangeClient` abstraction so auth, transport, retries, and error mapping stay centralized.
 - Errors are returned in a structured JSON form suitable for MCP `isError=true` handling.
 - `RTK.md` is not present in this repository, so the implementation follows `PLAN.md`.
+
+## Contributing
+
+Bug reports and PRs are welcome — see [CONTRIBUTING.md](CONTRIBUTING.md) for how to set up a dev environment and run the test suite without a real Exchange server. For vulnerability reports, see [SECURITY.md](SECURITY.md).
+
+## License
+
+MIT — see [LICENSE](LICENSE).
