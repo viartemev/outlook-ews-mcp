@@ -6,7 +6,9 @@ workflow:
 
 stages:
   - lint
+  - typecheck
   - test
+  - security
   - build
   - release
 
@@ -22,7 +24,7 @@ cache:
     - .uv-cache/
 
 .default_python_job: &default_python_job
-  image: python:3.12-slim
+  image: python:3.12-slim@sha256:57cd7c3a7a273101a6485ba99423ee568157882804b1124b4dd04266317710de
   before_script:
     - python --version
     - pip install --no-cache-dir uv
@@ -34,11 +36,23 @@ lint:
   script:
     - uv run ruff check .
 
+typecheck:
+  stage: typecheck
+  <<: *default_python_job
+  script:
+    - uv run mypy src
+
 test:
   stage: test
   <<: *default_python_job
   script:
-    - uv run pytest -q
+    - uv run pytest -q --cov=outlook_mcp --cov-report=term-missing --cov-fail-under=70
+
+security:
+  stage: security
+  <<: *default_python_job
+  script:
+    - uv run --with pip-audit pip-audit --strict --local
 
 build_package:
   stage: build
@@ -53,9 +67,9 @@ build_package:
 
 publish_container:
   stage: release
-  image: docker:27
+  image: docker:27@sha256:aa3df78ecf320f5fafdce71c659f1629e96e9de0968305fe1de670e0ca9176ce
   services:
-    - name: docker:27-dind
+    - name: docker:27-dind@sha256:aa3df78ecf320f5fafdce71c659f1629e96e9de0968305fe1de670e0ca9176ce
   variables:
     DOCKER_TLS_CERTDIR: "/certs"
   before_script:
