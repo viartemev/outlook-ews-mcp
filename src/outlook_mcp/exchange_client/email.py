@@ -33,6 +33,7 @@ from ..models import (
     SendEmailRequest,
     SendResult,
 )
+from .base import BaseEWSBackend
 
 try:
     Message.get_field_by_fieldname("flag_status")
@@ -43,12 +44,16 @@ except InvalidField:
 _FLAG_STATUS = {"flagged": 2, "complete": 1, "none": None}
 
 
-class EmailOperationsMixin:
+class EmailOperationsMixin(BaseEWSBackend):
     def _to_email_summary(self, item: Any) -> EmailSummary:
         return EmailSummary(
             id=item.id,
             subject=item.subject or "",
-            **{"from": self._email_address(getattr(item, "author", None) or getattr(item, "sender", None))},
+            **{
+                "from": self._email_address(
+                    getattr(item, "author", None) or getattr(item, "sender", None)
+                )
+            },
             to=self._recipients(getattr(item, "to_recipients", None)),
             date=getattr(item, "datetime_received", None)
             or getattr(item, "datetime_sent", None)
@@ -77,7 +82,9 @@ class EmailOperationsMixin:
             bcc=self._recipients(getattr(item, "bcc_recipients", None)),
             body_text=body_text,
             body_html=body_html,
-            attachments=[self._attachment_metadata(a) for a in getattr(item, "attachments", None) or []],
+            attachments=[
+                self._attachment_metadata(a) for a in getattr(item, "attachments", None) or []
+            ],
             conversation_id=getattr(getattr(item, "conversation_id", None), "id", None),
             headers=self._headers_to_dict(getattr(item, "headers", None)),
             truncated=False,
@@ -88,7 +95,11 @@ class EmailOperationsMixin:
         return text[:200]
 
     def _make_message(self, request: SendEmailRequest | DraftEmailRequest) -> Message:
-        body: str | HTMLBody = HTMLBody(request.body) if request.body_type == "html" else request.body
+        body: str | HTMLBody = (
+            HTMLBody(request.body) if request.body_type == "html" else request.body
+        )
+        reply_to: str | None = getattr(request, "reply_to", None)
+        importance: str | None = getattr(request, "importance", None)
         message = Message(
             account=self.account,
             folder=self.account.drafts,
@@ -97,8 +108,8 @@ class EmailOperationsMixin:
             to_recipients=[self._mailbox(address) for address in request.to],
             cc_recipients=[self._mailbox(address) for address in request.cc],
             bcc_recipients=[self._mailbox(address) for address in request.bcc],
-            reply_to=[self._mailbox(request.reply_to)] if getattr(request, "reply_to", None) else None,
-            importance=request.importance.capitalize() if hasattr(request, "importance") else "Normal",
+            reply_to=[self._mailbox(reply_to)] if reply_to else None,
+            importance=importance.capitalize() if importance else "Normal",
         )
         self._attach_files(message, request.attachments)
         return message
@@ -158,9 +169,15 @@ class EmailOperationsMixin:
         if request.subject:
             filters["subject__icontains"] = request.subject
         if request.since:
-            filters["datetime_received__gte"] = datetime.combine(request.since, datetime.min.time(), tzinfo=self.account.default_timezone)
+            filters["datetime_received__gte"] = datetime.combine(
+                request.since, datetime.min.time(), tzinfo=self.account.default_timezone
+            )
         if request.before:
-            filters["datetime_received__lt"] = datetime.combine(request.before + timedelta(days=1), datetime.min.time(), tzinfo=self.account.default_timezone)
+            filters["datetime_received__lt"] = datetime.combine(
+                request.before + timedelta(days=1),
+                datetime.min.time(),
+                tzinfo=self.account.default_timezone,
+            )
         if request.unread_only:
             filters["is_read"] = False
         if request.has_attachments is not None:
@@ -186,7 +203,9 @@ class EmailOperationsMixin:
             raise self._map_exception(exc) from exc
         if not items:
             try:
-                qs = folder.filter(text_body__icontains=request.query).order_by("-datetime_received")
+                qs = folder.filter(text_body__icontains=request.query).order_by(
+                    "-datetime_received"
+                )
                 items = list(qs[: request.limit])
             except Exception as exc:  # noqa: BLE001
                 raise self._map_exception(exc) from exc
@@ -300,14 +319,20 @@ class EmailOperationsMixin:
 
     def list_folders(self, request: ListFoldersRequest) -> list[FolderInfo]:
         folder = self._resolve_folder(request.parent)
-        return [self._to_folder_info(child, request.depth - 1) for child in folder.children] if request.depth != 0 else [self._to_folder_info(folder, 0)]
+        return (
+            [self._to_folder_info(child, request.depth - 1) for child in folder.children]
+            if request.depth != 0
+            else [self._to_folder_info(folder, 0)]
+        )
 
     def create_folder(self, request: CreateFolderRequest) -> ActionResult:
         parent = self._resolve_folder(request.parent)
         folder = Folder(parent=parent, name=request.name)
         try:
             folder.save()
-            return ActionResult(id=getattr(folder, "id", ""), status="created", path=self._folder_path(folder))
+            return ActionResult(
+                id=getattr(folder, "id", ""), status="created", path=self._folder_path(folder)
+            )
         except Exception as exc:  # noqa: BLE001
             raise self._map_exception(exc) from exc
 

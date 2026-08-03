@@ -1,9 +1,7 @@
 from __future__ import annotations
 
-import json
-
-from outlook_mcp.mcp_tools import bind_mcp_tool, normalize_tool_arguments
-from outlook_mcp.models import ListEmailsRequest, SearchContactsRequest
+from outlook_mcp.mcp_tools import ToolSpec, bind_mcp_tool, normalize_tool_arguments
+from outlook_mcp.models import EmailSummary, ListEmailsRequest, SearchContactsRequest
 from outlook_mcp.server import build_mcp_server, build_registry
 
 
@@ -20,7 +18,14 @@ def test_normalize_tool_arguments_keeps_flat_payload() -> None:
 
 def test_bind_mcp_tool_exposes_request_schema(client, settings) -> None:
     registry = build_registry(settings=settings, client=client)
-    tool_fn = bind_mcp_tool(registry.call, "list_emails", "List emails in a folder", ListEmailsRequest)
+    spec = ToolSpec(
+        "list_emails",
+        "List emails in a folder",
+        lambda client, arguments: None,
+        request_model=ListEmailsRequest,
+        response_model=list[EmailSummary],
+    )
+    tool_fn = bind_mcp_tool(registry.call, spec)
 
     from mcp.server.fastmcp.tools.base import Tool
 
@@ -35,8 +40,14 @@ def test_bind_mcp_tool_exposes_request_schema(client, settings) -> None:
 
 def test_bind_mcp_tool_routes_flat_arguments(client, settings) -> None:
     registry = build_registry(settings=settings, client=client)
-    tool_fn = bind_mcp_tool(registry.call, "search_contacts", "Search contacts", SearchContactsRequest)
-    payload = json.loads(tool_fn(query="ivan"))
+    spec = ToolSpec(
+        "search_contacts",
+        "Search contacts",
+        lambda client, arguments: None,
+        request_model=SearchContactsRequest,
+    )
+    tool_fn = bind_mcp_tool(registry.call, spec)
+    payload = tool_fn(query="ivan")
     assert payload[0]["id"] == "contact-1"
 
 

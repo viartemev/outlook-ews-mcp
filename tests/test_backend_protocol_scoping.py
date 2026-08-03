@@ -14,7 +14,9 @@ def _settings(**overrides) -> Settings:
     given here (see auth.build_auth_context, which needs an '@' username or an explicit email)."""
     return Settings(
         _env_file=None,
-        EXCHANGE_SERVER=overrides.pop("EXCHANGE_SERVER", "https://mail.example.com/EWS/Exchange.asmx"),
+        EXCHANGE_SERVER=overrides.pop(
+            "EXCHANGE_SERVER", "https://mail.example.com/EWS/Exchange.asmx"
+        ),
         EXCHANGE_USERNAME=overrides.pop("EXCHANGE_USERNAME", "user@example.com"),
         EXCHANGE_PASSWORD=overrides.pop("EXCHANGE_PASSWORD", "secret"),
         **overrides,
@@ -26,7 +28,9 @@ def test_two_backends_keep_their_own_ssl_verification_and_timeout() -> None:
     BaseProtocol.raw_session/TIMEOUT patch. Distinct servers/credentials get exchangelib's
     own separate (uncached) Protocol instances, so each backend's settings must stick."""
     verifying = EWSExchangeBackend(
-        _settings(EXCHANGE_SERVER="https://mail1.example.com/EWS/Exchange.asmx", EXCHANGE_TIMEOUT=30)
+        _settings(
+            EXCHANGE_SERVER="https://mail1.example.com/EWS/Exchange.asmx", EXCHANGE_TIMEOUT=30
+        )
     )
     non_verifying = EWSExchangeBackend(
         _settings(
@@ -52,7 +56,10 @@ def test_timezone_fallback_follows_the_most_recently_active_backend() -> None:
     to know which account triggered the parse. The fallback timezone must still track whichever
     backend's `.account` was most recently accessed, not whichever backend was built first."""
     moscow_backend = EWSExchangeBackend(
-        _settings(EXCHANGE_SERVER="https://mail1.example.com/EWS/Exchange.asmx", EXCHANGE_TIMEZONE="Europe/Moscow")
+        _settings(
+            EXCHANGE_SERVER="https://mail1.example.com/EWS/Exchange.asmx",
+            EXCHANGE_TIMEZONE="Europe/Moscow",
+        )
     )
     new_york_backend = EWSExchangeBackend(
         _settings(

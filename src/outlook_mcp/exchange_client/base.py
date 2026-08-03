@@ -6,7 +6,7 @@ import warnings
 from collections.abc import Iterable
 from contextvars import ContextVar
 from datetime import UTC, datetime
-from typing import Any
+from typing import Any, Literal
 from urllib.parse import urlparse
 
 from exchangelib import (
@@ -85,7 +85,12 @@ class BaseEWSBackend:
             raise APIError(
                 "validation_error",
                 "OAuth2 is not wired in this build yet",
-                details=[{"field": "EXCHANGE_AUTH_TYPE", "reason": "supported values for live checks are NTLM or Basic"}],
+                details=[
+                    {
+                        "field": "EXCHANGE_AUTH_TYPE",
+                        "reason": "supported values for live checks are NTLM or Basic",
+                    }
+                ],
             )
 
         self._configure_timezone_fallback()
@@ -138,7 +143,9 @@ class BaseEWSBackend:
         verify_ssl = self.settings.exchange_verify_ssl
         original_raw_session = protocol.raw_session
 
-        def raw_session_with_verify(prefix, oauth2_client=None, oauth2_session_params=None, oauth2_token_endpoint=None):
+        def raw_session_with_verify(
+            prefix, oauth2_client=None, oauth2_session_params=None, oauth2_token_endpoint=None
+        ):
             session = original_raw_session(
                 prefix,
                 oauth2_client=oauth2_client,
@@ -255,16 +262,22 @@ class BaseEWSBackend:
     def _email_address(self, mailbox: Any) -> EmailAddress:
         if mailbox is None:
             return EmailAddress(email="unknown@example.invalid", name=None)
-        email = getattr(mailbox, "email_address", None) or getattr(mailbox, "email", None) or "unknown@example.invalid"
+        email = (
+            getattr(mailbox, "email_address", None)
+            or getattr(mailbox, "email", None)
+            or "unknown@example.invalid"
+        )
         name = getattr(mailbox, "name", None)
         return EmailAddress(email=email, name=name)
 
     def _recipients(self, values: Iterable[Any] | None) -> list[EmailAddress]:
         return [self._email_address(value) for value in values or []]
 
-    def _normalize_importance(self, value: Any) -> str:
+    def _normalize_importance(self, value: Any) -> Literal["low", "normal", "high"]:
         normalized = str(value or "normal").lower()
-        return normalized if normalized in {"low", "normal", "high"} else "normal"
+        if normalized in ("low", "normal", "high"):
+            return normalized  # type: ignore[return-value]
+        return "normal"
 
     def _extract_message_body(self, item: Any) -> tuple[str, str | None]:
         text = ""
@@ -335,7 +348,12 @@ class BaseEWSBackend:
         latency_ms = round((datetime.now(UTC) - started).total_seconds() * 1000)
         parsed = urlparse(self.settings.exchange_server)
         version = getattr(getattr(account.protocol, "version", None), "api_version", None)
-        return PingResult(status="ok", server=parsed.netloc or self.settings.exchange_server, version=version, latency_ms=latency_ms)
+        return PingResult(
+            status="ok",
+            server=parsed.netloc or self.settings.exchange_server,
+            version=version,
+            latency_ms=latency_ms,
+        )
 
     def get_mailbox_info(self) -> MailboxInfo:
         account = self.account

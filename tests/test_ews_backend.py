@@ -94,9 +94,7 @@ def test_find_free_slots_requires_every_attendee_free(settings) -> None:
             "end": "2026-04-13T11:00:00+03:00",
         }
     )
-    backend._account = _fake_account(
-        [SimpleNamespace(merged="00"), SimpleNamespace(merged="02")]
-    )
+    backend._account = _fake_account([SimpleNamespace(merged="00"), SimpleNamespace(merged="02")])
 
     slots = backend.find_free_slots(request)
 
@@ -190,7 +188,10 @@ def test_get_contact_keeps_only_smtp_addresses_of_gal_contact(settings, monkeypa
         display_name="Ivan Ivanov",
         file_as=None,
         email_addresses=[
-            SimpleNamespace(label="EmailAddress1", email="X500:/o=TANDER/ou=Exchange Administrative Group/cn=ivan"),
+            SimpleNamespace(
+                label="EmailAddress1",
+                email="X500:/o=TANDER/ou=Exchange Administrative Group/cn=ivan",
+            ),
             SimpleNamespace(label="EmailAddress2", email="SMTP:ivan.alias@example.com"),
         ],
         phone_numbers=[SimpleNamespace(label="BusinessPhone", phone_number=None)],
@@ -209,7 +210,10 @@ def test_get_contact_keeps_only_smtp_addresses_of_gal_contact(settings, monkeypa
 
     contact = backend.get_contact(GetContactRequest(id="ivan@example.com"))
 
-    assert [entry.address for entry in contact.email_addresses] == ["ivan@example.com", "ivan.alias@example.com"]
+    assert [entry.address for entry in contact.email_addresses] == [
+        "ivan@example.com",
+        "ivan.alias@example.com",
+    ]
     assert contact.phone_numbers == []
 
 
@@ -271,7 +275,9 @@ def test_resolve_folder_by_id_uses_targeted_lookup_not_full_walk(settings, monke
     assert captured["folders"][0].id == "AAA="
 
 
-def test_resolve_folder_by_id_containing_slash_is_not_treated_as_path(settings, monkeypatch) -> None:
+def test_resolve_folder_by_id_containing_slash_is_not_treated_as_path(
+    settings, monkeypatch
+) -> None:
     backend = EWSExchangeBackend(settings)
     resolved_folder = SimpleNamespace(id="AAA=/BBB==", name="Projects")
     captured: dict = {}
@@ -300,7 +306,9 @@ def test_resolve_folder_by_id_containing_slash_is_not_treated_as_path(settings, 
     assert captured["folders"][0].id == "AAA=/BBB=="
 
 
-def test_resolve_folder_falls_back_to_name_lookup_when_id_lookup_is_empty(settings, monkeypatch) -> None:
+def test_resolve_folder_falls_back_to_name_lookup_when_id_lookup_is_empty(
+    settings, monkeypatch
+) -> None:
     backend = EWSExchangeBackend(settings)
     child = SimpleNamespace(name="Projects")
 
@@ -319,7 +327,9 @@ def test_resolve_folder_falls_back_to_name_lookup_when_id_lookup_is_empty(settin
     assert result is child
 
 
-def test_resolve_folder_falls_back_to_name_lookup_when_id_lookup_errors(settings, monkeypatch) -> None:
+def test_resolve_folder_falls_back_to_name_lookup_when_id_lookup_errors(
+    settings, monkeypatch
+) -> None:
     backend = EWSExchangeBackend(settings)
     child = SimpleNamespace(name="Projects")
 
@@ -513,7 +523,9 @@ def test_copy_email_returns_new_id_from_id_changekey_tuple(settings) -> None:
 
     result = backend.copy_email(FolderActionRequest(id="msg-1", folder="Inbox"))
 
-    assert result == ActionResult(id="msg-1", status="copied", new_folder="Inbox", new_id="msg-1-copy")
+    assert result == ActionResult(
+        id="msg-1", status="copied", new_folder="Inbox", new_id="msg-1-copy"
+    )
 
 
 def test_copy_email_handles_no_result_for_cross_mailbox_copy(settings) -> None:
@@ -574,15 +586,20 @@ def test_list_emails_from_address_filter_uses_author_field_not_a_subfield(settin
     inbox = _bound_inbox()
     restriction = Restriction(Q(**captured), folders=[inbox], applies_to=Restriction.ITEMS)
     xml = restriction.to_xml(version=inbox.account.version)
-    assert xml.find(".//{http://schemas.microsoft.com/exchange/services/2006/types}FieldURI").get(
-        "FieldURI"
-    ) == "message:From"
+    assert (
+        xml.find(".//{http://schemas.microsoft.com/exchange/services/2006/types}FieldURI").get(
+            "FieldURI"
+        )
+        == "message:From"
+    )
 
 
 def test_author_email_address_subfield_path_is_rejected_by_ews() -> None:
     """Regression guard: confirms the old, buggy filter key really is invalid EWS syntax."""
     inbox = _bound_inbox()
-    restriction = Restriction(Q(author__email_address="foo@example.com"), folders=[inbox], applies_to=Restriction.ITEMS)
+    restriction = Restriction(
+        Q(author__email_address="foo@example.com"), folders=[inbox], applies_to=Restriction.ITEMS
+    )
 
     with pytest.raises(Exception, match="Unknown field path 'author__email_address'"):
         restriction.to_xml(version=inbox.account.version)

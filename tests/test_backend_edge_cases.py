@@ -13,7 +13,9 @@ from outlook_mcp.models import CalendarEvent, EmailAddress, GetAttachmentRequest
 
 
 class FakeAttachment:
-    def __init__(self, attachment_id: str, name: str, content: bytes, size: int | None = None) -> None:
+    def __init__(
+        self, attachment_id: str, name: str, content: bytes, size: int | None = None
+    ) -> None:
         self.attachment_id = SimpleNamespace(id=attachment_id)
         self.name = name
         self.content = content
@@ -24,9 +26,13 @@ class FakeAttachment:
 def test_get_attachment_sanitizes_relative_traversal(settings, tmp_path: Path, monkeypatch) -> None:
     backend = EWSExchangeBackend(settings)
     attachment = FakeAttachment("att-1", "../../evil.txt", b"payload")
-    monkeypatch.setattr(backend, "_fetch_item", lambda *a, **k: SimpleNamespace(attachments=[attachment]))
+    monkeypatch.setattr(
+        backend, "_fetch_item", lambda *a, **k: SimpleNamespace(attachments=[attachment])
+    )
 
-    request = GetAttachmentRequest(email_id="email-1", attachment_id="att-1", save_path=str(tmp_path))
+    request = GetAttachmentRequest(
+        email_id="email-1", attachment_id="att-1", save_path=str(tmp_path)
+    )
     result = backend.get_attachment(request)
 
     saved_path = Path(result.saved_path)
@@ -38,9 +44,13 @@ def test_get_attachment_sanitizes_absolute_path(settings, tmp_path: Path, monkey
     backend = EWSExchangeBackend(settings)
     outside_target = tmp_path.parent / "outside-target.txt"
     attachment = FakeAttachment("att-1", str(outside_target), b"payload")
-    monkeypatch.setattr(backend, "_fetch_item", lambda *a, **k: SimpleNamespace(attachments=[attachment]))
+    monkeypatch.setattr(
+        backend, "_fetch_item", lambda *a, **k: SimpleNamespace(attachments=[attachment])
+    )
 
-    request = GetAttachmentRequest(email_id="email-1", attachment_id="att-1", save_path=str(tmp_path))
+    request = GetAttachmentRequest(
+        email_id="email-1", attachment_id="att-1", save_path=str(tmp_path)
+    )
     result = backend.get_attachment(request)
 
     saved_path = Path(result.saved_path)
@@ -48,13 +58,19 @@ def test_get_attachment_sanitizes_absolute_path(settings, tmp_path: Path, monkey
     assert not outside_target.exists()
 
 
-def test_get_attachment_rejects_declared_size_over_limit(settings, tmp_path: Path, monkeypatch) -> None:
+def test_get_attachment_rejects_declared_size_over_limit(
+    settings, tmp_path: Path, monkeypatch
+) -> None:
     settings.attachment_max_size_mb = 1
     backend = EWSExchangeBackend(settings)
     attachment = FakeAttachment("att-1", "big.bin", b"x", size=2 * 1024 * 1024)
-    monkeypatch.setattr(backend, "_fetch_item", lambda *a, **k: SimpleNamespace(attachments=[attachment]))
+    monkeypatch.setattr(
+        backend, "_fetch_item", lambda *a, **k: SimpleNamespace(attachments=[attachment])
+    )
 
-    request = GetAttachmentRequest(email_id="email-1", attachment_id="att-1", save_path=str(tmp_path))
+    request = GetAttachmentRequest(
+        email_id="email-1", attachment_id="att-1", save_path=str(tmp_path)
+    )
     with pytest.raises(APIError) as excinfo:
         backend.get_attachment(request)
 
@@ -62,13 +78,19 @@ def test_get_attachment_rejects_declared_size_over_limit(settings, tmp_path: Pat
     assert list(tmp_path.iterdir()) == []
 
 
-def test_get_attachment_rejects_content_over_limit_when_size_unknown(settings, tmp_path: Path, monkeypatch) -> None:
+def test_get_attachment_rejects_content_over_limit_when_size_unknown(
+    settings, tmp_path: Path, monkeypatch
+) -> None:
     settings.attachment_max_size_mb = 1
     backend = EWSExchangeBackend(settings)
     attachment = FakeAttachment("att-1", "big.bin", b"x" * (2 * 1024 * 1024))
-    monkeypatch.setattr(backend, "_fetch_item", lambda *a, **k: SimpleNamespace(attachments=[attachment]))
+    monkeypatch.setattr(
+        backend, "_fetch_item", lambda *a, **k: SimpleNamespace(attachments=[attachment])
+    )
 
-    request = GetAttachmentRequest(email_id="email-1", attachment_id="att-1", save_path=str(tmp_path))
+    request = GetAttachmentRequest(
+        email_id="email-1", attachment_id="att-1", save_path=str(tmp_path)
+    )
     with pytest.raises(APIError) as excinfo:
         backend.get_attachment(request)
 

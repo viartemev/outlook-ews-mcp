@@ -80,5 +80,5 @@ def get_my_availability(client: ExchangeClient, arguments: dict) -> dict:
     return dump_model(client.get_my_availability(request))
 
 
-def list_calendars(client: ExchangeClient) -> list[dict]:
+def list_calendars(client: ExchangeClient, arguments: dict) -> list[dict]:
     return dump_model(client.list_calendars())
