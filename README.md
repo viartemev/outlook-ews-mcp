@@ -214,7 +214,6 @@ uv run --python 3.12 --with '.[dev]' pytest -q
 
 - The implementation is centered around a single `ExchangeClient` abstraction so auth, transport, retries, and error mapping stay centralized.
 - Errors are returned in a structured JSON form suitable for MCP `isError=true` handling.
-- `RTK.md` is not present in this repository, so the implementation follows `PLAN.md`.
 
 ## Contributing
 

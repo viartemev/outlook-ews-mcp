@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, Literal
 
 from exchangelib.indexed_properties import EmailAddress as IndexedEmailAddress
 from exchangelib.indexed_properties import PhoneNumber as IndexedPhoneNumber
@@ -10,8 +10,10 @@ from exchangelib.services import ResolveNames
 from ..errors import NotFoundError
 from ..models import (
     ActionResult,
+    ContactAddress,
     ContactEmailAddress,
     ContactFull,
+    ContactPhoneNumber,
     ContactSummary,
     CreateContactRequest,
     DeleteContactRequest,
@@ -19,12 +21,23 @@ from ..models import (
     SearchContactsRequest,
     UpdateContactRequest,
 )
+from .base import BaseEWSBackend
 
 
-class ContactOperationsMixin:
-    def _contact_summary_from_contact(self, contact: Contact, source: str) -> ContactSummary:
-        emails = [entry.email for entry in getattr(contact, "email_addresses", None) or [] if getattr(entry, "email", None)]
-        phones = [entry.phone_number for entry in getattr(contact, "phone_numbers", None) or [] if getattr(entry, "phone_number", None)]
+class ContactOperationsMixin(BaseEWSBackend):
+    def _contact_summary_from_contact(
+        self, contact: Contact, source: Literal["personal", "gal"]
+    ) -> ContactSummary:
+        emails = [
+            entry.email
+            for entry in getattr(contact, "email_addresses", None) or []
+            if getattr(entry, "email", None)
+        ]
+        phones = [
+            entry.phone_number
+            for entry in getattr(contact, "phone_numbers", None) or []
+            if getattr(entry, "phone_number", None)
+        ]
         return ContactSummary(
             id=contact.id,
             display_name=contact.display_name or contact.file_as or "",
@@ -40,8 +53,12 @@ class ContactOperationsMixin:
         results: list[ContactSummary] = []
         if request.source in {"personal", "all"}:
             try:
-                qs = self.account.contacts.filter(display_name__icontains=request.query)[: request.limit]
-                results.extend(self._contact_summary_from_contact(contact, "personal") for contact in qs)
+                qs = self.account.contacts.filter(display_name__icontains=request.query)[
+                    : request.limit
+                ]
+                results.extend(
+                    self._contact_summary_from_contact(contact, "personal") for contact in qs
+                )
             except Exception as exc:  # noqa: BLE001
                 raise self._map_exception(exc) from exc
         if request.source in {"gal", "all"} and len(results) < request.limit:
@@ -56,11 +73,14 @@ class ContactOperationsMixin:
                     if contact is not None and getattr(contact, "id", None):
                         results.append(self._contact_summary_from_contact(contact, "gal"))
                     elif mailbox is not None:
+                        mailbox_email = getattr(mailbox, "email_address", None)
                         results.append(
                             ContactSummary(
-                                id=getattr(mailbox, "email_address", None) or request.query,
-                                display_name=getattr(mailbox, "name", None) or getattr(mailbox, "email_address", None) or request.query,
-                                email_addresses=[getattr(mailbox, "email_address", None)] if getattr(mailbox, "email_address", None) else [],
+                                id=mailbox_email or request.query,
+                                display_name=getattr(mailbox, "name", None)
+                                or mailbox_email
+                                or request.query,
+                                email_addresses=[mailbox_email] if mailbox_email else [],
                                 phone_numbers=[],
                                 source="gal",
                             )
@@ -94,17 +114,27 @@ class ContactOperationsMixin:
             if isinstance(entry, Exception):
                 raise self._map_exception(entry, item_id=address)
             mailbox, contact = entry
-            primary = self._smtp_address(getattr(mailbox, "email_address", None)) if mailbox is not None else None
+            primary = (
+                self._smtp_address(getattr(mailbox, "email_address", None))
+                if mailbox is not None
+                else None
+            )
             if contact is not None:
                 full = self._contact_full_from_item(contact, item_id=address, source="gal")
-                if primary and all(str(known.address).lower() != primary.lower() for known in full.email_addresses):
-                    full.email_addresses.insert(0, ContactEmailAddress(type="SMTP", address=primary))
+                if primary and all(
+                    str(known.address).lower() != primary.lower() for known in full.email_addresses
+                ):
+                    full.email_addresses.insert(
+                        0, ContactEmailAddress(type="SMTP", address=primary)
+                    )
                 return full
             if mailbox is not None:
                 return ContactFull(
                     id=address,
                     display_name=getattr(mailbox, "name", None) or primary or address,
-                    email_addresses=[{"type": "SMTP", "address": primary}] if primary else [],
+                    email_addresses=[ContactEmailAddress(type="SMTP", address=primary)]
+                    if primary
+                    else [],
                     source="gal",
                 )
         raise NotFoundError(address)
@@ -120,31 +150,39 @@ class ContactOperationsMixin:
             address = remainder.strip()
         return address or None
 
-    def _contact_full_from_item(self, item: Any, *, item_id: str, source: str) -> ContactFull:
+    def _to_contact_emails(self, entries: Any) -> list[ContactEmailAddress]:
+        result: list[ContactEmailAddress] = []
+        for entry in entries or []:
+            smtp = self._smtp_address(getattr(entry, "email", None))
+            if smtp:
+                result.append(ContactEmailAddress(type=entry.label, address=smtp))
+        return result
+
+    def _contact_full_from_item(
+        self, item: Any, *, item_id: str, source: Literal["personal", "gal"]
+    ) -> ContactFull:
         return ContactFull(
             id=item_id,
-            display_name=getattr(item, "display_name", None) or getattr(item, "file_as", None) or "",
+            display_name=getattr(item, "display_name", None)
+            or getattr(item, "file_as", None)
+            or "",
             first_name=getattr(item, "given_name", None),
             last_name=getattr(item, "surname", None),
-            email_addresses=[
-                {"type": entry.label, "address": self._smtp_address(entry.email)}
-                for entry in getattr(item, "email_addresses", None) or []
-                if self._smtp_address(getattr(entry, "email", None))
-            ],
+            email_addresses=self._to_contact_emails(getattr(item, "email_addresses", None)),
             phone_numbers=[
-                {"type": entry.label, "number": entry.phone_number}
+                ContactPhoneNumber(type=entry.label, number=entry.phone_number)
                 for entry in getattr(item, "phone_numbers", None) or []
                 if getattr(entry, "phone_number", None)
             ],
             addresses=[
-                {
-                    "type": entry.label,
-                    "street": entry.street,
-                    "city": entry.city,
-                    "state": entry.state,
-                    "postal_code": entry.zipcode,
-                    "country": entry.country,
-                }
+                ContactAddress(
+                    type=entry.label,
+                    street=entry.street,
+                    city=entry.city,
+                    state=entry.state,
+                    postal_code=entry.zipcode,
+                    country=entry.country,
+                )
                 for entry in getattr(item, "physical_addresses", None) or []
             ],
             company=getattr(item, "company_name", None),
@@ -166,8 +204,12 @@ class ContactOperationsMixin:
             company_name=request.company,
             job_title=request.job_title,
             notes=request.notes,
-            email_addresses=[IndexedEmailAddress(label="EmailAddress1", email=str(request.email))] if request.email else [],
-            phone_numbers=[IndexedPhoneNumber(label="PrimaryPhone", phone_number=request.phone)] if request.phone else [],
+            email_addresses=[IndexedEmailAddress(label="EmailAddress1", email=str(request.email))]
+            if request.email
+            else [],
+            phone_numbers=[IndexedPhoneNumber(label="PrimaryPhone", phone_number=request.phone)]
+            if request.phone
+            else [],
         )
         try:
             contact.save()
@@ -194,11 +236,15 @@ class ContactOperationsMixin:
                 updated_fields.append(request_field)
                 save_fields.append(item_field)
         if request.email is not None:
-            contact.email_addresses = [IndexedEmailAddress(label="EmailAddress1", email=str(request.email))]
+            contact.email_addresses = [
+                IndexedEmailAddress(label="EmailAddress1", email=str(request.email))
+            ]
             updated_fields.append("email")
             save_fields.append("email_addresses")
         if request.phone is not None:
-            contact.phone_numbers = [IndexedPhoneNumber(label="PrimaryPhone", phone_number=request.phone)]
+            contact.phone_numbers = [
+                IndexedPhoneNumber(label="PrimaryPhone", phone_number=request.phone)
+            ]
             updated_fields.append("phone")
             save_fields.append("phone_numbers")
         try:

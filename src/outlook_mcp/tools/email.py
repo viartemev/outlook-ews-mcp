@@ -55,7 +55,9 @@ def send_email(client: ExchangeClient, arguments: dict) -> dict:
     except ValidationError as exc:
         raise validation_error_from_pydantic(exc) from exc
 
-    _validate_attachments(request.attachments, client.settings.attachment_max_size_mb, client.settings.attachment_root)
+    _validate_attachments(
+        request.attachments, client.settings.attachment_max_size_mb, client.settings.attachment_root
+    )
     return dump_model(client.send_email(request))
 
 
@@ -64,7 +66,9 @@ def reply_email(client: ExchangeClient, arguments: dict) -> dict:
         request = ReplyEmailRequest.model_validate(arguments)
     except ValidationError as exc:
         raise validation_error_from_pydantic(exc) from exc
-    _validate_attachments(request.attachments, client.settings.attachment_max_size_mb, client.settings.attachment_root)
+    _validate_attachments(
+        request.attachments, client.settings.attachment_max_size_mb, client.settings.attachment_root
+    )
     return dump_model(client.reply_email(request))
 
 
@@ -73,7 +77,9 @@ def forward_email(client: ExchangeClient, arguments: dict) -> dict:
         request = ForwardEmailRequest.model_validate(arguments)
     except ValidationError as exc:
         raise validation_error_from_pydantic(exc) from exc
-    _validate_attachments(request.attachments, client.settings.attachment_max_size_mb, client.settings.attachment_root)
+    _validate_attachments(
+        request.attachments, client.settings.attachment_max_size_mb, client.settings.attachment_root
+    )
     return dump_model(client.forward_email(request))
 
 
@@ -130,7 +136,9 @@ def create_draft(client: ExchangeClient, arguments: dict) -> dict:
         request = DraftEmailRequest.model_validate(arguments)
     except ValidationError as exc:
         raise validation_error_from_pydantic(exc) from exc
-    _validate_attachments(request.attachments, client.settings.attachment_max_size_mb, client.settings.attachment_root)
+    _validate_attachments(
+        request.attachments, client.settings.attachment_max_size_mb, client.settings.attachment_root
+    )
     return dump_model(client.create_draft(request))
 
 
@@ -156,12 +164,17 @@ def _validate_within_root(paths: list[Path], root: Path | None, field: str) -> N
     if root is None:
         return
     resolved_root = root.resolve()
-    outside = [str(path) for path in paths if not Path(path).resolve().is_relative_to(resolved_root)]
+    outside = [
+        str(path) for path in paths if not Path(path).resolve().is_relative_to(resolved_root)
+    ]
     if outside:
         raise APIError(
             "validation_error",
             f"one or more {field} paths are outside the configured EXCHANGE_ATTACHMENT_ROOT",
-            details=[{"field": field, "reason": f"path outside EXCHANGE_ATTACHMENT_ROOT: {path}"} for path in outside],
+            details=[
+                {"field": field, "reason": f"path outside EXCHANGE_ATTACHMENT_ROOT: {path}"}
+                for path in outside
+            ],
         )
 
 
@@ -173,7 +186,9 @@ def _validate_attachments(attachments: list[Path], max_size_mb: int, root: Path 
         raise APIError(
             "validation_error",
             "one or more attachments do not exist",
-            details=[{"field": "attachments", "reason": f"missing file: {path}"} for path in missing],
+            details=[
+                {"field": "attachments", "reason": f"missing file: {path}"} for path in missing
+            ],
         )
 
     max_size_bytes = max_size_mb * 1024 * 1024

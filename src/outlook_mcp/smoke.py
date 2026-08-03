@@ -4,6 +4,7 @@ import json
 import os
 from datetime import datetime, timedelta
 from typing import Any
+from zoneinfo import ZoneInfo
 
 from .config import get_settings
 from .exchange_client import ExchangeClient, build_default_backend
@@ -39,9 +40,12 @@ def main() -> None:
     ping = client.ping().model_dump(mode="json")
     mailbox = client.get_mailbox_info().model_dump(mode="json")
 
-    start = datetime.now(backend.account.default_timezone)
+    start = datetime.now(ZoneInfo(mailbox["timezone"]))
     end = start + timedelta(days=7)
-    inbox = [item.model_dump(mode="json", by_alias=True) for item in client.list_emails(ListEmailsRequest(limit=5))]
+    inbox = [
+        item.model_dump(mode="json", by_alias=True)
+        for item in client.list_emails(ListEmailsRequest(limit=5))
+    ]
     events = [
         item.model_dump(mode="json", by_alias=True)
         for item in client.list_events(ListEventsRequest(start=start, end=end))

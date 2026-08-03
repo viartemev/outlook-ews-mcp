@@ -26,7 +26,11 @@ LEGACY_DN = (
         (EmailAddress, "email", {}),
         (Attendee, "email", {}),
         (ContactEmailAddress, "address", {"type": "EX"}),
-        (MailboxInfo, "email_address", {"display_name": "Захаров А.В.", "timezone": "Europe/Moscow"}),
+        (
+            MailboxInfo,
+            "email_address",
+            {"display_name": "Захаров А.В.", "timezone": "Europe/Moscow"},
+        ),
     ],
 )
 def test_read_models_accept_legacy_x500_address(model, field, extra) -> None:

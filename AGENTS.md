@@ -24,8 +24,10 @@ Package/CLI/repo are all `outlook-ews-mcp` now — `outlook-mcp` was already tak
 - Dev deps are an optional extra, not a dependency-group: `uv sync --extra dev` (NOT `uv sync --group dev`, that errors).
 - Run tests: `.venv/bin/python -m pytest -q` or `uv run --extra dev pytest -q`. If a bare `pytest` on PATH fails with `ModuleNotFoundError: No module named '_pytest.scope'`, that's a mise-managed global pytest/anyio-plugin mismatch shadowing the project venv — use the venv's pytest directly instead of debugging the global install.
 - Tests never hit a real Exchange server: `tests/conftest.py` provides `FakeExchangeBackend` implementing the `ExchangeBackend` protocol. Extend that fake rather than mocking `exchangelib` directly.
-- Lint: `.venv/bin/python -m ruff check .` (line length 100, configured in `pyproject.toml`).
-- Both checks also run in CI: GitHub Actions (`.github/workflows/ci.yml`) and GitLab CI (`.gitlab-ci.yml`, additionally builds the package and publishes a Docker image on `main`/tags).
+- Lint: `.venv/bin/python -m ruff check .` (line length 100, configured in `pyproject.toml`). Format: `.venv/bin/python -m ruff format .`.
+- Type check: `.venv/bin/python -m mypy src` (config in `pyproject.toml`; `exchangelib` has no stubs, so it's exempted via `ignore_missing_imports`).
+- Coverage gate: `.venv/bin/python -m pytest -q --cov=outlook_mcp --cov-fail-under=70` (current coverage is ~75%; the 70% floor has slack, not a target to write to).
+- All of the above run in CI: GitHub Actions (`.github/workflows/ci.yml`) and GitLab CI (`.gitlab-ci.yml`, additionally builds the package, runs `pip-audit`, and publishes a Docker image on `main`/tags).
 
 ## Conventions
 - Errors from `exchange_client/` should surface as `APIError` subclasses so `errors.py` can map them to structured MCP error payloads — don't let raw `exchangelib` exceptions escape to `tools/`.

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections.abc import Sequence
 from datetime import date, datetime, time
 from pathlib import Path
 from typing import Annotated, Any, Literal
@@ -250,7 +251,6 @@ class CreateEventRequest(ExchangeModel):
     recurrence: RecurrencePattern | None = None
     categories: list[str] = Field(default_factory=list)
     importance: Literal["low", "normal", "high"] = "normal"
-    online_meeting: bool = False
 
     @model_validator(mode="after")
     def validate_range(self) -> "CreateEventRequest":
@@ -468,7 +468,9 @@ class DeleteContactRequest(ExchangeModel):
     id: str
 
 
-def dump_model(value: BaseModel | list[BaseModel] | dict[str, Any] | list[dict[str, Any]]) -> Any:
+def dump_model(
+    value: BaseModel | Sequence[BaseModel] | dict[str, Any] | Sequence[dict[str, Any]],
+) -> Any:
     if isinstance(value, BaseModel):
         return value.model_dump(mode="json", by_alias=True)
     if isinstance(value, list):

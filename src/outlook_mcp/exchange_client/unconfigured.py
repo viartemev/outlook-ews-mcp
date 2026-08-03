@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from typing import NoReturn
+
 from ..config import Settings
 from ..errors import ExchangeUnavailableError
 from ..models import (
@@ -51,7 +53,7 @@ class UnconfiguredExchangeBackend:
     def __init__(self, settings: Settings) -> None:
         self.settings = settings
 
-    def _raise(self) -> None:
+    def _raise(self) -> NoReturn:
         raise ExchangeUnavailableError(
             "exchange backend is not configured; provide a real EWS-backed implementation"
         )

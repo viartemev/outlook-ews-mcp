@@ -25,7 +25,9 @@ def _account_with_item(item: FakeSavableItem, **extra) -> SimpleNamespace:
 
 def test_mark_email_saves_real_ews_field_names_and_preserves_categories(settings) -> None:
     backend = EWSExchangeBackend(settings)
-    item = FakeSavableItem(id="email-1", is_read=False, importance="Normal", categories=["Existing"])
+    item = FakeSavableItem(
+        id="email-1", is_read=False, importance="Normal", categories=["Existing"]
+    )
     backend._account = _account_with_item(item)
 
     request = MarkEmailRequest.model_validate({"id": "email-1", "read": True, "flag": "flagged"})
@@ -67,7 +69,10 @@ def test_update_event_saves_real_ews_field_names(settings) -> None:
     result = backend.update_event(request)
 
     assert item.reminder_minutes_before_start == 30
-    assert item.save_calls[-1]["update_fields"] == ["reminder_minutes_before_start", "required_attendees"]
+    assert item.save_calls[-1]["update_fields"] == [
+        "reminder_minutes_before_start",
+        "required_attendees",
+    ]
     assert result.updated_fields == ["reminder_minutes", "add_attendees", "remove_attendees"]
 
 

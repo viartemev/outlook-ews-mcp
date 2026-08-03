@@ -3,80 +3,24 @@ from __future__ import annotations
 import logging
 import sys
 import time
-from collections.abc import Callable
 from typing import Any
 
 from .config import Settings, get_settings
 from .errors import APIError, normalize_exception
 from .exchange_client import ExchangeClient, build_default_backend
 from .mcp_tools import normalize_tool_arguments, register_mcp_tools
-from .models import (
-    CreateContactRequest,
-    CreateEventRequest,
-    CreateFolderRequest,
-    DeleteContactRequest,
-    DeleteEmailRequest,
-    DeleteEventRequest,
-    DraftEmailRequest,
-    FindFreeSlotsRequest,
-    FolderActionRequest,
-    ForwardEmailRequest,
-    GetAttachmentRequest,
-    GetContactRequest,
-    GetEmailRequest,
-    GetEventRequest,
-    ListEmailsRequest,
-    ListEventsRequest,
-    ListFoldersRequest,
-    MarkEmailRequest,
-    ReplyEmailRequest,
-    RespondToInviteRequest,
-    SearchContactsRequest,
-    SearchEmailsRequest,
-    SendDraftRequest,
-    SendEmailRequest,
-    UpdateContactRequest,
-    UpdateEventRequest,
-)
-from .tools.calendar import (
-    create_event,
-    delete_event,
-    find_free_slots,
-    get_event,
-    get_my_availability,
-    list_calendars,
-    list_events,
-    respond_to_invite,
-    update_event,
-)
-from .tools.contacts import create_contact, delete_contact, get_contact, search_contacts, update_contact
-from .tools.email import (
-    copy_email,
-    create_draft,
-    create_folder,
-    delete_email,
-    forward_email,
-    get_attachment,
-    get_email,
-    list_emails,
-    list_folders,
-    mark_email,
-    move_email,
-    reply_email,
-    search_emails,
-    send_draft,
-    send_email,
-)
-from .tools.system import get_mailbox_info, ping_exchange
+from .tool_specs import TOOL_SPECS
 
 logger = logging.getLogger(__name__)
-
-ToolHandler = Callable[[ExchangeClient, dict[str, Any]], Any]
 
 
 def configure_logging(settings: Settings) -> None:
     handlers: list[logging.Handler]
-    if settings.log_file and str(settings.log_file).strip() not in {"", "."} and not settings.log_file.is_dir():
+    if (
+        settings.log_file
+        and str(settings.log_file).strip() not in {"", "."}
+        and not settings.log_file.is_dir()
+    ):
         handlers = [logging.FileHandler(settings.log_file)]
     else:
         handlers = [logging.StreamHandler(sys.stderr)]
@@ -90,69 +34,20 @@ def configure_logging(settings: Settings) -> None:
 class ToolRegistry:
     def __init__(self, client: ExchangeClient) -> None:
         self.client = client
-        self._handlers: dict[str, ToolHandler] = {
-            "list_emails": list_emails,
-            "get_email": get_email,
-            "search_emails": search_emails,
-            "send_email": send_email,
-            "reply_email": reply_email,
-            "forward_email": forward_email,
-            "move_email": move_email,
-            "copy_email": copy_email,
-            "delete_email": delete_email,
-            "mark_email": mark_email,
-            "list_folders": list_folders,
-            "create_folder": create_folder,
-            "create_draft": create_draft,
-            "send_draft": send_draft,
-            "get_attachment": get_attachment,
-            "list_events": list_events,
-            "get_event": get_event,
-            "create_event": create_event,
-            "update_event": update_event,
-            "delete_event": delete_event,
-            "respond_to_invite": respond_to_invite,
-            "find_free_slots": find_free_slots,
-            "get_my_availability": get_my_availability,
-            "search_contacts": search_contacts,
-            "get_contact": get_contact,
-            "create_contact": create_contact,
-            "update_contact": update_contact,
-            "delete_contact": delete_contact,
-        }
+        self._specs = {spec.name: spec for spec in TOOL_SPECS}
 
-    def call(self, name: str, arguments: dict[str, Any] | None = None) -> tuple[dict[str, Any], bool]:
+    def call(
+        self, name: str, arguments: dict[str, Any] | None = None
+    ) -> tuple[dict[str, Any], bool]:
         arguments = normalize_tool_arguments(arguments)
-        if name == "ping_exchange":
-            return ping_exchange(self.client), False
-        if name == "get_mailbox_info":
-            return get_mailbox_info(self.client), False
-        if name == "list_calendars":
-            return list_calendars(self.client), False
-        if name == "resource_mailbox_folders":
-            return {"uri": "mailbox://folders", "data": list_folders(self.client, {})}, False
-        if name == "resource_mailbox_inbox":
-            return {
-                "uri": "mailbox://inbox?limit=10",
-                "data": list_emails(self.client, {"folder": "inbox", "limit": 10}),
-            }, False
-        if name == "resource_mailbox_email":
-            email_id = arguments.get("id")
-            return {"uri": f"mailbox://email/{email_id}", "data": get_email(self.client, arguments)}, False
-        if name == "resource_mailbox_drafts":
-            return {"uri": "mailbox://drafts", "data": list_emails(self.client, {"folder": "drafts"})}, False
-        if name == "resource_calendar_today":
-            now = time.time()
-            return {"uri": "calendar://today", "generated_at": now}, False
-
-        handler = self._handlers.get(name)
-        if not handler:
+        spec = self._specs.get(name)
+        if not spec:
             error = APIError("not_found", f"unknown tool: {name}")
             return error.to_dict(), True
 
         started = time.perf_counter()
         try:
-            result = handler(self.client, arguments)
+            result = spec.handler(self.client, arguments)
             duration_ms = round((time.perf_counter() - started) * 1000)
             logger.info("tool=%s status=ok duration_ms=%s", name, duration_ms)
             return result, False
@@ -168,7 +63,9 @@ class ToolRegistry:
             return api_error.to_dict(), True
 
 
-def build_registry(settings: Settings | None = None, client: ExchangeClient | None = None) -> ToolRegistry:
+def build_registry(
+    settings: Settings | None = None, client: ExchangeClient | None = None
+) -> ToolRegistry:
     settings = settings or get_settings()
     configure_logging(settings)
     client = client or ExchangeClient(settings=settings, backend=build_default_backend(settings))
@@ -183,44 +80,7 @@ def build_mcp_server(settings: Settings | None = None, client: ExchangeClient | 
 
     registry = build_registry(settings=settings, client=client)
     server = FastMCP("outlook-mcp")
-
-    register_mcp_tools(
-        server,
-        registry,
-        [
-            ("ping_exchange", "Check connectivity to Exchange", None),
-            ("get_mailbox_info", "Get mailbox metadata", None),
-            ("list_emails", "List emails in a folder", ListEmailsRequest),
-            ("get_email", "Get a full email by ID", GetEmailRequest),
-            ("search_emails", "Search emails", SearchEmailsRequest),
-            ("send_email", "Send a new email", SendEmailRequest),
-            ("reply_email", "Reply to an email", ReplyEmailRequest),
-            ("forward_email", "Forward an email", ForwardEmailRequest),
-            ("move_email", "Move email to another folder", FolderActionRequest),
-            ("copy_email", "Copy email to another folder", FolderActionRequest),
-            ("delete_email", "Delete an email", DeleteEmailRequest),
-            ("mark_email", "Update email flags", MarkEmailRequest),
-            ("list_folders", "List mailbox folders", ListFoldersRequest),
-            ("create_folder", "Create a mailbox folder", CreateFolderRequest),
-            ("create_draft", "Create an email draft", DraftEmailRequest),
-            ("send_draft", "Send a draft email", SendDraftRequest),
-            ("get_attachment", "Save an attachment to disk", GetAttachmentRequest),
-            ("list_events", "List calendar events in a time range", ListEventsRequest),
-            ("get_event", "Get a calendar event by ID", GetEventRequest),
-            ("create_event", "Create a calendar event", CreateEventRequest),
-            ("update_event", "Update a calendar event", UpdateEventRequest),
-            ("delete_event", "Delete a calendar event", DeleteEventRequest),
-            ("respond_to_invite", "Respond to a calendar invite", RespondToInviteRequest),
-            ("find_free_slots", "Find meeting time slots", FindFreeSlotsRequest),
-            ("get_my_availability", "Get free and busy slots", ListEventsRequest),
-            ("list_calendars", "List calendars", None),
-            ("search_contacts", "Search contacts", SearchContactsRequest),
-            ("get_contact", "Get a contact by ID", GetContactRequest),
-            ("create_contact", "Create a personal contact", CreateContactRequest),
-            ("update_contact", "Update a personal contact", UpdateContactRequest),
-            ("delete_contact", "Delete a personal contact", DeleteContactRequest),
-        ],
-    )
+    register_mcp_tools(server, registry, TOOL_SPECS)
     return server
 
 

@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from datetime import datetime, time, timedelta
-from typing import Any
+from typing import Any, Literal
 
 from exchangelib import Attendee, CalendarItem
 from exchangelib.recurrence import (
@@ -31,17 +31,21 @@ from ..models import (
     UpdateEventRequest,
     WorkHours,
 )
+from .base import BaseEWSBackend
 
 
-class CalendarOperationsMixin:
+class CalendarOperationsMixin(BaseEWSBackend):
     def _to_calendar_event(self, item: Any) -> CalendarEvent:
         attendees = [
             self._to_attendee(attendee)
-            for attendee in (getattr(item, "required_attendees", None) or []) + (getattr(item, "optional_attendees", None) or [])
+            for attendee in (getattr(item, "required_attendees", None) or [])
+            + (getattr(item, "optional_attendees", None) or [])
         ]
         organizer = self._email_address(getattr(item, "organizer", None))
         body_text, _ = self._extract_message_body(item)
-        online_url = getattr(item, "meeting_workspace_url", None) or getattr(item, "net_show_url", None)
+        online_url = getattr(item, "meeting_workspace_url", None) or getattr(
+            item, "net_show_url", None
+        )
         recurrence = getattr(item, "recurrence", None)
         return CalendarEvent(
             id=item.id,
@@ -72,9 +76,11 @@ class CalendarOperationsMixin:
             response_type=self._normalize_response(response),
         )
 
-    def _normalize_response(self, value: Any) -> str:
+    def _normalize_response(
+        self, value: Any
+    ) -> Literal["accept", "tentative", "decline", "unknown"]:
         normalized = str(value or "unknown").lower()
-        mapping = {
+        mapping: dict[str, Literal["accept", "tentative", "decline", "unknown"]] = {
             "accept": "accept",
             "accepted": "accept",
             "organizer": "accept",
@@ -111,7 +117,11 @@ class CalendarOperationsMixin:
         return free_slots
 
     def list_events(self, request: ListEventsRequest) -> list[CalendarEvent]:
-        folder = self.account.calendar if not request.calendar_id else self._resolve_folder(request.calendar_id)
+        folder = (
+            self.account.calendar
+            if not request.calendar_id
+            else self._resolve_folder(request.calendar_id)
+        )
         start = self._to_ews_datetime(request.start)
         end = self._to_ews_datetime(request.end)
         qs = folder.view(start=start, end=end)
@@ -150,7 +160,11 @@ class CalendarOperationsMixin:
         return Recurrence(pattern=ews_pattern, **boundary)
 
     def create_event(self, request: CreateEventRequest) -> CreateEventResult:
-        folder = self.account.calendar if not request.calendar_id else self._resolve_folder(request.calendar_id)
+        folder = (
+            self.account.calendar
+            if not request.calendar_id
+            else self._resolve_folder(request.calendar_id)
+        )
         start = self._to_ews_datetime(request.start)
         end = self._to_ews_datetime(request.end)
         item = CalendarItem(
@@ -161,16 +175,23 @@ class CalendarOperationsMixin:
             end=end,
             location=request.location,
             body=request.body,
-            required_attendees=[Attendee(mailbox=self._mailbox(address)) for address in request.attendees],
+            required_attendees=[
+                Attendee(mailbox=self._mailbox(address)) for address in request.attendees
+            ],
             is_all_day=request.is_all_day,
             categories=request.categories,
             importance=request.importance.capitalize(),
             reminder_minutes_before_start=request.reminder_minutes,
-            recurrence=self._build_recurrence(request.recurrence, start) if request.recurrence else None,
-            is_online_meeting=request.online_meeting,
+            recurrence=self._build_recurrence(request.recurrence, start)
+            if request.recurrence
+            else None,
         )
         try:
-            item.save(send_meeting_invitations="SendToAllAndSaveCopy" if request.attendees else "SendToNone")
+            item.save(
+                send_meeting_invitations="SendToAllAndSaveCopy"
+                if request.attendees
+                else "SendToNone"
+            )
             return CreateEventResult(
                 id=item.id or "",
                 status="created",
@@ -197,7 +218,9 @@ class CalendarOperationsMixin:
                 save_fields.append(target)
         if request.add_attendees:
             current = list(getattr(item, "required_attendees", None) or [])
-            current.extend(Attendee(mailbox=self._mailbox(address)) for address in request.add_attendees)
+            current.extend(
+                Attendee(mailbox=self._mailbox(address)) for address in request.add_attendees
+            )
             item.required_attendees = current
             updated_fields.append("add_attendees")
             if "required_attendees" not in save_fields:
@@ -207,7 +230,8 @@ class CalendarOperationsMixin:
             item.required_attendees = [
                 attendee
                 for attendee in getattr(item, "required_attendees", None) or []
-                if getattr(getattr(attendee, "mailbox", None), "email_address", "").lower() not in remove_set
+                if getattr(getattr(attendee, "mailbox", None), "email_address", "").lower()
+                not in remove_set
             ]
             updated_fields.append("remove_attendees")
             if "required_attendees" not in save_fields:
@@ -230,7 +254,9 @@ class CalendarOperationsMixin:
                 item.cancel(body=request.cancel_message)
             else:
                 item.delete(
-                    send_meeting_cancellations="SendToAllAndSaveCopy" if request.notify_attendees else "SendToNone"
+                    send_meeting_cancellations="SendToAllAndSaveCopy"
+                    if request.notify_attendees
+                    else "SendToNone"
                 )
             return ActionResult(id=request.id, status="deleted")
         except Exception as exc:  # noqa: BLE001
@@ -283,7 +309,9 @@ class CalendarOperationsMixin:
                 position < len(merged) and merged[position] == "0" for merged in merged_per_attendee
             )
             if all_free and self._within_work_hours(cursor, slot_end, work_hours):
-                slots.append(FreeSlot(start=cursor, end=slot_end, all_available=True, busy_attendees=[]))
+                slots.append(
+                    FreeSlot(start=cursor, end=slot_end, all_available=True, busy_attendees=[])
+                )
             cursor = slot_end
             position += 1
         return slots
@@ -306,7 +334,9 @@ class CalendarOperationsMixin:
 
     def get_my_availability(self, request: ListEventsRequest) -> AvailabilityResult:
         events = self.list_events(request)
-        busy_slots = [{"start": event.start, "end": event.end, "subject": event.subject} for event in events]
+        busy_slots = [
+            {"start": event.start, "end": event.end, "subject": event.subject} for event in events
+        ]
         start = self._to_ews_datetime(request.start)
         end = self._to_ews_datetime(request.end)
         free_slots = self._compute_free_slots(start, end, events)

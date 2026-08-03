@@ -54,7 +54,12 @@ from outlook_mcp.models import (
 
 class FakeExchangeBackend:
     def ping(self) -> PingResult:
-        return PingResult(status="ok", server="https://mail.example.com/EWS/Exchange.asmx", version="2019", latency_ms=42)
+        return PingResult(
+            status="ok",
+            server="https://mail.example.com/EWS/Exchange.asmx",
+            version="2019",
+            latency_ms=42,
+        )
 
     def get_mailbox_info(self) -> MailboxInfo:
         return MailboxInfo(
@@ -122,7 +127,9 @@ class FakeExchangeBackend:
         return ActionResult(id=request.id, status="deleted")
 
     def mark_email(self, request: MarkEmailRequest) -> ActionResult:
-        updated_fields = [field for field in ["read", "flag", "importance"] if getattr(request, field) is not None]
+        updated_fields = [
+            field for field in ["read", "flag", "importance"] if getattr(request, field) is not None
+        ]
         return ActionResult(id=request.id, status="updated", updated_fields=updated_fields)
 
     def list_folders(self, request: ListFoldersRequest) -> list[FolderInfo]:
@@ -138,7 +145,9 @@ class FakeExchangeBackend:
         ]
 
     def create_folder(self, request) -> ActionResult:
-        return ActionResult(id="folder-new", status="created", path=f"{request.parent}/{request.name}")
+        return ActionResult(
+            id="folder-new", status="created", path=f"{request.parent}/{request.name}"
+        )
 
     def create_draft(self, request: DraftEmailRequest) -> ActionResult:
         return ActionResult(id="draft-1", status="draft")
@@ -188,7 +197,11 @@ class FakeExchangeBackend:
         )
 
     def update_event(self, request: UpdateEventRequest) -> ActionResult:
-        updated_fields = [field for field in ["subject", "start", "end", "location", "body"] if getattr(request, field) is not None]
+        updated_fields = [
+            field
+            for field in ["subject", "start", "end", "location", "body"]
+            if getattr(request, field) is not None
+        ]
         return ActionResult(id=request.id, status="updated", updated_fields=updated_fields)
 
     def delete_event(self, request: DeleteEventRequest) -> ActionResult:
@@ -215,7 +228,11 @@ class FakeExchangeBackend:
         )
 
     def list_calendars(self) -> list[CalendarInfo]:
-        return [CalendarInfo(id="cal-1", name="Calendar", is_default=True, owner_email="user@example.com")]
+        return [
+            CalendarInfo(
+                id="cal-1", name="Calendar", is_default=True, owner_email="user@example.com"
+            )
+        ]
 
     def search_contacts(self, request: SearchContactsRequest) -> list[ContactSummary]:
         return [
@@ -250,6 +267,11 @@ class FakeExchangeBackend:
 
     def delete_contact(self, request: DeleteContactRequest) -> ActionResult:
         return ActionResult(id=request.id, status="deleted")
+
+
+@pytest.fixture
+def anyio_backend() -> str:
+    return "asyncio"
 
 
 @pytest.fixture

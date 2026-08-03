@@ -23,7 +23,7 @@ class FakeCalendarItem:
         FakeCalendarItem.saved.append(self)
 
 
-def test_create_event_passes_recurrence_and_online_meeting(settings, monkeypatch) -> None:
+def test_create_event_passes_recurrence(settings, monkeypatch) -> None:
     monkeypatch.setattr(calendar_module, "CalendarItem", FakeCalendarItem)
     backend = EWSExchangeBackend(settings)
     backend._account = SimpleNamespace(calendar=object(), default_timezone=UTC)
@@ -33,15 +33,17 @@ def test_create_event_passes_recurrence_and_online_meeting(settings, monkeypatch
             "subject": "Sprint planning",
             "start": "2026-04-13T09:00:00+00:00",
             "end": "2026-04-13T10:00:00+00:00",
-            "recurrence": {"type": "weekly", "interval": 2, "days_of_week": ["monday", "wednesday"]},
-            "online_meeting": True,
+            "recurrence": {
+                "type": "weekly",
+                "interval": 2,
+                "days_of_week": ["monday", "wednesday"],
+            },
         }
     )
 
     backend.create_event(request)
 
     saved = FakeCalendarItem.saved[-1]
-    assert saved.kwargs["is_online_meeting"] is True
     recurrence = saved.kwargs["recurrence"]
     assert recurrence.pattern.interval == 2
     assert list(recurrence.pattern.weekdays) == ["Monday", "Wednesday"]
@@ -64,7 +66,6 @@ def test_create_event_without_recurrence_leaves_it_unset(settings, monkeypatch) 
 
     saved = FakeCalendarItem.saved[-1]
     assert saved.kwargs["recurrence"] is None
-    assert saved.kwargs["is_online_meeting"] is False
 
 
 class FakeCalendarFolder:
