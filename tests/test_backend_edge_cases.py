@@ -145,3 +145,47 @@ def test_get_my_availability_fully_busy_has_no_free_slots(settings, monkeypatch)
     result = backend.get_my_availability(request)
 
     assert result.free_slots == []
+
+
+def test_get_my_availability_ignores_free_status_events(settings, monkeypatch) -> None:
+    backend = EWSExchangeBackend(settings)
+    backend._account = SimpleNamespace(default_timezone=EWSTimeZone("Europe/Moscow"))
+
+    free_event = CalendarEvent(
+        id="event-1",
+        subject="Holiday",
+        start=datetime(2026, 4, 8, 9, 0, tzinfo=UTC),
+        end=datetime(2026, 4, 8, 12, 0, tzinfo=UTC),
+        organizer=EmailAddress(email="organizer@example.com"),
+        free_busy_status="free",
+    )
+    monkeypatch.setattr(backend, "list_events", lambda request: [free_event])
+
+    request = ListEventsRequest(
+        start=datetime(2026, 4, 8, 9, 0, tzinfo=UTC),
+        end=datetime(2026, 4, 8, 12, 0, tzinfo=UTC),
+    )
+    result = backend.get_my_availability(request)
+
+    assert result.busy_slots == []
+    assert len(result.free_slots) == 1
+    assert result.free_slots[0].start.timestamp() == request.start.timestamp()
+    assert result.free_slots[0].end.timestamp() == request.end.timestamp()
+
+
+def test_to_calendar_event_normalizes_free_busy_status(settings) -> None:
+    backend = EWSExchangeBackend(settings)
+    item = SimpleNamespace(
+        id="event-1",
+        subject="Sync",
+        start=datetime(2026, 4, 8, 9, 0, tzinfo=UTC),
+        end=datetime(2026, 4, 8, 10, 0, tzinfo=UTC),
+        organizer=None,
+        required_attendees=[],
+        optional_attendees=[],
+        legacy_free_busy_status="Free",
+    )
+
+    event = backend._to_calendar_event(item)
+
+    assert event.free_busy_status == "free"
