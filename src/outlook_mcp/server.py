@@ -82,8 +82,9 @@ def build_mcp_server(settings: Settings | None = None, client: ExchangeClient | 
     except ImportError as exc:  # pragma: no cover
         raise RuntimeError("mcp package is required to run the server") from exc
 
+    settings = settings or get_settings()
     registry = build_registry(settings=settings, client=client)
-    server = FastMCP("outlook-mcp")
+    server = FastMCP("outlook-mcp", host=settings.mcp_sse_host, port=settings.mcp_sse_port)
     register_mcp_tools(server, registry, TOOL_SPECS)
     return server
 
@@ -97,8 +98,8 @@ def main() -> None:
         server.run()
         return
 
-    if transport == "sse":  # pragma: no cover
-        server.run(transport="sse", host=settings.mcp_sse_host, port=settings.mcp_sse_port)
+    if transport == "sse":
+        server.run(transport="sse")
         return
 
     raise RuntimeError(f"unsupported transport: {transport}")
