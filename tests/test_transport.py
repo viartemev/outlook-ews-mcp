@@ -21,7 +21,7 @@ async def test_call_tool_returns_structured_content(client, settings) -> None:
 
     assert result.content
     payload = json.loads(result.content[0].text)
-    assert payload["id"] == "contact-1"
+    assert payload[0]["id"] == "contact-1"
 
 
 async def test_call_tool_reports_is_error_for_cross_field_validation(client, settings) -> None:
@@ -35,5 +35,13 @@ async def test_call_tool_reports_is_error_for_cross_field_validation(client, set
         )
 
     assert result.isError is True
+
+    # The error must arrive as the exact structured payload errors.py produced -
+    # not a raised-exception string mangled with FastMCP's "Error executing
+    # tool ..." prefix, and not lost because it didn't match a success schema.
+    assert result.structuredContent is not None
+    assert result.structuredContent["error"] == "validation_error"
+
     assert result.content
-    assert "validation_error" in result.content[0].text
+    payload = json.loads(result.content[0].text)
+    assert payload["error"] == "validation_error"

@@ -27,6 +27,7 @@ def test_normalize_exception_preserves_api_error() -> None:
 
 
 def test_normalize_exception_wraps_other_errors() -> None:
-    error = normalize_exception(RuntimeError("boom"))
+    error = normalize_exception(RuntimeError("boom, connect to https://exchange.internal/EWS failed"))
     assert error.code == "internal_error"
-    assert error.message == "boom"
+    assert "boom" not in error.message
+    assert "exchange.internal" not in error.message

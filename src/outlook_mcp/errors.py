@@ -77,4 +77,7 @@ def validation_error_from_pydantic(exc: ValidationError) -> APIError:
 def normalize_exception(exc: Exception) -> APIError:
     if isinstance(exc, APIError):
         return exc
-    return APIError("internal_error", str(exc))
+    # exc may carry internal details (hostnames, EWS payloads, stack info) that
+    # must not reach the client; callers are expected to log the original
+    # exception server-side for diagnostics.
+    return APIError("internal_error", "an unexpected internal error occurred")

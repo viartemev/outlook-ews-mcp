@@ -47,8 +47,9 @@ def test_bind_mcp_tool_routes_flat_arguments(client, settings) -> None:
         request_model=SearchContactsRequest,
     )
     tool_fn = bind_mcp_tool(registry.call, spec)
-    payload = tool_fn(query="ivan")
-    assert payload[0]["id"] == "contact-1"
+    result = tool_fn(query="ivan")
+    assert result.isError is False
+    assert result.structuredContent["result"][0]["id"] == "contact-1"
 
 
 def test_build_mcp_server_registers_typed_tools(client, settings) -> None:
