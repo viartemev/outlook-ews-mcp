@@ -2,7 +2,7 @@
 
 ## Reporting a vulnerability
 
-Please do not open a public GitHub issue for security vulnerabilities. Instead, use [GitHub's private vulnerability reporting](https://github.com/viartemev/outlook-mcp/security/advisories/new) for this repository, or email the maintainer directly if that is unavailable.
+Please do not open a public GitHub issue for security vulnerabilities. Instead, use [GitHub's private vulnerability reporting](https://github.com/viartemev/outlook-ews-mcp/security/advisories/new) for this repository, or email the maintainer directly if that is unavailable.
 
 Include:
 - affected version/commit
