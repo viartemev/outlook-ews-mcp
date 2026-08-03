@@ -9,7 +9,7 @@ from exchangelib import FileAttachment, Folder, HTMLBody, Message
 from exchangelib.extended_properties import Flag
 from exchangelib.fields import InvalidField
 
-from ..errors import NotFoundError
+from ..errors import APIError, NotFoundError
 from ..models import (
     ActionResult,
     Attachment,
@@ -331,15 +331,19 @@ class EmailOperationsMixin:
         item = self._fetch_item(request.email_id)
         target_dir = Path(request.save_path) if request.save_path else Path(tempfile.gettempdir())
         target_dir.mkdir(parents=True, exist_ok=True)
+        max_size_bytes = self.settings.attachment_max_size_mb * 1024 * 1024
         for attachment in getattr(item, "attachments", None) or []:
             attachment_id = getattr(getattr(attachment, "attachment_id", None), "id", None)
             if attachment_id == request.attachment_id:
+                declared_size = getattr(attachment, "size", None)
+                self._check_attachment_size(declared_size, max_size_bytes)
                 filename = self._sanitize_attachment_filename(getattr(attachment, "name", None))
                 path = self._unique_path(target_dir / filename)
                 content = getattr(attachment, "content", None)
                 if content is None:
                     _ = attachment.content
                     content = attachment.content
+                self._check_attachment_size(len(content), max_size_bytes)
                 path.write_bytes(content)
                 return AttachmentResult(
                     filename=filename,
@@ -348,3 +352,17 @@ class EmailOperationsMixin:
                     content_type=getattr(attachment, "content_type", None),
                 )
         raise NotFoundError(request.attachment_id)
+
+    def _check_attachment_size(self, size: int | None, max_size_bytes: int) -> None:
+        if size is not None and size > max_size_bytes:
+            raise APIError(
+                "validation_error",
+                "attachment exceeds the configured size limit",
+                details=[
+                    {
+                        "field": "attachment_id",
+                        "reason": f"attachment size {size} bytes exceeds "
+                        f"ATTACHMENT_MAX_SIZE_MB={self.settings.attachment_max_size_mb}",
+                    }
+                ],
+            )
