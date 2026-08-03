@@ -373,15 +373,16 @@ class BaseEWSBackend:
         return EWSDateTime.from_datetime(value)
 
     def _map_exception(self, exc: Exception, item_id: str | None = None) -> APIError:
-        message = str(exc)
         if isinstance(exc, APIError):
             return exc
+        message = str(exc)
         if isinstance(exc, UnauthorizedError):
             return AuthFailedError()
         if isinstance(exc, RateLimitError):
             return ExchangeUnavailableError("exchange throttling or rate limit encountered")
         if isinstance(exc, (ErrorItemSavePropertyError, ErrorFolderSavePropertyError)):
-            return ConflictError(message)
+            logger.warning("Exchange save-property conflict: %s", message)
+            return ConflictError()
         # ResponseMessageError subclasses TransportError, so it has to be matched first.
         if isinstance(exc, ResponseMessageError):
             lowered = message.lower()
@@ -389,12 +390,15 @@ class BaseEWSBackend:
                 return NotFoundError(item_id)
             if "access is denied" in lowered or "permission" in lowered:
                 return PermissionDeniedError()
-            return APIError("exchange_error", message)
+            logger.warning("Unmapped Exchange response error: %s", message)
+            return APIError("exchange_error", "exchange rejected the request")
         if isinstance(exc, (TransportError, TimeoutError)):
             if "timed out" in message.lower():
                 return TimeoutAPIError(self.settings.exchange_timeout)
-            return ExchangeUnavailableError(message)
-        return ExchangeUnavailableError(message)
+            logger.warning("Exchange transport error: %s", message)
+            return ExchangeUnavailableError("exchange is unavailable")
+        logger.warning("Unmapped Exchange exception: %s", message)
+        return ExchangeUnavailableError("exchange is unavailable")
 
     def ping(self) -> PingResult:
         started = datetime.now(UTC)
