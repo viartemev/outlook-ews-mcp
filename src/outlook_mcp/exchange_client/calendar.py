@@ -13,6 +13,7 @@ from exchangelib.recurrence import (
     WeeklyPattern,
 )
 
+from ..errors import APIError
 from ..models import (
     ActionResult,
     Attendee as ApiAttendee,
@@ -116,12 +117,11 @@ class CalendarOperationsMixin(BaseEWSBackend):
             free_slots.append(FreeSlot(start=cursor, end=end, all_available=True))
         return free_slots
 
+    def _calendar_folder(self, calendar_id: str | None) -> Any:
+        return self.account.calendar if not calendar_id else self._resolve_folder(calendar_id)
+
     def list_events(self, request: ListEventsRequest) -> list[CalendarEvent]:
-        folder = (
-            self.account.calendar
-            if not request.calendar_id
-            else self._resolve_folder(request.calendar_id)
-        )
+        folder = self._calendar_folder(request.calendar_id)
         start = self._to_ews_datetime(request.start)
         end = self._to_ews_datetime(request.end)
         qs = folder.view(start=start, end=end)
@@ -134,7 +134,7 @@ class CalendarOperationsMixin(BaseEWSBackend):
         return [self._to_calendar_event(item) for item in items]
 
     def get_event(self, request: GetEventRequest) -> CalendarEvent:
-        item = self._fetch_item(request.id, folder=self.account.calendar)
+        item = self._fetch_item(request.id, folder=self._calendar_folder(request.calendar_id))
         return self._to_calendar_event(item)
 
     def _build_recurrence(self, pattern: RecurrencePattern, start: datetime) -> Recurrence:
@@ -159,14 +159,29 @@ class CalendarOperationsMixin(BaseEWSBackend):
             boundary["number"] = pattern.occurrences
         return Recurrence(pattern=ews_pattern, **boundary)
 
+    def _all_day_bounds(self, start: Any, end: Any) -> tuple[Any, Any]:
+        """Floor start/end to midnight in Exchange's own timezone.
+
+        EWS all-day appointments use an exclusive end date (a single day off
+        Aug 3rd is start=Aug3T00:00, end=Aug4T00:00). Flooring the caller's end
+        to its own date's midnight -- rather than to 23:59:59 on that date --
+        keeps that convention: a same-day start/end becomes a one-day event,
+        and a start/end already a day apart stays a one-day event instead of
+        silently growing by almost a full extra day.
+        """
+        start_date = start.date()
+        end_date = end.date() if end.date() > start_date else start_date + timedelta(days=1)
+        tz = self.account.default_timezone
+        start_bound = self._to_ews_datetime(datetime.combine(start_date, time.min, tzinfo=tz))
+        end_bound = self._to_ews_datetime(datetime.combine(end_date, time.min, tzinfo=tz))
+        return start_bound, end_bound
+
     def create_event(self, request: CreateEventRequest) -> CreateEventResult:
-        folder = (
-            self.account.calendar
-            if not request.calendar_id
-            else self._resolve_folder(request.calendar_id)
-        )
+        folder = self._calendar_folder(request.calendar_id)
         start = self._to_ews_datetime(request.start)
         end = self._to_ews_datetime(request.end)
+        if request.is_all_day:
+            start, end = self._all_day_bounds(start, end)
         item = CalendarItem(
             account=self.account,
             folder=folder,
@@ -204,14 +219,35 @@ class CalendarOperationsMixin(BaseEWSBackend):
             raise self._map_exception(exc) from exc
 
     def update_event(self, request: UpdateEventRequest) -> ActionResult:
-        item = self._fetch_item(request.id, folder=self.account.calendar)
+        item = self._fetch_item(request.id, folder=self._calendar_folder(request.calendar_id))
+        resolved_start = self._to_ews_datetime(request.start) if request.start else None
+        resolved_end = self._to_ews_datetime(request.end) if request.end else None
+        if resolved_start is not None or resolved_end is not None:
+            # Only touch the existing item's start/end when one side of the range
+            # is actually changing -- a lone new start/end must still be checked
+            # against the counterpart already on the event, not just against itself.
+            effective_start = resolved_start if resolved_start is not None else item.start
+            effective_end = resolved_end if resolved_end is not None else item.end
+            if effective_end <= effective_start:
+                raise APIError(
+                    "validation_error",
+                    "end must be greater than start",
+                    details=[
+                        {
+                            "field": "start/end",
+                            "reason": "resulting event range is empty or reversed",
+                        }
+                    ],
+                )
         updated_fields: list[str] = []
         save_fields: list[str] = []
         for field in ["subject", "start", "end", "location", "body", "reminder_minutes"]:
             value = getattr(request, field)
             if value is not None:
-                if field in {"start", "end"}:
-                    value = self._to_ews_datetime(value)
+                if field == "start":
+                    value = resolved_start
+                elif field == "end":
+                    value = resolved_end
                 target = "reminder_minutes_before_start" if field == "reminder_minutes" else field
                 setattr(item, target, value)
                 updated_fields.append(field)
@@ -236,19 +272,23 @@ class CalendarOperationsMixin(BaseEWSBackend):
             updated_fields.append("remove_attendees")
             if "required_attendees" not in save_fields:
                 save_fields.append("required_attendees")
+        if not save_fields:
+            # Nothing actually changed -- saving anyway would still fire attendee
+            # notifications per request.send_updates (default "all") for a no-op update.
+            return ActionResult(id=request.id, status="updated", updated_fields=updated_fields)
         try:
             invitations = {
                 "none": "SendToNone",
                 "all": "SendToAllAndSaveCopy",
                 "modified": "SendOnlyToChanged",
             }[request.send_updates]
-            item.save(update_fields=save_fields or None, send_meeting_invitations=invitations)
+            item.save(update_fields=save_fields, send_meeting_invitations=invitations)
             return ActionResult(id=request.id, status="updated", updated_fields=updated_fields)
         except Exception as exc:  # noqa: BLE001
             raise self._map_exception(exc, item_id=request.id) from exc
 
     def delete_event(self, request: DeleteEventRequest) -> ActionResult:
-        item = self._fetch_item(request.id, folder=self.account.calendar)
+        item = self._fetch_item(request.id, folder=self._calendar_folder(request.calendar_id))
         try:
             if request.notify_attendees and request.cancel_message:
                 item.cancel(body=request.cancel_message)
@@ -263,7 +303,7 @@ class CalendarOperationsMixin(BaseEWSBackend):
             raise self._map_exception(exc, item_id=request.id) from exc
 
     def respond_to_invite(self, request: RespondToInviteRequest) -> ActionResult:
-        item = self._fetch_item(request.id, folder=self.account.calendar)
+        item = self._fetch_item(request.id, folder=self._calendar_folder(request.calendar_id))
         try:
             if request.response == "accept":
                 item.accept(body=request.message)
@@ -303,7 +343,10 @@ class CalendarOperationsMixin(BaseEWSBackend):
         cursor = start
         interval = timedelta(minutes=request.duration)
         position = 0
-        while cursor < end:
+        # Stop once a full-length slot would no longer fit before `end` -- a
+        # truncated final slot would be shorter than the requested duration and
+        # so isn't actually usable for scheduling a meeting of that length.
+        while cursor + interval <= end:
             slot_end = cursor + interval
             all_free = all(
                 position < len(merged) and merged[position] == "0" for merged in merged_per_attendee
@@ -342,12 +385,18 @@ class CalendarOperationsMixin(BaseEWSBackend):
         free_slots = self._compute_free_slots(start, end, events)
         return AvailabilityResult(free_slots=free_slots, busy_slots=busy_slots)
 
+    #: Standard EWS folder class for calendar folders.
+    _CALENDAR_FOLDER_CLASS = "IPF.Appointment"
+
     def list_calendars(self) -> list[CalendarInfo]:
+        default_id = self.account.calendar.id
         return [
             CalendarInfo(
-                id=self.account.calendar.id,
-                name=self.account.calendar.name,
-                is_default=True,
+                id=folder.id,
+                name=folder.name,
+                is_default=folder.id == default_id,
                 owner_email=self.account.primary_smtp_address,
             )
+            for folder in self.account.root.walk()
+            if getattr(folder, "folder_class", None) == self._CALENDAR_FOLDER_CLASS
         ]

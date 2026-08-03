@@ -1,11 +1,24 @@
 from __future__ import annotations
 
+import re
 from collections.abc import Sequence
-from datetime import date, datetime, time
+from datetime import date, datetime
 from pathlib import Path
 from typing import Annotated, Any, Literal
 
-from pydantic import BaseModel, BeforeValidator, ConfigDict, EmailStr, Field, model_validator
+from pydantic import (
+    BaseModel,
+    BeforeValidator,
+    ConfigDict,
+    EmailStr,
+    Field,
+    field_validator,
+    model_validator,
+)
+
+_HHMM_RE = re.compile(r"^([01]\d|2[0-3]):[0-5]\d$")
+
+WeekdayName = Literal["monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday"]
 
 
 def _server_address(value: Any) -> Any:
@@ -118,7 +131,7 @@ class RecurrencePattern(ExchangeModel):
     interval: int = Field(ge=1, default=1)
     end_date: date | None = None
     occurrences: int | None = Field(default=None, ge=1)
-    days_of_week: list[str] | None = None
+    days_of_week: list[WeekdayName] | None = None
 
 
 class ListEmailsRequest(ExchangeModel):
@@ -231,11 +244,25 @@ class ListEventsRequest(ExchangeModel):
 
 class GetEventRequest(ExchangeModel):
     id: str
+    calendar_id: str | None = None
 
 
 class WorkHours(ExchangeModel):
     start: str = "09:00"
     end: str = "18:00"
+
+    @field_validator("start", "end")
+    @classmethod
+    def _validate_format(cls, value: str) -> str:
+        if not _HHMM_RE.match(value):
+            raise ValueError("must be 24-hour HH:MM, e.g. '09:00'")
+        return value
+
+    @model_validator(mode="after")
+    def _validate_order(self) -> "WorkHours":
+        if self.end <= self.start:
+            raise ValueError("end must be after start")
+        return self
 
 
 class CreateEventRequest(ExchangeModel):
@@ -256,14 +283,12 @@ class CreateEventRequest(ExchangeModel):
     def validate_range(self) -> "CreateEventRequest":
         if self.end <= self.start:
             raise ValueError("end must be greater than start")
-        if self.is_all_day:
-            self.start = datetime.combine(self.start.date(), time.min, tzinfo=self.start.tzinfo)
-            self.end = datetime.combine(self.end.date(), time.max, tzinfo=self.end.tzinfo)
         return self
 
 
 class UpdateEventRequest(ExchangeModel):
     id: str
+    calendar_id: str | None = None
     subject: str | None = None
     start: datetime | None = None
     end: datetime | None = None
@@ -283,12 +308,14 @@ class UpdateEventRequest(ExchangeModel):
 
 class DeleteEventRequest(ExchangeModel):
     id: str
+    calendar_id: str | None = None
     notify_attendees: bool = True
     cancel_message: str | None = None
 
 
 class RespondToInviteRequest(ExchangeModel):
     id: str
+    calendar_id: str | None = None
     response: Literal["accept", "tentative", "decline"]
     message: str | None = None
 
@@ -460,8 +487,20 @@ class CreateContactRequest(ExchangeModel):
     notes: str | None = None
 
 
-class UpdateContactRequest(CreateContactRequest):
+class UpdateContactRequest(ExchangeModel):
+    """A partial update: omitted fields are left unchanged; a field explicitly
+    set to ``null`` clears that value on the contact (see ``model_fields_set``
+    usage in ``exchange_client/contacts.py``'s ``update_contact``)."""
+
     id: str
+    display_name: str | None = None
+    first_name: str | None = None
+    last_name: str | None = None
+    email: EmailStr | None = None
+    phone: str | None = None
+    company: str | None = None
+    job_title: str | None = None
+    notes: str | None = None
 
 
 class DeleteContactRequest(ExchangeModel):

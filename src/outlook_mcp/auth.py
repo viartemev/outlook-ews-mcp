@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any
 
 from .config import Settings
 from .errors import APIError
@@ -14,13 +13,9 @@ class AuthContext:
     password: str
     primary_smtp_address: str
     impersonate_as: str | None = None
-    extra: dict[str, Any] | None = None
 
 
 def build_auth_context(settings: Settings) -> AuthContext:
-    extra: dict[str, Any] = {}
-    if settings.exchange_version:
-        extra["exchange_version"] = settings.exchange_version
     primary_smtp_address = (
         settings.exchange_impersonate_as
         or settings.exchange_email_address
@@ -43,5 +38,4 @@ def build_auth_context(settings: Settings) -> AuthContext:
         password=settings.exchange_password,
         primary_smtp_address=primary_smtp_address,
         impersonate_as=settings.exchange_impersonate_as,
-        extra=extra,
     )

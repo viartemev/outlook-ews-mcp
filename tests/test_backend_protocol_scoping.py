@@ -1,8 +1,10 @@
 from __future__ import annotations
 
+import pytest
 from exchangelib.ewsdatetime import EWSTimeZone
 
 from outlook_mcp.config import Settings
+from outlook_mcp.errors import APIError
 from outlook_mcp.exchange_client import EWSExchangeBackend
 
 _UNKNOWN_TIMEZONE_GUID = "2a2b3c4d-0000-0000-0000-000000000001"
@@ -74,3 +76,43 @@ def test_timezone_fallback_follows_the_most_recently_active_backend() -> None:
 
     _ = new_york_backend.account
     assert EWSTimeZone.from_ms_id(_UNKNOWN_TIMEZONE_GUID).key == "America/New_York"
+
+
+def test_exchange_version_setting_configures_account_protocol_version() -> None:
+    """EXCHANGE_VERSION used to be parsed and stashed but never actually reach
+    exchangelib.Configuration, so it silently did nothing."""
+    backend = EWSExchangeBackend(
+        _settings(
+            EXCHANGE_SERVER="https://mail3.example.com/EWS/Exchange.asmx",
+            EXCHANGE_USERNAME="version-user@example.com",
+            EXCHANGE_VERSION="EXCHANGE_2016",
+        )
+    )
+
+    assert backend.account.protocol.config.version.api_version == "Exchange2016"
+
+
+def test_unset_exchange_version_leaves_autodetection_untouched() -> None:
+    backend = EWSExchangeBackend(
+        _settings(
+            EXCHANGE_SERVER="https://mail4.example.com/EWS/Exchange.asmx",
+            EXCHANGE_USERNAME="unset-version-user@example.com",
+        )
+    )
+
+    assert backend.account.protocol.config.version is None
+
+
+def test_unknown_exchange_version_raises_validation_error() -> None:
+    backend = EWSExchangeBackend(
+        _settings(
+            EXCHANGE_SERVER="https://mail5.example.com/EWS/Exchange.asmx",
+            EXCHANGE_USERNAME="bad-version-user@example.com",
+            EXCHANGE_VERSION="NOT_A_REAL_VERSION",
+        )
+    )
+
+    with pytest.raises(APIError) as excinfo:
+        _ = backend.account
+
+    assert excinfo.value.code == "validation_error"

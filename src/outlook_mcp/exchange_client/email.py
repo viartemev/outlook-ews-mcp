@@ -5,9 +5,10 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
 
-from exchangelib import FileAttachment, Folder, HTMLBody, Message
+from exchangelib import FileAttachment, Folder, HTMLBody, Message, Q
 from exchangelib.extended_properties import Flag
 from exchangelib.fields import InvalidField
+from exchangelib.folders import FolderCollection
 
 from ..errors import APIError, NotFoundError
 from ..models import (
@@ -194,21 +195,33 @@ class EmailOperationsMixin(BaseEWSBackend):
         item = self._fetch_item(request.id)
         return self._to_email_full(item)
 
+    #: Standard EWS folder class for mail folders; excludes calendar/contacts/tasks
+    #: folders when a search walks the whole mailbox.
+    _MAIL_FOLDER_CLASS = "IPF.Note"
+
     def search_emails(self, request: SearchEmailsRequest) -> list[EmailSummary]:
-        folder = self._resolve_folder(request.folder) if request.folder else self.account.inbox
+        searchable: Folder | FolderCollection
+        if request.folder:
+            searchable = self._resolve_folder(request.folder)
+        else:
+            searchable = FolderCollection(
+                account=self.account,
+                folders=[
+                    folder
+                    for folder in self.account.root.walk()
+                    if getattr(folder, "folder_class", None) == self._MAIL_FOLDER_CLASS
+                ],
+            )
+        query = (
+            Q(subject__icontains=request.query)
+            | Q(text_body__icontains=request.query)
+            | Q(author__icontains=request.query)
+        )
         try:
-            qs = folder.filter(subject__icontains=request.query).order_by("-datetime_received")
+            qs = searchable.filter(query).order_by("-datetime_received")
             items = list(qs[: request.limit])
         except Exception as exc:  # noqa: BLE001
             raise self._map_exception(exc) from exc
-        if not items:
-            try:
-                qs = folder.filter(text_body__icontains=request.query).order_by(
-                    "-datetime_received"
-                )
-                items = list(qs[: request.limit])
-            except Exception as exc:  # noqa: BLE001
-                raise self._map_exception(exc) from exc
         return [self._to_email_summary(item) for item in items]
 
     def send_email(self, request: SendEmailRequest) -> SendResult:

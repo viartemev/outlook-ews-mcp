@@ -3,12 +3,18 @@ from __future__ import annotations
 from datetime import UTC, datetime
 from types import SimpleNamespace
 
+import pytest
+
 import outlook_mcp.exchange_client.calendar as calendar_module
 from outlook_mcp.exchange_client import EWSExchangeBackend
 from outlook_mcp.models import (
     CreateEventRequest,
     DeleteEventRequest,
+    FindFreeSlotsRequest,
+    GetEventRequest,
     ListEventsRequest,
+    RecurrencePattern,
+    WorkHours,
 )
 
 
@@ -165,3 +171,113 @@ def test_delete_event_without_message_still_deletes(settings) -> None:
 
     assert item.deleted_with == {"send_meeting_cancellations": "SendToAllAndSaveCopy"}
     assert item.cancelled_with is None
+
+
+def test_create_event_all_day_same_day_becomes_one_ews_day(settings, monkeypatch) -> None:
+    """A same-day start/end marked is_all_day must become a single EWS day
+    (exclusive end date), not a zero-duration item."""
+    monkeypatch.setattr(calendar_module, "CalendarItem", FakeCalendarItem)
+    backend = EWSExchangeBackend(settings)
+    backend._account = SimpleNamespace(calendar=object(), default_timezone=UTC)
+
+    request = CreateEventRequest.model_validate(
+        {
+            "subject": "Day off",
+            "start": "2026-08-03T09:00:00+00:00",
+            "end": "2026-08-03T17:00:00+00:00",
+            "is_all_day": True,
+        }
+    )
+
+    result = backend.create_event(request)
+
+    assert result.start == datetime(2026, 8, 3, 0, 0, tzinfo=UTC)
+    assert result.end == datetime(2026, 8, 4, 0, 0, tzinfo=UTC)
+
+
+def test_create_event_all_day_does_not_add_an_extra_day(settings, monkeypatch) -> None:
+    """Regression: '3-4 August' used to become 03.08 00:00 - 04.08 23:59:59 --
+    almost two days -- instead of the single EWS day the exclusive-end
+    convention implies."""
+    monkeypatch.setattr(calendar_module, "CalendarItem", FakeCalendarItem)
+    backend = EWSExchangeBackend(settings)
+    backend._account = SimpleNamespace(calendar=object(), default_timezone=UTC)
+
+    request = CreateEventRequest.model_validate(
+        {
+            "subject": "Day off",
+            "start": "2026-08-03T00:00:00+00:00",
+            "end": "2026-08-04T00:00:00+00:00",
+            "is_all_day": True,
+        }
+    )
+
+    result = backend.create_event(request)
+
+    assert result.start == datetime(2026, 8, 3, 0, 0, tzinfo=UTC)
+    assert result.end == datetime(2026, 8, 4, 0, 0, tzinfo=UTC)
+
+
+def test_get_event_uses_alternate_calendar_when_calendar_id_given(settings, monkeypatch) -> None:
+    default_calendar = object()
+    alt_calendar = object()
+    fetch_calls: list = []
+    backend = EWSExchangeBackend(settings)
+
+    def fetch(ids, folder=None):
+        fetch_calls.append(folder)
+        return iter([_fake_event("event-1", False)])
+
+    backend._account = SimpleNamespace(calendar=default_calendar, fetch=fetch)
+    monkeypatch.setattr(
+        backend,
+        "_resolve_folder",
+        lambda value: alt_calendar if value == "cal-2" else default_calendar,
+    )
+
+    backend.get_event(GetEventRequest(id="event-1", calendar_id="cal-2"))
+    assert fetch_calls[-1] is alt_calendar
+
+    backend.get_event(GetEventRequest(id="event-1"))
+    assert fetch_calls[-1] is default_calendar
+
+
+def test_work_hours_rejects_bad_time_format() -> None:
+    with pytest.raises(Exception, match="HH:MM"):
+        WorkHours(start="bad", end="18:00")
+
+
+def test_work_hours_rejects_end_before_start() -> None:
+    with pytest.raises(Exception, match="end must be after start"):
+        WorkHours(start="18:00", end="09:00")
+
+
+def test_recurrence_pattern_rejects_invalid_weekday() -> None:
+    with pytest.raises(Exception):
+        RecurrencePattern(type="weekly", days_of_week=["someday"])
+
+
+def test_find_free_slots_never_produces_a_slot_past_end(settings, monkeypatch) -> None:
+    """A window that isn't a multiple of the requested duration (100 minutes for
+    a 60-minute duration) must yield one full-length slot, not a second slot
+    truncated or overflowing past `end`."""
+    backend = EWSExchangeBackend(settings)
+    start = datetime(2026, 4, 8, 9, 0, tzinfo=UTC)
+    end = datetime(2026, 4, 8, 10, 40, tzinfo=UTC)
+
+    class FakeProtocol:
+        def get_free_busy_info(self, **kwargs):
+            return [SimpleNamespace(merged="0" * 10)]
+
+    backend._account = SimpleNamespace(protocol=FakeProtocol(), default_timezone=UTC)
+    monkeypatch.setattr(backend, "_to_ews_datetime", lambda value: value)
+
+    request = FindFreeSlotsRequest(
+        attendees=["user@example.com"], duration=60, start=start, end=end
+    )
+    slots = backend.find_free_slots(request)
+
+    assert len(slots) == 1
+    assert slots[0].start == start
+    assert slots[0].end == datetime(2026, 4, 8, 10, 0, tzinfo=UTC)
+    assert slots[0].end <= end

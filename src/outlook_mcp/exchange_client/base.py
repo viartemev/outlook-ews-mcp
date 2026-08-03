@@ -35,6 +35,8 @@ from exchangelib.errors import (
 from exchangelib.folders import FolderCollection
 from exchangelib.properties import ItemId
 from exchangelib.protocol import BaseProtocol, FailFast, FaultTolerance
+from exchangelib import version as ews_version
+from exchangelib.version import Build, Version
 from urllib3.exceptions import InsecureRequestWarning
 
 from ..auth import build_auth_context
@@ -107,6 +109,7 @@ class BaseEWSBackend:
             credentials=credentials,
             auth_type=auth_type,
             retry_policy=retry_policy,
+            version=self._resolve_configured_version(),
         )
         access_type = IMPERSONATION if auth.impersonate_as else DELEGATE
         try:
@@ -120,6 +123,33 @@ class BaseEWSBackend:
             raise self._map_exception(exc) from exc
         self._configure_protocol(account.protocol)
         return account
+
+    def _resolve_configured_version(self) -> Version | None:
+        """Turn EXCHANGE_VERSION (e.g. "EXCHANGE_2016") into a Configuration(version=...).
+
+        Skipping this made EXCHANGE_VERSION a documented setting that did
+        nothing: exchangelib always fell back to autodetecting the server
+        version instead. Leaving it unset here preserves that autodetection.
+        """
+        name = self.settings.exchange_version
+        if not name:
+            return None
+        build = getattr(ews_version, name, None)
+        if not isinstance(build, Build):
+            raise APIError(
+                "validation_error",
+                f"unknown EXCHANGE_VERSION: {name!r}",
+                details=[
+                    {
+                        "field": "EXCHANGE_VERSION",
+                        "reason": (
+                            "must match an exchangelib.version.EXCHANGE_* constant, "
+                            "e.g. EXCHANGE_2016"
+                        ),
+                    }
+                ],
+            )
+        return Version(build=build)
 
     def _normalize_service_endpoint(self, value: str) -> str:
         endpoint = value.strip()
@@ -194,8 +224,14 @@ class BaseEWSBackend:
         if normalized == "archive":
             try:
                 archive_root = account.archive_root
-            except Exception:  # noqa: BLE001
+            except ResponseMessageError:
+                # A scoped EWS response fault (e.g. no archive mailbox configured
+                # for this account) -- safe to fall back to root.
                 archive_root = account.root
+            except Exception as exc:  # noqa: BLE001
+                # Auth/network/throttling failures must propagate instead of
+                # silently pretending the archive folder is root.
+                raise self._map_exception(exc) from exc
         builtin = {
             "inbox": account.inbox,
             "sent": account.sent,
@@ -237,8 +273,16 @@ class BaseEWSBackend:
             resolved = list(
                 FolderCollection(account=self.account, folders=[Folder(id=folder_id)]).resolve()
             )
-        except Exception:  # noqa: BLE001
+        except ResponseMessageError:
+            # A scoped EWS response fault about this specific id (malformed, not
+            # found, ...) -- safe to treat as "not an id" and fall through to a
+            # path-based lookup.
             return None
+        except Exception as exc:  # noqa: BLE001
+            # A failure of the GetFolder call itself (auth, network, throttling) is not
+            # scoped to this one id and must propagate rather than fall through to a
+            # path-based lookup that can only ever produce a misleading not_found.
+            raise self._map_exception(exc, item_id=folder_id) from exc
         for item in resolved:
             if item is None or isinstance(item, Exception):
                 return None
