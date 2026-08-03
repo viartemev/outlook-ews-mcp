@@ -6,7 +6,6 @@ from pathlib import Path
 from typing import Any
 
 from exchangelib import FileAttachment, Folder, HTMLBody, Message
-from exchangelib.errors import RateLimitError, TransportError, UnauthorizedError
 from exchangelib.extended_properties import Flag
 from exchangelib.fields import InvalidField
 
@@ -183,10 +182,8 @@ class EmailOperationsMixin:
         try:
             qs = folder.filter(subject__icontains=request.query).order_by("-datetime_received")
             items = list(qs[: request.limit])
-        except (RateLimitError, TransportError, TimeoutError, UnauthorizedError) as exc:
+        except Exception as exc:  # noqa: BLE001
             raise self._map_exception(exc) from exc
-        except Exception:
-            items = []
         if not items:
             try:
                 qs = folder.filter(text_body__icontains=request.query).order_by("-datetime_received")
