@@ -337,11 +337,10 @@ class CreateEventResult(ExchangeModel):
 
 
 class PingResult(ExchangeModel):
-    status: Literal["ok", "error"]
+    status: Literal["ok"]
     server: str
     version: str | None = None
     latency_ms: int | None = None
-    error: str | None = None
 
 
 class MailboxInfo(ExchangeModel):
