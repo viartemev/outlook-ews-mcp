@@ -3,7 +3,7 @@ from __future__ import annotations
 from types import SimpleNamespace
 
 import pytest
-from exchangelib.errors import ErrorInvalidIdMalformed
+from exchangelib.errors import ErrorInvalidIdMalformed, UnauthorizedError
 from exchangelib.ewsdatetime import EWSTimeZone
 from exchangelib.folders import Inbox
 from exchangelib.restriction import Q, Restriction
@@ -11,7 +11,7 @@ from exchangelib.version import EXCHANGE_2016, Version
 
 import outlook_mcp.exchange_client.base as exchange_client_base
 import outlook_mcp.exchange_client.contacts as exchange_client_contacts
-from outlook_mcp.errors import APIError
+from outlook_mcp.errors import APIError, AuthFailedError
 from outlook_mcp.exchange_client import EWSExchangeBackend
 from outlook_mcp.models import (
     ActionResult,
@@ -22,6 +22,7 @@ from outlook_mcp.models import (
     GetEmailRequest,
     ListEmailsRequest,
     ReplyEmailRequest,
+    SearchEmailsRequest,
     SendResult,
 )
 
@@ -585,3 +586,24 @@ def test_author_email_address_subfield_path_is_rejected_by_ews() -> None:
 
     with pytest.raises(Exception, match="Unknown field path 'author__email_address'"):
         restriction.to_xml(version=inbox.account.version)
+
+
+def test_search_emails_raises_auth_failed_instead_of_swallowing_it(settings) -> None:
+    """Regression guard: an auth failure during the subject-filter pass must surface as
+    AuthFailedError, not get treated as 'no results' and silently fall through to the
+    text_body pass."""
+    backend = EWSExchangeBackend(settings)
+
+    class FailingQuerySet:
+        def order_by(self, *args):
+            return self
+
+        def filter(self, **filters):
+            raise UnauthorizedError("access denied")
+
+    account = _fake_account_for_folder_resolution(object())
+    account.inbox = FailingQuerySet()
+    backend._account = account
+
+    with pytest.raises(AuthFailedError):
+        backend.search_emails(SearchEmailsRequest(query="hello"))
