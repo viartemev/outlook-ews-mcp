@@ -44,6 +44,20 @@ def test_mark_email_saves_real_ews_field_names_and_preserves_categories(settings
     assert result.updated_fields == ["read", "flag"]
 
 
+def test_mark_email_empty_request_does_not_save(settings) -> None:
+    """An id-only MarkEmailRequest has nothing to change -- saving anyway would
+    still write every loaded field back via item.save(update_fields=None)."""
+    backend = EWSExchangeBackend(settings)
+    item = FakeSavableItem(id="email-1", is_read=False)
+    backend._account = _account_with_item(item)
+
+    request = MarkEmailRequest.model_validate({"id": "email-1"})
+    result = backend.mark_email(request)
+
+    assert item.save_calls == []
+    assert result.updated_fields == []
+
+
 def test_mark_email_flag_none_clears_status(settings) -> None:
     backend = EWSExchangeBackend(settings)
     item = FakeSavableItem(id="email-1", flag_status=2)

@@ -201,23 +201,23 @@ class EmailOperationsMixin(BaseEWSBackend):
 
     def search_emails(self, request: SearchEmailsRequest) -> list[EmailSummary]:
         searchable: Folder | FolderCollection
-        if request.folder:
-            searchable = self._resolve_folder(request.folder)
-        else:
-            searchable = FolderCollection(
-                account=self.account,
-                folders=[
-                    folder
-                    for folder in self.account.root.walk()
-                    if getattr(folder, "folder_class", None) == self._MAIL_FOLDER_CLASS
-                ],
-            )
-        query = (
-            Q(subject__icontains=request.query)
-            | Q(text_body__icontains=request.query)
-            | Q(author__icontains=request.query)
-        )
         try:
+            if request.folder:
+                searchable = self._resolve_folder(request.folder)
+            else:
+                searchable = FolderCollection(
+                    account=self.account,
+                    folders=[
+                        folder
+                        for folder in self.account.root.walk()
+                        if getattr(folder, "folder_class", None) == self._MAIL_FOLDER_CLASS
+                    ],
+                )
+            query = (
+                Q(subject__icontains=request.query)
+                | Q(text_body__icontains=request.query)
+                | Q(author__icontains=request.query)
+            )
             qs = searchable.filter(query).order_by("-datetime_received")
             items = list(qs[: request.limit])
         except Exception as exc:  # noqa: BLE001
@@ -324,19 +324,25 @@ class EmailOperationsMixin(BaseEWSBackend):
             item.flag_status = _FLAG_STATUS[request.flag]
             updated_fields.append("flag")
             save_fields.append("flag_status")
+        if not save_fields:
+            # Nothing to change -- saving anyway would still write every loaded field back.
+            return ActionResult(id=request.id, status="updated", updated_fields=updated_fields)
         try:
-            item.save(update_fields=save_fields or None)
+            item.save(update_fields=save_fields)
             return ActionResult(id=request.id, status="updated", updated_fields=updated_fields)
         except Exception as exc:  # noqa: BLE001
             raise self._map_exception(exc, item_id=request.id) from exc
 
     def list_folders(self, request: ListFoldersRequest) -> list[FolderInfo]:
         folder = self._resolve_folder(request.parent)
-        return (
-            [self._to_folder_info(child, request.depth - 1) for child in folder.children]
-            if request.depth != 0
-            else [self._to_folder_info(folder, 0)]
-        )
+        try:
+            return (
+                [self._to_folder_info(child, request.depth - 1) for child in folder.children]
+                if request.depth != 0
+                else [self._to_folder_info(folder, 0)]
+            )
+        except Exception as exc:  # noqa: BLE001
+            raise self._map_exception(exc) from exc
 
     def create_folder(self, request: CreateFolderRequest) -> ActionResult:
         parent = self._resolve_folder(request.parent)
@@ -373,23 +379,42 @@ class EmailOperationsMixin(BaseEWSBackend):
         for attachment in getattr(item, "attachments", None) or []:
             attachment_id = getattr(getattr(attachment, "attachment_id", None), "id", None)
             if attachment_id == request.attachment_id:
-                declared_size = getattr(attachment, "size", None)
-                self._check_attachment_size(declared_size, max_size_bytes)
+                self._check_attachment_size(getattr(attachment, "size", None), max_size_bytes)
                 filename = self._sanitize_attachment_filename(getattr(attachment, "name", None))
                 path = self._unique_path(target_dir / filename)
-                content = getattr(attachment, "content", None)
-                if content is None:
-                    _ = attachment.content
-                    content = attachment.content
-                self._check_attachment_size(len(content), max_size_bytes)
-                path.write_bytes(content)
+                try:
+                    size = self._save_attachment(attachment, path, max_size_bytes)
+                except Exception:
+                    path.unlink(missing_ok=True)
+                    raise
                 return AttachmentResult(
                     filename=filename,
-                    size=len(content),
+                    size=size,
                     saved_path=str(path),
                     content_type=getattr(attachment, "content_type", None),
                 )
         raise NotFoundError(request.attachment_id)
+
+    def _save_attachment(self, attachment: Any, path: Path, max_size_bytes: int) -> int:
+        if not hasattr(attachment, "fp"):
+            content = attachment.content
+            self._check_attachment_size(len(content), max_size_bytes)
+            path.write_bytes(content)
+            return len(content)
+        # FileAttachment.fp streams the content from the GetAttachment service in
+        # chunks instead of buffering the whole thing in memory (as .content does),
+        # so an oversized attachment can be caught -- and the partial file
+        # discarded by the caller -- without ever holding it all in RAM.
+        written = 0
+        with attachment.fp as source, path.open("wb") as dest:
+            while True:
+                chunk = source.read(65536)
+                if not chunk:
+                    break
+                written += len(chunk)
+                self._check_attachment_size(written, max_size_bytes)
+                dest.write(chunk)
+        return written
 
     def _check_attachment_size(self, size: int | None, max_size_bytes: int) -> None:
         if size is not None and size > max_size_bytes:

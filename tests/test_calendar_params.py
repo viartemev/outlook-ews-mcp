@@ -1,11 +1,13 @@
 from __future__ import annotations
 
-from datetime import UTC, datetime
+from datetime import UTC, datetime, date
 from types import SimpleNamespace
 
 import pytest
+from exchangelib.errors import UnauthorizedError
 
 import outlook_mcp.exchange_client.calendar as calendar_module
+from outlook_mcp.errors import AuthFailedError
 from outlook_mcp.exchange_client import EWSExchangeBackend
 from outlook_mcp.models import (
     CreateEventRequest,
@@ -255,6 +257,51 @@ def test_work_hours_rejects_end_before_start() -> None:
 def test_recurrence_pattern_rejects_invalid_weekday() -> None:
     with pytest.raises(Exception):
         RecurrencePattern(type="weekly", days_of_week=["someday"])
+
+
+def test_recurrence_pattern_rejects_end_date_and_occurrences_together() -> None:
+    with pytest.raises(Exception, match="not both"):
+        RecurrencePattern(type="daily", end_date=date(2026, 1, 1), occurrences=5)
+
+
+def test_recurrence_pattern_rejects_days_of_week_on_non_weekly_type() -> None:
+    with pytest.raises(Exception, match="days_of_week"):
+        RecurrencePattern(type="daily", days_of_week=["monday"])
+
+
+def test_recurrence_pattern_rejects_interval_on_yearly_type() -> None:
+    """exchangelib's AbsoluteYearlyPattern has no interval field, so any
+    interval other than 1 could only ever be silently ignored downstream."""
+    with pytest.raises(Exception, match="interval"):
+        RecurrencePattern(type="yearly", interval=2)
+
+
+def test_create_event_rejects_recurrence_end_date_before_start() -> None:
+    with pytest.raises(Exception, match="recurrence.end_date"):
+        CreateEventRequest.model_validate(
+            {
+                "subject": "Standup",
+                "start": "2026-04-13T09:00:00+00:00",
+                "end": "2026-04-13T09:30:00+00:00",
+                "recurrence": {"type": "daily", "end_date": "2026-01-01"},
+            }
+        )
+
+
+def test_list_calendars_maps_error_raised_while_walking_folders(settings) -> None:
+    """Regression guard: list_calendars ran account.root.walk() outside any
+    try/except, so an auth/network failure escaped as a raw exchangelib
+    exception instead of an APIError."""
+    backend = EWSExchangeBackend(settings)
+
+    class PoisonRoot:
+        def walk(self):
+            raise UnauthorizedError("access denied")
+
+    backend._account = SimpleNamespace(calendar=SimpleNamespace(id="cal-1"), root=PoisonRoot())
+
+    with pytest.raises(AuthFailedError):
+        backend.list_calendars()
 
 
 def test_find_free_slots_never_produces_a_slot_past_end(settings, monkeypatch) -> None:

@@ -131,6 +131,8 @@ EXCHANGE_MAX_RETRY_WAIT_SECONDS=90
 EXCHANGE_TIMEZONE=Europe/Moscow
 EXCHANGE_IMPERSONATE_AS=
 ATTACHMENT_MAX_SIZE_MB=10
+ATTACHMENT_MAX_COUNT=10
+ATTACHMENT_MAX_TOTAL_SIZE_MB=25
 EXCHANGE_ATTACHMENT_ROOT=
 MCP_TRANSPORT=stdio
 MCP_SSE_HOST=127.0.0.1
@@ -145,6 +147,7 @@ Notes:
 - `EXCHANGE_ALLOW_INSECURE_BASIC_AUTH` only matters with `EXCHANGE_AUTH_TYPE=Basic` and an `http://` `EXCHANGE_SERVER`; startup fails otherwise unless it's set `true`
 - `EXCHANGE_IMPERSONATE_AS` enables mailbox impersonation when Exchange permissions are configured accordingly
 - `ATTACHMENT_MAX_SIZE_MB` is enforced both on local files attached to outgoing email and on attachments downloaded via `get_attachment`
+- `ATTACHMENT_MAX_COUNT` and `ATTACHMENT_MAX_TOTAL_SIZE_MB` cap the number and combined size of attachments on a single `send_email`/`reply_email`/`forward_email`/`create_draft` call
 - `EXCHANGE_ATTACHMENT_ROOT` is unset (unrestricted) by default; set it to an absolute directory to confine both `attachments` paths (send/reply/forward/create_draft) and `get_attachment`'s `save_path` to that directory tree
 - `EXCHANGE_MAX_RETRY_WAIT_SECONDS` is a total backoff time budget (exchangelib retries transient errors with exponential backoff until this many seconds have elapsed), not a retry count; set to `0` to disable retries and fail fast on the first error
 

@@ -37,6 +37,10 @@ class Settings(BaseSettings):
     exchange_timezone: str = Field(default="Europe/Moscow", alias="EXCHANGE_TIMEZONE")
     exchange_impersonate_as: str | None = Field(default=None, alias="EXCHANGE_IMPERSONATE_AS")
     attachment_max_size_mb: int = Field(default=10, alias="ATTACHMENT_MAX_SIZE_MB", ge=1, le=100)
+    attachment_max_count: int = Field(default=10, alias="ATTACHMENT_MAX_COUNT", ge=1, le=100)
+    attachment_max_total_size_mb: int = Field(
+        default=25, alias="ATTACHMENT_MAX_TOTAL_SIZE_MB", ge=1, le=500
+    )
     attachment_root: Path | None = Field(default=None, alias="EXCHANGE_ATTACHMENT_ROOT")
 
     mcp_transport: Literal["stdio", "sse"] = Field(default="stdio", alias="MCP_TRANSPORT")
