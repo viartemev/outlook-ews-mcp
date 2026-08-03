@@ -42,6 +42,7 @@ class Settings(BaseSettings):
     mcp_transport: Literal["stdio", "sse"] = Field(default="stdio", alias="MCP_TRANSPORT")
     mcp_sse_host: str = Field(default="127.0.0.1", alias="MCP_SSE_HOST")
     mcp_sse_port: int = Field(default=8080, alias="MCP_SSE_PORT", ge=1, le=65535)
+    mcp_sse_auth_token: str | None = Field(default=None, alias="MCP_SSE_AUTH_TOKEN")
 
     log_level: Literal["DEBUG", "INFO", "WARNING", "ERROR"] = Field(
         default="INFO",
@@ -60,6 +61,15 @@ class Settings(BaseSettings):
                 "EXCHANGE_SERVER=http://... . Use an https:// endpoint, or set "
                 "EXCHANGE_ALLOW_INSECURE_BASIC_AUTH=true to explicitly opt into "
                 "sending Basic auth over plain HTTP (e.g. for a local/test server)."
+            )
+        return self
+
+    @model_validator(mode="after")
+    def _require_sse_auth_token(self) -> "Settings":
+        if self.mcp_transport == "sse" and not self.mcp_sse_auth_token:
+            raise ValueError(
+                "MCP_TRANSPORT=sse exposes the mailbox over the network and requires "
+                "MCP_SSE_AUTH_TOKEN to be set so clients must present it as a bearer token."
             )
         return self
 
