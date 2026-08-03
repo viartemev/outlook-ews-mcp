@@ -54,11 +54,15 @@ class ToolRegistry:
         except Exception as exc:  # noqa: BLE001
             api_error = normalize_exception(exc)
             duration_ms = round((time.perf_counter() - started) * 1000)
+            # Unclassified exceptions get a sanitized client-facing message (see
+            # normalize_exception); log the real exception here, server-side only,
+            # so it stays diagnosable without leaking internals to the MCP client.
             logger.warning(
                 "tool=%s status=error duration_ms=%s error=%s",
                 name,
                 duration_ms,
                 api_error.code,
+                exc_info=exc if not isinstance(exc, APIError) else None,
             )
             return api_error.to_dict(), True
 

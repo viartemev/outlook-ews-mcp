@@ -6,6 +6,7 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any
 
+from mcp.types import CallToolResult, TextContent
 from pydantic.fields import FieldInfo
 
 from .exchange_client import ExchangeClient
@@ -34,6 +35,9 @@ class ToolSpec:
     description: str
     handler: Callable[[ExchangeClient, dict[str, Any]], Any]
     request_model: type[ExchangeModel] | None = None
+    #: Documents the handler's success payload shape; not enforced as an MCP output
+    #: schema (see bind_mcp_tool — every tool reports isError via CallToolResult, and
+    #: error payloads don't share this shape, so FastMCP's schema validation can't apply).
     response_model: Any = None
     read_only: bool = False
     destructive: bool = False
@@ -45,26 +49,30 @@ def bind_mcp_tool(
 ) -> Callable[..., Any]:
     """Build a FastMCP tool function with a schema derived from ``spec``."""
 
-    def execute(**arguments: Any) -> Any:
+    def execute(**arguments: Any) -> CallToolResult:
         payload, is_error = registry_call(spec.name, normalize_tool_arguments(arguments))
-        if is_error:
-            raise RuntimeError(json.dumps(payload, ensure_ascii=False))
-        return payload
+        structured = payload if isinstance(payload, dict) else {"result": payload}
+        return CallToolResult(
+            content=[TextContent(type="text", text=json.dumps(payload, ensure_ascii=False))],
+            structuredContent=structured,
+            isError=is_error,
+        )
 
     execute.__name__ = spec.name
     execute.__doc__ = spec.description
 
-    return_annotation = spec.response_model if spec.response_model is not None else Any
-
     if spec.request_model is None:
         # FastMCP derives the tool schema from the function's signature/annotations,
-        # so these must be patched onto the plain function object at runtime.
-        execute.__signature__ = inspect.Signature(return_annotation=return_annotation)  # type: ignore[attr-defined]
-        execute.__annotations__ = {"return": return_annotation}
+        # so these must be patched onto the plain function object at runtime. The
+        # return annotation is the bare CallToolResult type (not Annotated with a
+        # payload model) so FastMCP skips output-schema validation entirely and lets
+        # execute() report isError/structuredContent for both success and failure.
+        execute.__signature__ = inspect.Signature(return_annotation=CallToolResult)  # type: ignore[attr-defined]
+        execute.__annotations__ = {"return": CallToolResult}
         return execute
 
     parameters: list[inspect.Parameter] = []
-    annotations: dict[str, Any] = {"return": return_annotation}
+    annotations: dict[str, Any] = {"return": CallToolResult}
     for field_name, field in spec.request_model.model_fields.items():
         parameters.append(
             inspect.Parameter(
@@ -77,7 +85,7 @@ def bind_mcp_tool(
         annotations[field_name] = field.annotation
 
     execute.__signature__ = inspect.Signature(  # type: ignore[attr-defined]
-        parameters, return_annotation=return_annotation
+        parameters, return_annotation=CallToolResult
     )
     execute.__annotations__ = annotations
     return execute
