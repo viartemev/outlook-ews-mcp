@@ -322,6 +322,91 @@ def test_search_contacts_propagates_resolve_names_error_instead_of_unpacking_it(
         backend.search_contacts(SearchContactsRequest(query="ivan", source="gal"))
 
 
+def test_search_contacts_gal_result_id_is_resolvable_by_get_contact(settings, monkeypatch) -> None:
+    """Regression guard: search_contacts(source="gal") used to return the GAL
+    contact's opaque contact.id, which get_contact() cannot resolve (its "@"
+    heuristic routes it to the personal contacts folder instead of the GAL).
+    The id search_contacts hands back must be the SMTP address so the two
+    calls round-trip."""
+    backend = EWSExchangeBackend(settings)
+    gal_contact = SimpleNamespace(
+        id="AAA=opaque-ad-object-id",
+        display_name="Ivan Ivanov",
+        file_as=None,
+        email_addresses=[SimpleNamespace(label="EmailAddress1", email="ivan@example.com")],
+        phone_numbers=[],
+        company_name=None,
+        job_title=None,
+        department=None,
+    )
+
+    class FakeResolveNames:
+        def __init__(self, protocol) -> None:
+            self.protocol = protocol
+
+        def call(self, **kwargs):
+            yield SimpleNamespace(email_address="ivan@example.com", name="Ivan Ivanov"), gal_contact
+
+    monkeypatch.setattr(exchange_client_contacts, "ResolveNames", FakeResolveNames)
+    backend._account = SimpleNamespace(contacts=object(), protocol=object())
+
+    results = backend.search_contacts(SearchContactsRequest(query="ivan", source="gal"))
+
+    assert len(results) == 1
+    assert results[0].id == "ivan@example.com"
+
+    def fetch(ids, folder=None):
+        raise AssertionError("GAL contacts must not be fetched from the personal contacts folder")
+
+    backend._account = SimpleNamespace(fetch=fetch, contacts=object(), protocol=object())
+    contact = backend.get_contact(GetContactRequest(id=results[0].id))
+
+    assert contact.source == "gal"
+    assert contact.display_name == "Ivan Ivanov"
+
+
+def test_get_contact_explicit_source_bypasses_at_sign_heuristic(settings, monkeypatch) -> None:
+    """A legacy Exchange DN (no "@") passed with an explicit source="gal" must
+    be resolved against the GAL instead of being misrouted to the personal
+    contacts folder by the "@"-based heuristic."""
+    backend = EWSExchangeBackend(settings)
+    legacy_dn = "/o=ExchangeLabs/ou=Exchange Administrative Group/cn=Recipients/cn=ivan"
+    gal_contact = SimpleNamespace(
+        id=None,
+        display_name="Ivan Ivanov",
+        file_as=None,
+        email_addresses=[SimpleNamespace(label="EmailAddress1", email="ivan@example.com")],
+        phone_numbers=[],
+        company_name=None,
+        job_title=None,
+        department=None,
+        physical_addresses=[],
+        manager=None,
+        notes=None,
+        birthday=None,
+    )
+
+    class FakeResolveNames:
+        def __init__(self, protocol) -> None:
+            self.protocol = protocol
+
+        def call(self, **kwargs):
+            yield SimpleNamespace(email_address="ivan@example.com", name="Ivan Ivanov"), gal_contact
+
+    def fetch(ids, folder=None):
+        raise AssertionError(
+            "Legacy DN with source='gal' must not hit the personal contacts folder"
+        )
+
+    monkeypatch.setattr(exchange_client_contacts, "ResolveNames", FakeResolveNames)
+    backend._account = SimpleNamespace(fetch=fetch, contacts=object(), protocol=object())
+
+    contact = backend.get_contact(GetContactRequest(id=legacy_dn, source="gal"))
+
+    assert contact.source == "gal"
+    assert contact.display_name == "Ivan Ivanov"
+
+
 def _fake_account_for_folder_resolution(root) -> SimpleNamespace:
     return SimpleNamespace(
         root=root,

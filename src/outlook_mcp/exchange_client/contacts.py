@@ -84,10 +84,31 @@ class ContactOperationsMixin(BaseEWSBackend):
                     if isinstance(entry, Exception):
                         raise self._map_exception(entry)
                     mailbox, contact = entry
+                    mailbox_email = (
+                        self._smtp_address(getattr(mailbox, "email_address", None))
+                        if mailbox is not None
+                        else None
+                    )
                     if contact is not None and getattr(contact, "id", None):
-                        results.append(self._contact_summary_from_contact(contact, "gal"))
+                        summary = self._contact_summary_from_contact(contact, "gal")
+                        # get_contact() distinguishes GAL vs. personal ids by looking for
+                        # "@", so a GAL result must carry a resolvable SMTP address as its
+                        # id rather than the opaque contact.id — otherwise round-tripping
+                        # this id through get_contact() looks up the wrong folder.
+                        contact_smtp = next(
+                            (
+                                smtp
+                                for smtp in (
+                                    self._smtp_address(getattr(e, "email", None))
+                                    for e in getattr(contact, "email_addresses", None) or []
+                                )
+                                if smtp
+                            ),
+                            None,
+                        )
+                        summary.id = mailbox_email or contact_smtp or summary.id
+                        results.append(summary)
                     elif mailbox is not None:
-                        mailbox_email = getattr(mailbox, "email_address", None)
                         results.append(
                             ContactSummary(
                                 id=mailbox_email or request.query,
@@ -106,7 +127,8 @@ class ContactOperationsMixin(BaseEWSBackend):
         return results[: request.limit]
 
     def get_contact(self, request: GetContactRequest) -> ContactFull:
-        if "@" in request.id:
+        source = request.source or ("gal" if "@" in request.id else "personal")
+        if source == "gal":
             return self._get_gal_contact(request.id)
         item = self._fetch_item(request.id, folder=self.account.contacts)
         return self._contact_full_from_item(item, item_id=item.id, source="personal")

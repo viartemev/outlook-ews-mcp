@@ -474,6 +474,7 @@ class SearchContactsRequest(ExchangeModel):
 
 class GetContactRequest(ExchangeModel):
     id: str
+    source: Literal["personal", "gal"] | None = None
 
 
 class CreateContactRequest(ExchangeModel):
