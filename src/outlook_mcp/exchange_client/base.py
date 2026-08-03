@@ -4,6 +4,7 @@ import logging
 import re
 import warnings
 from collections.abc import Iterable
+from contextvars import ContextVar
 from datetime import UTC, datetime
 from typing import Any
 from urllib.parse import urlparse
@@ -50,10 +51,17 @@ from ..errors import (
 from ..models import EmailAddress, MailboxInfo, PingResult
 
 logger = logging.getLogger(__name__)
-_RAW_SESSION_PATCHED = False
 _TIMEZONE_FALLBACK_PATCHED = False
 _GUID_TIMEZONE_RE = re.compile(
     r"^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$"
+)
+# EWSTimeZone.from_ms_id is a bare classmethod with no reference back to the account/backend
+# that triggered the parse, so the per-instance fallback timezone can't be passed as an argument.
+# Track it here instead: whichever backend's `.account` was most recently touched (on this thread/
+# async task) is the one whose fallback applies, since EWS response parsing always happens
+# synchronously underneath that access.
+_active_timezone_fallback: ContextVar[str | None] = ContextVar(
+    "_active_timezone_fallback", default=None
 )
 
 
@@ -68,6 +76,7 @@ class BaseEWSBackend:
     def account(self) -> Account:
         if self._account is None:
             self._account = self._build_account()
+        _active_timezone_fallback.set(self.settings.exchange_timezone)
         return self._account
 
     def _build_account(self) -> Account:
@@ -79,8 +88,6 @@ class BaseEWSBackend:
                 details=[{"field": "EXCHANGE_AUTH_TYPE", "reason": "supported values for live checks are NTLM or Basic"}],
             )
 
-        BaseProtocol.TIMEOUT = self.settings.exchange_timeout
-        self._configure_ssl_verification()
         self._configure_timezone_fallback()
         retry_policy = (
             FailFast()
@@ -98,7 +105,7 @@ class BaseEWSBackend:
         )
         access_type = IMPERSONATION if auth.impersonate_as else DELEGATE
         try:
-            return Account(
+            account = Account(
                 primary_smtp_address=auth.primary_smtp_address,
                 config=config,
                 autodiscover=False,
@@ -106,6 +113,8 @@ class BaseEWSBackend:
             )
         except Exception as exc:  # noqa: BLE001
             raise self._map_exception(exc) from exc
+        self._configure_protocol(account.protocol)
+        return account
 
     def _normalize_service_endpoint(self, value: str) -> str:
         endpoint = value.strip()
@@ -115,17 +124,22 @@ class BaseEWSBackend:
             endpoint = endpoint.rstrip("/") + "/EWS/Exchange.asmx"
         return endpoint
 
-    def _configure_ssl_verification(self) -> None:
-        global _RAW_SESSION_PATCHED
-        if _RAW_SESSION_PATCHED:
-            return
+    def _configure_protocol(self, protocol: BaseProtocol) -> None:
+        """Scope timeout/SSL-verification settings to this backend's own protocol instance.
+
+        These used to be set as mutations on the shared `BaseProtocol` class, which meant the
+        first backend built in a process silently decided the behavior for every later one.
+        Setting them directly on the instance shadows the class attribute/classmethod (both are
+        non-data descriptors, so an instance attribute of the same name wins) without touching
+        any other backend's protocol.
+        """
+        protocol.TIMEOUT = self.settings.exchange_timeout
 
         verify_ssl = self.settings.exchange_verify_ssl
-        original = BaseProtocol.raw_session.__func__
+        original_raw_session = protocol.raw_session
 
-        def raw_session_with_verify(cls, prefix, oauth2_client=None, oauth2_session_params=None, oauth2_token_endpoint=None):
-            session = original(
-                cls,
+        def raw_session_with_verify(prefix, oauth2_client=None, oauth2_session_params=None, oauth2_token_endpoint=None):
+            session = original_raw_session(
                 prefix,
                 oauth2_client=oauth2_client,
                 oauth2_session_params=oauth2_session_params,
@@ -134,8 +148,7 @@ class BaseEWSBackend:
             session.verify = verify_ssl
             return session
 
-        BaseProtocol.raw_session = classmethod(raw_session_with_verify)
-        _RAW_SESSION_PATCHED = True
+        protocol.raw_session = raw_session_with_verify
 
         if not verify_ssl:
             warnings.filterwarnings("ignore", category=InsecureRequestWarning)
@@ -146,14 +159,14 @@ class BaseEWSBackend:
         if _TIMEZONE_FALLBACK_PATCHED:
             return
 
-        fallback_timezone = self.settings.exchange_timezone
         original = EWSTimeZone.from_ms_id.__func__
 
         def from_ms_id_with_fallback(cls, ms_id):
             try:
                 return original(cls, ms_id)
             except UnknownTimeZone:
-                if isinstance(ms_id, str) and _GUID_TIMEZONE_RE.match(ms_id):
+                fallback_timezone = _active_timezone_fallback.get()
+                if fallback_timezone and isinstance(ms_id, str) and _GUID_TIMEZONE_RE.match(ms_id):
                     logger.info(
                         "Mapping unknown Exchange timezone id %s to configured timezone %s",
                         ms_id,
