@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+import secrets
 import sys
 import time
 from typing import Any
@@ -12,6 +13,38 @@ from .mcp_tools import normalize_tool_arguments, register_mcp_tools
 from .tool_specs import TOOL_SPECS
 
 logger = logging.getLogger(__name__)
+
+
+class BearerTokenMiddleware:
+    """Raw ASGI middleware gating every request behind a static bearer token.
+
+    Deliberately not Starlette's BaseHTTPMiddleware: that buffers the whole
+    response before sending it, which breaks the long-lived text/event-stream
+    connection SSE depends on. This passes scope/receive/send straight through
+    once authorized, so streaming is untouched.
+    """
+
+    def __init__(self, app: Any, token: str) -> None:
+        self._app = app
+        self._expected = f"Bearer {token}"
+
+    async def __call__(self, scope: dict[str, Any], receive: Any, send: Any) -> None:
+        if scope["type"] != "http":
+            await self._app(scope, receive, send)
+            return
+
+        headers = dict(scope.get("headers") or [])
+        presented = headers.get(b"authorization", b"").decode("latin-1")
+        if not secrets.compare_digest(presented, self._expected):
+            from starlette.responses import PlainTextResponse
+
+            response = PlainTextResponse(
+                "Unauthorized", status_code=401, headers={"WWW-Authenticate": "Bearer"}
+            )
+            await response(scope, receive, send)
+            return
+
+        await self._app(scope, receive, send)
 
 
 def configure_logging(settings: Settings) -> None:
@@ -98,7 +131,11 @@ def main() -> None:
         return
 
     if transport == "sse":  # pragma: no cover
-        server.run(transport="sse", host=settings.mcp_sse_host, port=settings.mcp_sse_port)
+        import uvicorn
+
+        assert settings.mcp_sse_auth_token  # enforced by Settings validation
+        app = BearerTokenMiddleware(server.sse_app(), token=settings.mcp_sse_auth_token)
+        uvicorn.run(app, host=settings.mcp_sse_host, port=settings.mcp_sse_port)
         return
 
     raise RuntimeError(f"unsupported transport: {transport}")
