@@ -11,6 +11,7 @@ from exchangelib.version import EXCHANGE_2016, Version
 
 import outlook_mcp.exchange_client.base as exchange_client_base
 import outlook_mcp.exchange_client.contacts as exchange_client_contacts
+import outlook_mcp.exchange_client.email as exchange_client_email
 from outlook_mcp.errors import APIError, AuthFailedError
 from outlook_mcp.exchange_client import EWSExchangeBackend
 from outlook_mcp.models import (
@@ -22,6 +23,7 @@ from outlook_mcp.models import (
     GetEmailRequest,
     ListEmailsRequest,
     ReplyEmailRequest,
+    SearchContactsRequest,
     SearchEmailsRequest,
     SendResult,
 )
@@ -136,6 +138,33 @@ def test_fetch_item_raises_api_error_when_exchange_returns_error(settings) -> No
     assert excinfo.value.code == "exchange_error"
 
 
+def test_get_contact_reads_notes_from_body_not_readonly_notes_field(settings) -> None:
+    """Regression test: Contact.notes is read-only in exchangelib, so reading it
+    always returned None. Outlook stores contact notes in the item body."""
+    backend = EWSExchangeBackend(settings)
+    item = SimpleNamespace(
+        id="contact-1",
+        display_name="Ivan Ivanov",
+        file_as=None,
+        given_name=None,
+        surname=None,
+        email_addresses=[],
+        phone_numbers=[],
+        physical_addresses=[],
+        company_name=None,
+        job_title=None,
+        department=None,
+        manager=None,
+        birthday=None,
+        text_body="Met at the conference",
+    )
+    backend._account = SimpleNamespace(fetch=lambda **kwargs: iter([item]), contacts=object())
+
+    contact = backend.get_contact(GetContactRequest(id="contact-1"))
+
+    assert contact.notes == "Met at the conference"
+
+
 def test_get_contact_resolves_gal_address(settings, monkeypatch) -> None:
     backend = EWSExchangeBackend(settings)
     captured: dict = {}
@@ -234,6 +263,63 @@ def test_get_contact_raises_not_found_when_gal_has_no_match(settings, monkeypatc
         backend.get_contact(GetContactRequest(id="nobody@example.com"))
 
     assert excinfo.value.code == "not_found"
+
+
+def test_search_contacts_matches_personal_contact_by_email_not_just_display_name(
+    settings, monkeypatch
+) -> None:
+    """Regression guard: search_contacts used to filter personal contacts on
+    display_name only, so a query matching only the email/company/job_title
+    found nothing."""
+    backend = EWSExchangeBackend(settings)
+    matched_contact = SimpleNamespace(
+        id="contact-1",
+        display_name="Ivan Ivanov",
+        file_as=None,
+        email_addresses=[SimpleNamespace(email="ivan@example.com")],
+        phone_numbers=[],
+        company_name="Acme",
+        job_title="Manager",
+        department=None,
+    )
+    captured: dict = {}
+
+    class FakeContactsFolder:
+        def filter(self, restriction):
+            captured["restriction"] = restriction
+            return [matched_contact]
+
+    backend._account = SimpleNamespace(contacts=FakeContactsFolder(), protocol=object())
+
+    results = backend.search_contacts(
+        SearchContactsRequest(query="ivan@example.com", source="personal")
+    )
+
+    assert [r.id for r in results] == ["contact-1"]
+    # The filter must actually search more than display_name.
+    assert "email_addresses" in str(captured["restriction"])
+
+
+def test_search_contacts_propagates_resolve_names_error_instead_of_unpacking_it(
+    settings, monkeypatch
+) -> None:
+    """Regression guard: an Exception entry yielded by ResolveNames used to be
+    unpacked directly as `(mailbox, contact)`, which raises a confusing
+    unpacking TypeError instead of the mapped APIError."""
+    backend = EWSExchangeBackend(settings)
+
+    class FakeResolveNames:
+        def __init__(self, protocol) -> None:
+            self.protocol = protocol
+
+        def call(self, **kwargs):
+            yield UnauthorizedError("access denied")
+
+    monkeypatch.setattr(exchange_client_contacts, "ResolveNames", FakeResolveNames)
+    backend._account = SimpleNamespace(contacts=object(), protocol=object())
+
+    with pytest.raises(AuthFailedError):
+        backend.search_contacts(SearchContactsRequest(query="ivan", source="gal"))
 
 
 def _fake_account_for_folder_resolution(root) -> SimpleNamespace:
@@ -346,6 +432,60 @@ def test_resolve_folder_falls_back_to_name_lookup_when_id_lookup_errors(
     result = backend._resolve_folder("Projects")
 
     assert result is child
+
+
+def test_resolve_folder_by_id_propagates_auth_failure_instead_of_swallowing_it(
+    settings, monkeypatch
+) -> None:
+    """Regression guard: an auth/network failure while resolving a folder id must
+    surface as AuthFailedError, not be treated the same as 'not an id' and
+    silently fall through to a path lookup that can only ever misreport
+    not_found."""
+    backend = EWSExchangeBackend(settings)
+
+    class FakeFolderCollection:
+        def __init__(self, account, folders) -> None:
+            pass
+
+        def resolve(self):
+            raise UnauthorizedError("access denied")
+
+    class PoisonRoot:
+        @property
+        def children(self):
+            raise AssertionError("must not fall back to path traversal on a real auth failure")
+
+    monkeypatch.setattr(exchange_client_base, "FolderCollection", FakeFolderCollection)
+    backend._account = _fake_account_for_folder_resolution(PoisonRoot())
+
+    with pytest.raises(AuthFailedError):
+        backend._resolve_folder("AAA=")
+
+
+def test_resolve_folder_archive_propagates_auth_failure_instead_of_falling_back_to_root(
+    settings,
+) -> None:
+    root = SimpleNamespace()
+
+    class NoArchiveAccount(SimpleNamespace):
+        @property
+        def archive_root(self):
+            raise UnauthorizedError("access denied")
+
+    backend = EWSExchangeBackend(settings)
+    backend._account = NoArchiveAccount(
+        root=root,
+        inbox=object(),
+        sent=object(),
+        drafts=object(),
+        trash=object(),
+        junk=object(),
+        calendar=object(),
+        contacts=object(),
+    )
+
+    with pytest.raises(AuthFailedError):
+        backend._resolve_folder("archive")
 
 
 def test_reply_email_sends_response_object_when_no_attachments(settings) -> None:
@@ -606,16 +746,15 @@ def test_author_email_address_subfield_path_is_rejected_by_ews() -> None:
 
 
 def test_search_emails_raises_auth_failed_instead_of_swallowing_it(settings) -> None:
-    """Regression guard: an auth failure during the subject-filter pass must surface as
-    AuthFailedError, not get treated as 'no results' and silently fall through to the
-    text_body pass."""
+    """Regression guard: an auth failure while searching must surface as AuthFailedError,
+    not get treated as 'no results'."""
     backend = EWSExchangeBackend(settings)
 
     class FailingQuerySet:
         def order_by(self, *args):
             return self
 
-        def filter(self, **filters):
+        def filter(self, *args, **kwargs):
             raise UnauthorizedError("access denied")
 
     account = _fake_account_for_folder_resolution(object())
@@ -623,4 +762,69 @@ def test_search_emails_raises_auth_failed_instead_of_swallowing_it(settings) -> 
     backend._account = account
 
     with pytest.raises(AuthFailedError):
-        backend.search_emails(SearchEmailsRequest(query="hello"))
+        backend.search_emails(SearchEmailsRequest(query="hello", folder="inbox"))
+
+
+def test_search_emails_matches_subject_or_body_or_sender_in_one_pass(settings) -> None:
+    """Regression guard: search_emails used to check subject first and only fall
+    back to text_body when subject had zero hits, silently dropping body-only
+    matches whenever anything else in the folder matched on subject. The
+    filter must now search subject, text_body, and sender together."""
+    backend = EWSExchangeBackend(settings)
+    captured: dict = {}
+
+    class FakeQuerySet:
+        def filter(self, restriction):
+            captured["restriction"] = restriction
+            return self
+
+        def order_by(self, *args):
+            return self
+
+        def __getitem__(self, item):
+            return []
+
+    account = _fake_account_for_folder_resolution(object())
+    account.inbox = FakeQuerySet()
+    backend._account = account
+
+    backend.search_emails(SearchEmailsRequest(query="hello", folder="inbox"))
+
+    restriction_text = str(captured["restriction"])
+    assert "subject" in restriction_text
+    assert "text_body" in restriction_text
+    assert "author" in restriction_text
+
+
+def test_search_emails_defaults_to_mail_folders_only(settings, monkeypatch) -> None:
+    """Regression guard: search_emails used to default to Inbox only. It should
+    now search the whole mailbox by default, but only actual mail folders
+    (folder_class IPF.Note), not e.g. Calendar or Contacts."""
+    backend = EWSExchangeBackend(settings)
+    mail_folder = SimpleNamespace(folder_class="IPF.Note", name="Inbox")
+    other_folder = SimpleNamespace(folder_class="IPF.Appointment", name="Calendar")
+    captured: dict = {}
+
+    class FakeRoot:
+        def walk(self):
+            return [mail_folder, other_folder]
+
+    class FakeFolderCollection:
+        def __init__(self, account, folders) -> None:
+            captured["folders"] = folders
+
+        def filter(self, restriction):
+            return self
+
+        def order_by(self, *args):
+            return self
+
+        def __getitem__(self, item):
+            return []
+
+    monkeypatch.setattr(exchange_client_email, "FolderCollection", FakeFolderCollection)
+    backend._account = SimpleNamespace(root=FakeRoot())
+
+    backend.search_emails(SearchEmailsRequest(query="hello"))
+
+    assert captured["folders"] == [mail_folder]

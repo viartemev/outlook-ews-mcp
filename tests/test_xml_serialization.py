@@ -134,6 +134,28 @@ def test_create_contact_serializes_indexed_properties(settings, monkeypatch) -> 
     assert "+79990000000" in xml
 
 
+def test_create_contact_notes_serialize_via_body_not_readonly_notes_field(
+    settings, monkeypatch
+) -> None:
+    """Regression test: ``Contact.notes`` is read-only in exchangelib and would
+    be silently dropped from the create payload -- Outlook actually stores
+    contact notes in the item body, so ``create_contact`` writes there
+    instead (see exchange_client/contacts.py)."""
+    captured = _capture_save(monkeypatch, Contact)
+    backend = EWSExchangeBackend(settings)
+    backend._account = _bare_account()
+
+    request = CreateContactRequest.model_validate(
+        {"display_name": "Ivan Ivanov", "notes": "Met at the conference"}
+    )
+
+    backend.create_contact(request)
+
+    xml = captured["xml"]
+    assert "Met at the conference" in xml
+    assert "<t:Notes>" not in xml
+
+
 def test_update_contact_only_serializes_requested_fields(settings, monkeypatch) -> None:
     contact = Contact(display_name="Old Name")
     backend = EWSExchangeBackend(settings)

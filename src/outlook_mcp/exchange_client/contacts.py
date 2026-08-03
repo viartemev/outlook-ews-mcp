@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from typing import Any, Literal
 
+from exchangelib import Q
 from exchangelib.indexed_properties import EmailAddress as IndexedEmailAddress
 from exchangelib.indexed_properties import PhoneNumber as IndexedPhoneNumber
 from exchangelib.items import Contact
@@ -52,10 +53,20 @@ class ContactOperationsMixin(BaseEWSBackend):
     def search_contacts(self, request: SearchContactsRequest) -> list[ContactSummary]:
         results: list[ContactSummary] = []
         if request.source in {"personal", "all"}:
+            query = request.query
+            # Indexed fields (email_addresses) require an explicit label per EWS
+            # restriction rules, so contains-matching "any email" means OR-ing
+            # across the fixed set of labels the create/update paths use.
+            contact_filter = (
+                Q(display_name__icontains=query)
+                | Q(company_name__icontains=query)
+                | Q(job_title__icontains=query)
+                | Q(email_addresses__EmailAddress1__icontains=query)
+                | Q(email_addresses__EmailAddress2__icontains=query)
+                | Q(email_addresses__EmailAddress3__icontains=query)
+            )
             try:
-                qs = self.account.contacts.filter(display_name__icontains=request.query)[
-                    : request.limit
-                ]
+                qs = self.account.contacts.filter(contact_filter)[: request.limit]
                 results.extend(
                     self._contact_summary_from_contact(contact, "personal") for contact in qs
                 )
@@ -69,7 +80,10 @@ class ContactOperationsMixin(BaseEWSBackend):
                     search_scope="ActiveDirectory",
                     contact_data_shape="AllProperties",
                 )
-                for mailbox, contact in resolved:
+                for entry in resolved:
+                    if isinstance(entry, Exception):
+                        raise self._map_exception(entry)
+                    mailbox, contact = entry
                     if contact is not None and getattr(contact, "id", None):
                         results.append(self._contact_summary_from_contact(contact, "gal"))
                     elif mailbox is not None:
@@ -161,6 +175,9 @@ class ContactOperationsMixin(BaseEWSBackend):
     def _contact_full_from_item(
         self, item: Any, *, item_id: str, source: Literal["personal", "gal"]
     ) -> ContactFull:
+        # Contact.notes is read-only in exchangelib; Outlook actually stores contact
+        # notes in the item body, so notes are read/written through body instead.
+        notes, _ = self._extract_message_body(item)
         return ContactFull(
             id=item_id,
             display_name=getattr(item, "display_name", None)
@@ -189,7 +206,7 @@ class ContactOperationsMixin(BaseEWSBackend):
             job_title=getattr(item, "job_title", None),
             department=getattr(item, "department", None),
             manager=getattr(item, "manager", None),
-            notes=getattr(item, "notes", None),
+            notes=notes or None,
             birthday=getattr(item, "birthday", None),
             source=source,
         )
@@ -203,7 +220,7 @@ class ContactOperationsMixin(BaseEWSBackend):
             surname=request.last_name,
             company_name=request.company,
             job_title=request.job_title,
-            notes=request.notes,
+            body=request.notes,
             email_addresses=[IndexedEmailAddress(label="EmailAddress1", email=str(request.email))]
             if request.email
             else [],
@@ -221,30 +238,37 @@ class ContactOperationsMixin(BaseEWSBackend):
         contact = self._fetch_item(request.id, folder=self.account.contacts)
         updated_fields: list[str] = []
         save_fields: list[str] = []
+        # A field name in `fields_set` means the caller explicitly included it in the
+        # request (even as null, to clear it); an omitted field is left untouched.
+        fields_set = request.model_fields_set
         field_map = {
             "display_name": "display_name",
             "first_name": "given_name",
             "last_name": "surname",
             "company": "company_name",
             "job_title": "job_title",
-            "notes": "notes",
+            "notes": "body",
         }
         for request_field, item_field in field_map.items():
-            value = getattr(request, request_field)
-            if value is not None:
-                setattr(contact, item_field, value)
-                updated_fields.append(request_field)
-                save_fields.append(item_field)
-        if request.email is not None:
-            contact.email_addresses = [
-                IndexedEmailAddress(label="EmailAddress1", email=str(request.email))
-            ]
+            if request_field not in fields_set:
+                continue
+            setattr(contact, item_field, getattr(request, request_field))
+            updated_fields.append(request_field)
+            save_fields.append(item_field)
+        if "email" in fields_set:
+            contact.email_addresses = (
+                [IndexedEmailAddress(label="EmailAddress1", email=str(request.email))]
+                if request.email is not None
+                else []
+            )
             updated_fields.append("email")
             save_fields.append("email_addresses")
-        if request.phone is not None:
-            contact.phone_numbers = [
-                IndexedPhoneNumber(label="PrimaryPhone", phone_number=request.phone)
-            ]
+        if "phone" in fields_set:
+            contact.phone_numbers = (
+                [IndexedPhoneNumber(label="PrimaryPhone", phone_number=request.phone)]
+                if request.phone is not None
+                else []
+            )
             updated_fields.append("phone")
             save_fields.append("phone_numbers")
         try:

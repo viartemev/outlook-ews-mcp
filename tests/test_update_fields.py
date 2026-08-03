@@ -1,7 +1,11 @@
 from __future__ import annotations
 
+from datetime import UTC, datetime
 from types import SimpleNamespace
 
+import pytest
+
+from outlook_mcp.errors import APIError
 from outlook_mcp.exchange_client import EWSExchangeBackend
 from outlook_mcp.models import (
     MarkEmailRequest,
@@ -74,6 +78,66 @@ def test_update_event_saves_real_ews_field_names(settings) -> None:
         "required_attendees",
     ]
     assert result.updated_fields == ["reminder_minutes", "add_attendees", "remove_attendees"]
+
+
+def test_update_event_rejects_lone_start_past_existing_end(settings) -> None:
+    backend = EWSExchangeBackend(settings)
+    item = FakeSavableItem(
+        id="event-1",
+        start=datetime(2026, 4, 8, 9, 0, tzinfo=UTC),
+        end=datetime(2026, 4, 8, 10, 0, tzinfo=UTC),
+    )
+    backend._account = _account_with_item(item, calendar=object(), default_timezone=UTC)
+
+    request = UpdateEventRequest.model_validate(
+        {"id": "event-1", "start": "2026-04-08T11:00:00+00:00"}
+    )
+
+    with pytest.raises(APIError) as excinfo:
+        backend.update_event(request)
+    assert excinfo.value.code == "validation_error"
+    assert item.save_calls == []
+
+
+def test_update_event_empty_update_does_not_save_or_notify(settings) -> None:
+    backend = EWSExchangeBackend(settings)
+    item = FakeSavableItem(
+        id="event-1",
+        start=datetime(2026, 4, 8, 9, 0, tzinfo=UTC),
+        end=datetime(2026, 4, 8, 10, 0, tzinfo=UTC),
+    )
+    backend._account = _account_with_item(item, calendar=object(), default_timezone=UTC)
+
+    request = UpdateEventRequest.model_validate({"id": "event-1"})
+    result = backend.update_event(request)
+
+    assert item.save_calls == []
+    assert result.updated_fields == []
+
+
+def test_update_contact_omitted_fields_left_untouched(settings) -> None:
+    backend = EWSExchangeBackend(settings)
+    item = FakeSavableItem(id="contact-1", display_name="Old Name", job_title="Old Title")
+    backend._account = _account_with_item(item, contacts=object())
+
+    request = UpdateContactRequest.model_validate({"id": "contact-1", "job_title": "New Title"})
+    backend.update_contact(request)
+
+    assert item.display_name == "Old Name"
+    assert item.job_title == "New Title"
+    assert item.save_calls[-1]["update_fields"] == ["job_title"]
+
+
+def test_update_contact_explicit_null_clears_phone(settings) -> None:
+    backend = EWSExchangeBackend(settings)
+    item = FakeSavableItem(id="contact-1", phone_numbers=[SimpleNamespace(phone_number="+1000")])
+    backend._account = _account_with_item(item, contacts=object())
+
+    request = UpdateContactRequest.model_validate({"id": "contact-1", "phone": None})
+    backend.update_contact(request)
+
+    assert item.phone_numbers == []
+    assert item.save_calls[-1]["update_fields"] == ["phone_numbers"]
 
 
 def test_update_contact_saves_real_ews_field_names(settings) -> None:
