@@ -124,3 +124,18 @@ def test_blank_attachment_root_does_not_become_the_current_directory():
     settings = Settings(_env_file=None, **_kwargs(EXCHANGE_ATTACHMENT_ROOT=""))
 
     assert settings.attachment_root is None
+
+
+def test_sse_transport_without_auth_token_rejected():
+    with pytest.raises(ValidationError, match="MCP_SSE_AUTH_TOKEN"):
+        Settings(**_kwargs(MCP_TRANSPORT="sse"))
+
+
+def test_sse_transport_with_auth_token_allowed():
+    settings = Settings(**_kwargs(MCP_TRANSPORT="sse", MCP_SSE_AUTH_TOKEN="s3cret"))
+    assert settings.mcp_sse_auth_token == "s3cret"
+
+
+def test_stdio_transport_does_not_require_auth_token():
+    settings = Settings(**_kwargs(MCP_TRANSPORT="stdio"))
+    assert settings.mcp_sse_auth_token is None

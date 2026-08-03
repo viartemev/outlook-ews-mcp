@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import logging
 
+import uvicorn
+
 from outlook_mcp import server as server_module
 from outlook_mcp.config import Settings
 from outlook_mcp.exchange_client import ExchangeClient
@@ -43,48 +45,31 @@ def test_main_stdio_runs_with_no_arguments(
     assert calls == [((), {})]
 
 
-def test_main_sse_runs_with_transport_only(
+def test_main_sse_runs_via_uvicorn_with_bearer_middleware(
     monkeypatch, client: ExchangeClient, settings: Settings
 ) -> None:
-    """Regression test: main() must call server.run(transport="sse") without
-    host/port kwargs - mcp==1.29.0's FastMCP.run() only accepts transport and
-    mount_path, and would raise TypeError if called the old way."""
-    settings = settings.model_copy(update={"mcp_transport": "sse"})
-    calls: list[tuple[tuple, dict]] = []
-
-    class FakeServer:
-        def run(self, *args, **kwargs):
-            calls.append((args, kwargs))
-
-    monkeypatch.setattr(server_module, "get_settings", lambda: settings)
-    monkeypatch.setattr(server_module, "build_mcp_server", lambda settings: FakeServer())
-
-    main()
-
-    assert calls == [((), {"transport": "sse"})]
-
-
-def test_main_sse_transport_does_not_raise_with_real_fastmcp(
-    monkeypatch, client: ExchangeClient, settings: Settings
-) -> None:
-    """End-to-end check with the real FastMCP.run() signature: construct the
-    real server, monkeypatch just the network-binding uvicorn call, and
-    confirm main() reaches it without a TypeError from a bad kwarg."""
-    settings = settings.model_copy(update={"mcp_transport": "sse"})
+    """main() must wrap the sse ASGI app in BearerTokenMiddleware and hand it to
+    uvicorn.run directly - FastMCP.run(transport="sse") has no way to require a
+    bearer token, so the sse branch bypasses it entirely."""
+    settings = settings.model_copy(update={"mcp_transport": "sse", "mcp_sse_auth_token": "s3cret"})
     real_server = build_mcp_server(settings=settings, client=client)
 
     run_calls: list[dict] = []
 
-    async def fake_run_sse_async(self, mount_path=None):
-        run_calls.append({"mount_path": mount_path})
+    def fake_uvicorn_run(app, host=None, port=None):
+        run_calls.append({"app": app, "host": host, "port": port})
 
     monkeypatch.setattr(server_module, "get_settings", lambda: settings)
     monkeypatch.setattr(server_module, "build_mcp_server", lambda settings: real_server)
-    monkeypatch.setattr(type(real_server), "run_sse_async", fake_run_sse_async)
+    monkeypatch.setattr(uvicorn, "run", fake_uvicorn_run)
 
     main()
 
-    assert run_calls == [{"mount_path": None}]
+    assert len(run_calls) == 1
+    call = run_calls[0]
+    assert isinstance(call["app"], server_module.BearerTokenMiddleware)
+    assert call["host"] == settings.mcp_sse_host
+    assert call["port"] == settings.mcp_sse_port
 
 
 def test_configure_logging_does_not_leak_exchangelib_xml(settings: Settings, caplog) -> None:
