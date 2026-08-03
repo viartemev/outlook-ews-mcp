@@ -5,7 +5,7 @@ from pathlib import Path
 import pytest
 
 from outlook_mcp.errors import APIError
-from outlook_mcp.tools.email import get_email, list_emails, send_email
+from outlook_mcp.tools.email import get_attachment, get_email, list_emails, send_email
 
 
 def test_list_emails(client) -> None:
@@ -69,3 +69,81 @@ def test_send_email_rejects_attachment_over_limit(client, tmp_path: Path) -> Non
 
     assert excinfo.value.code == "validation_error"
     assert "ATTACHMENT_MAX_SIZE_MB=1" in excinfo.value.details[0]["reason"]
+
+
+def test_send_email_rejects_attachment_outside_root(client, tmp_path: Path) -> None:
+    root = tmp_path / "allowed"
+    root.mkdir()
+    client.settings.attachment_root = root
+    outside = tmp_path / "outside.txt"
+    outside.write_text("hello", encoding="utf-8")
+
+    with pytest.raises(APIError) as excinfo:
+        send_email(
+            client,
+            {
+                "to": ["user@example.com"],
+                "subject": "Test",
+                "body": "Hello",
+                "attachments": [str(outside)],
+            },
+        )
+
+    assert excinfo.value.code == "validation_error"
+    assert "EXCHANGE_ATTACHMENT_ROOT" in excinfo.value.details[0]["reason"]
+
+
+def test_send_email_allows_attachment_inside_root(client, tmp_path: Path) -> None:
+    root = tmp_path / "allowed"
+    root.mkdir()
+    client.settings.attachment_root = root
+    inside = root / "ok.txt"
+    inside.write_text("hello", encoding="utf-8")
+
+    result = send_email(
+        client,
+        {
+            "to": ["user@example.com"],
+            "subject": "Test",
+            "body": "Hello",
+            "attachments": [str(inside)],
+        },
+    )
+    assert result["status"] == "sent"
+
+
+def test_get_attachment_rejects_save_path_outside_root(client, tmp_path: Path) -> None:
+    root = tmp_path / "allowed"
+    root.mkdir()
+    client.settings.attachment_root = root
+    outside = tmp_path / "elsewhere"
+
+    with pytest.raises(APIError) as excinfo:
+        get_attachment(
+            client,
+            {
+                "email_id": "email-1",
+                "attachment_id": "attachment-1",
+                "save_path": str(outside),
+            },
+        )
+
+    assert excinfo.value.code == "validation_error"
+    assert "EXCHANGE_ATTACHMENT_ROOT" in excinfo.value.details[0]["reason"]
+
+
+def test_get_attachment_allows_save_path_inside_root(client, tmp_path: Path) -> None:
+    root = tmp_path / "allowed"
+    root.mkdir()
+    client.settings.attachment_root = root
+    inside = root / "downloads"
+
+    result = get_attachment(
+        client,
+        {
+            "email_id": "email-1",
+            "attachment_id": "attachment-1",
+            "save_path": str(inside),
+        },
+    )
+    assert result["filename"] == "test.txt"
