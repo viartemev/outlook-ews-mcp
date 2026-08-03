@@ -65,6 +65,9 @@ class CalendarOperationsMixin(BaseEWSBackend):
             categories=list(getattr(item, "categories", None) or []),
             recurrence_pattern={"value": str(recurrence)} if recurrence else None,
             importance=self._normalize_importance(getattr(item, "importance", None)),
+            free_busy_status=self._normalize_free_busy_status(
+                getattr(item, "legacy_free_busy_status", None)
+            ),
         )
 
     def _to_attendee(self, attendee: Any) -> ApiAttendee:
@@ -377,12 +380,17 @@ class CalendarOperationsMixin(BaseEWSBackend):
 
     def get_my_availability(self, request: ListEventsRequest) -> AvailabilityResult:
         events = self.list_events(request)
+        # "Free" appointments are placeholders (e.g. reminders, holidays) that
+        # don't actually block time -- only exclude those from busy time, the
+        # same threshold find_free_slots applies to the EWS merged free/busy view.
+        busy_events = [event for event in events if event.free_busy_status != "free"]
         busy_slots = [
-            {"start": event.start, "end": event.end, "subject": event.subject} for event in events
+            {"start": event.start, "end": event.end, "subject": event.subject}
+            for event in busy_events
         ]
         start = self._to_ews_datetime(request.start)
         end = self._to_ews_datetime(request.end)
-        free_slots = self._compute_free_slots(start, end, events)
+        free_slots = self._compute_free_slots(start, end, busy_events)
         return AvailabilityResult(free_slots=free_slots, busy_slots=busy_slots)
 
     #: Standard EWS folder class for calendar folders.

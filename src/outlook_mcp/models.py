@@ -124,6 +124,9 @@ class CalendarEvent(ExchangeModel):
     categories: list[str] = Field(default_factory=list)
     recurrence_pattern: dict[str, Any] | None = None
     importance: Literal["low", "normal", "high"] = "normal"
+    free_busy_status: Literal[
+        "free", "tentative", "busy", "oof", "working_elsewhere", "unknown"
+    ] = "busy"
 
 
 class RecurrencePattern(ExchangeModel):

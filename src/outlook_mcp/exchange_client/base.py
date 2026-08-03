@@ -323,6 +323,22 @@ class BaseEWSBackend:
             return normalized  # type: ignore[return-value]
         return "normal"
 
+    def _normalize_free_busy_status(
+        self, value: Any
+    ) -> Literal["free", "tentative", "busy", "oof", "working_elsewhere", "unknown"]:
+        # EWS's own choices are Free/Tentative/Busy/OOF/NoData/WorkingElsewhere.
+        # Anything we don't recognize is treated as "busy", the same
+        # conservative default exchangelib itself uses for new appointments.
+        mapping: dict[str, Literal["free", "tentative", "busy", "oof", "working_elsewhere"]] = {
+            "free": "free",
+            "tentative": "tentative",
+            "busy": "busy",
+            "oof": "oof",
+            "workingelsewhere": "working_elsewhere",
+        }
+        normalized = str(value or "").lower()
+        return mapping.get(normalized, "busy" if normalized != "nodata" else "unknown")
+
     def _extract_message_body(self, item: Any) -> tuple[str, str | None]:
         text = ""
         html = None
