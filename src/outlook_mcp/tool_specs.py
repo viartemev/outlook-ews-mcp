@@ -166,7 +166,6 @@ TOOL_SPECS: list[ToolSpec] = [
         get_attachment,
         request_model=models.GetAttachmentRequest,
         response_model=models.AttachmentResult,
-        read_only=True,
     ),
     ToolSpec(
         "list_events",
