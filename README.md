@@ -94,6 +94,7 @@ What the current code does:
 
 What you should still be careful with:
 - `EXCHANGE_VERIFY_SSL=false` disables TLS certificate verification and should be used only for trusted internal/self-signed environments
+- `EXCHANGE_AUTH_TYPE=Basic` sends credentials in the clear, so the server refuses to start against an `http://` `EXCHANGE_SERVER`; only override with `EXCHANGE_ALLOW_INSECURE_BASIC_AUTH=true` for a local/test server you control
 - `get_attachment` writes files to disk, so choose a safe destination directory
 - `send_email`/`reply_email`/`forward_email`/`create_draft` read local files (via `attachments`) and attach their contents to outgoing mail — combined with untrusted email content, this is a plausible path for a prompt-injected exfiltration of any file readable by the process; set `EXCHANGE_ATTACHMENT_ROOT` to restrict both which files can be attached and where `get_attachment` may write downloads
 - `outlook-ews-mcp-smoke` is privacy-safe by default and prints only masked mailbox info plus counts; set `OUTLOOK_MCP_SMOKE_INCLUDE_DATA=true` only if you explicitly want real inbox/event data in stdout
@@ -123,6 +124,7 @@ EXCHANGE_PASSWORD=secret
 EXCHANGE_EMAIL_ADDRESS=user@company.com
 EXCHANGE_VERIFY_SSL=true
 EXCHANGE_AUTH_TYPE=NTLM
+EXCHANGE_ALLOW_INSECURE_BASIC_AUTH=false
 EXCHANGE_VERSION=EXCHANGE_2016
 EXCHANGE_TIMEOUT=30
 EXCHANGE_MAX_RETRY_WAIT_SECONDS=90
@@ -140,6 +142,7 @@ LOG_FILE=
 Notes:
 - set `EXCHANGE_EMAIL_ADDRESS` when `EXCHANGE_USERNAME` is not an SMTP address
 - `OAuth2` is reserved in config, but this build currently supports live auth with `NTLM` or `Basic`
+- `EXCHANGE_ALLOW_INSECURE_BASIC_AUTH` only matters with `EXCHANGE_AUTH_TYPE=Basic` and an `http://` `EXCHANGE_SERVER`; startup fails otherwise unless it's set `true`
 - `EXCHANGE_IMPERSONATE_AS` enables mailbox impersonation when Exchange permissions are configured accordingly
 - `ATTACHMENT_MAX_SIZE_MB` is enforced both on local files attached to outgoing email and on attachments downloaded via `get_attachment`
 - `EXCHANGE_ATTACHMENT_ROOT` is unset (unrestricted) by default; set it to an absolute directory to confine both `attachments` paths (send/reply/forward/create_draft) and `get_attachment`'s `save_path` to that directory tree

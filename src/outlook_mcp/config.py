@@ -3,8 +3,9 @@ from __future__ import annotations
 from functools import lru_cache
 from pathlib import Path
 from typing import Literal
+from urllib.parse import urlparse
 
-from pydantic import Field
+from pydantic import Field, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -25,6 +26,9 @@ class Settings(BaseSettings):
         default="NTLM",
         alias="EXCHANGE_AUTH_TYPE",
     )
+    exchange_allow_insecure_basic_auth: bool = Field(
+        default=False, alias="EXCHANGE_ALLOW_INSECURE_BASIC_AUTH"
+    )
     exchange_version: str | None = Field(default=None, alias="EXCHANGE_VERSION")
     exchange_timeout: int = Field(default=30, alias="EXCHANGE_TIMEOUT", ge=1, le=300)
     exchange_max_retry_wait: int = Field(
@@ -44,6 +48,20 @@ class Settings(BaseSettings):
         alias="LOG_LEVEL",
     )
     log_file: Path | None = Field(default=None, alias="LOG_FILE")
+
+    @model_validator(mode="after")
+    def _reject_insecure_basic_auth(self) -> "Settings":
+        if self.exchange_auth_type != "Basic" or self.exchange_allow_insecure_basic_auth:
+            return self
+        scheme = urlparse(self.exchange_server).scheme.lower()
+        if scheme == "http":
+            raise ValueError(
+                "EXCHANGE_AUTH_TYPE=Basic sends credentials in the clear over "
+                "EXCHANGE_SERVER=http://... . Use an https:// endpoint, or set "
+                "EXCHANGE_ALLOW_INSECURE_BASIC_AUTH=true to explicitly opt into "
+                "sending Basic auth over plain HTTP (e.g. for a local/test server)."
+            )
+        return self
 
 
 @lru_cache(maxsize=1)
