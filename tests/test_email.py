@@ -51,6 +51,25 @@ def test_send_email_rejects_missing_attachment(client) -> None:
     assert excinfo.value.code == "validation_error"
 
 
+def test_send_email_rejects_non_regular_file_attachment(client, tmp_path: Path) -> None:
+    directory_as_attachment = tmp_path / "dir"
+    directory_as_attachment.mkdir()
+
+    with pytest.raises(APIError) as excinfo:
+        send_email(
+            client,
+            {
+                "to": ["user@example.com"],
+                "subject": "Test",
+                "body": "Hello",
+                "attachments": [str(directory_as_attachment)],
+            },
+        )
+
+    assert excinfo.value.code == "validation_error"
+    assert "not a regular file" in excinfo.value.details[0]["reason"]
+
+
 def test_send_email_rejects_attachment_over_limit(client, tmp_path: Path) -> None:
     client.settings.attachment_max_size_mb = 1
     oversized = tmp_path / "big.bin"

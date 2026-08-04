@@ -197,6 +197,21 @@ def _validate_attachments(attachments: list[Path], settings: Settings) -> None:
             ],
         )
 
+    # Reject anything that isn't a plain file up front (devices, FIFOs, directories, ...).
+    # This is an early, best-effort check for a friendly error message -- the authoritative
+    # check happens against the opened file descriptor in _attach_files, since the file on
+    # disk can still change between this stat and the actual read.
+    not_regular = [str(path) for path in attachments if not path.is_file()]
+    if not_regular:
+        raise APIError(
+            "validation_error",
+            "one or more attachments are not regular files",
+            details=[
+                {"field": "attachments", "reason": f"not a regular file: {path}"}
+                for path in not_regular
+            ],
+        )
+
     max_size_bytes = settings.attachment_max_size_mb * 1024 * 1024
     sizes = [(path, path.stat().st_size) for path in attachments]
     oversized = [{"path": str(path), "size": size} for path, size in sizes if size > max_size_bytes]

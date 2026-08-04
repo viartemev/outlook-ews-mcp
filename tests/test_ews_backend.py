@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+import os
+import threading
+from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
@@ -703,6 +706,71 @@ def test_forward_email_saves_draft_attaches_files_then_sends(settings, tmp_path)
         ("send",),
     ]
     assert result == SendResult(id="sent-1", status="sent")
+
+
+@pytest.mark.skipif(not hasattr(os, "mkfifo"), reason="FIFOs are POSIX-only")
+def test_attach_files_rejects_fifo_without_hanging(settings, tmp_path) -> None:
+    """A FIFO with no writer connected would block open() forever without O_NONBLOCK."""
+    backend = EWSExchangeBackend(settings)
+    fifo_path = tmp_path / "pipe"
+    os.mkfifo(fifo_path)
+
+    class FakeMessage:
+        def attach(self, attachment):
+            raise AssertionError("should not attach a FIFO")
+
+    outcome: dict = {}
+
+    def run() -> None:
+        try:
+            backend._attach_files(FakeMessage(), [fifo_path])
+        except BaseException as exc:  # noqa: BLE001
+            outcome["error"] = exc
+
+    thread = threading.Thread(target=run, daemon=True)
+    thread.start()
+    thread.join(timeout=5)
+
+    assert not thread.is_alive(), "_attach_files hung opening a FIFO with no writer"
+    error = outcome.get("error")
+    assert isinstance(error, APIError)
+    assert error.code == "validation_error"
+    assert "not a regular file" in error.details[0]["reason"]
+
+
+@pytest.mark.skipif(os.name != "posix", reason="/dev/null device check is POSIX-specific")
+def test_attach_files_rejects_character_device(settings) -> None:
+    backend = EWSExchangeBackend(settings)
+
+    class FakeMessage:
+        def attach(self, attachment):
+            raise AssertionError("should not attach a device file")
+
+    with pytest.raises(APIError) as excinfo:
+        backend._attach_files(FakeMessage(), [Path(os.devnull)])
+
+    assert excinfo.value.code == "validation_error"
+    assert "not a regular file" in excinfo.value.details[0]["reason"]
+
+
+def test_attach_files_bounds_read_and_reports_oversize_from_actual_bytes(
+    settings, tmp_path
+) -> None:
+    """The size check must come from bytes actually read, not the earlier path-based stat."""
+    settings.attachment_max_size_mb = 1
+    backend = EWSExchangeBackend(settings)
+    oversized = tmp_path / "big.bin"
+    oversized.write_bytes(b"x" * (1024 * 1024 + 1))
+
+    class FakeMessage:
+        def attach(self, attachment):
+            raise AssertionError("oversized attachment must not be attached")
+
+    with pytest.raises(APIError) as excinfo:
+        backend._attach_files(FakeMessage(), [oversized])
+
+    assert excinfo.value.code == "validation_error"
+    assert "ATTACHMENT_MAX_SIZE_MB=1" in excinfo.value.details[0]["reason"]
 
 
 def test_move_email_returns_new_id_mutated_in_place_by_move(settings) -> None:

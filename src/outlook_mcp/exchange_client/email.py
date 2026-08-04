@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import os
+import stat
 import tempfile
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -116,9 +118,60 @@ class EmailOperationsMixin(BaseEWSBackend):
         return message
 
     def _attach_files(self, message: Message, attachments: list[Path]) -> None:
+        max_size_bytes = self.settings.attachment_max_size_mb * 1024 * 1024
+        max_total_size_bytes = self.settings.attachment_max_total_size_mb * 1024 * 1024
+        total_size = 0
+        # O_NONBLOCK keeps open() from hanging forever on a FIFO with no writer connected;
+        # it's a no-op for the regular files this loop actually accepts (POSIX only applies
+        # nonblocking semantics to FIFOs/devices/sockets, never to plain files).
+        nonblock_flag = getattr(os, "O_NONBLOCK", 0)
         for path in attachments:
-            with Path(path).open("rb") as handle:
-                message.attach(FileAttachment(name=Path(path).name, content=handle.read()))
+            fd = os.open(path, os.O_RDONLY | nonblock_flag)
+            fd_owned = False
+            try:
+                # Re-validate against the opened fd, not the earlier path-based stat: the
+                # file on disk could have been swapped since that check, and a path check
+                # alone can't tell a FIFO or /dev/zero from a plain file.
+                if not stat.S_ISREG(os.fstat(fd).st_mode):
+                    raise APIError(
+                        "validation_error",
+                        "one or more attachments are not regular files",
+                        details=[{"field": "attachments", "reason": f"not a regular file: {path}"}],
+                    )
+                with os.fdopen(fd, "rb") as handle:
+                    fd_owned = True
+                    # Bounded to max_size_bytes + 1 so a file that lies about its size
+                    # (grown after the earlier stat) can't be read unboundedly into memory.
+                    content = handle.read(max_size_bytes + 1)
+            finally:
+                if not fd_owned:
+                    os.close(fd)
+            if len(content) > max_size_bytes:
+                raise APIError(
+                    "validation_error",
+                    "one or more attachments exceed the configured size limit",
+                    details=[
+                        {
+                            "field": "attachments",
+                            "reason": f"file exceeds ATTACHMENT_MAX_SIZE_MB="
+                            f"{self.settings.attachment_max_size_mb}: {path}",
+                        }
+                    ],
+                )
+            total_size += len(content)
+            if total_size > max_total_size_bytes:
+                raise APIError(
+                    "validation_error",
+                    "total attachment size exceeds the configured limit",
+                    details=[
+                        {
+                            "field": "attachments",
+                            "reason": f"combined size exceeds ATTACHMENT_MAX_TOTAL_SIZE_MB="
+                            f"{self.settings.attachment_max_total_size_mb}",
+                        }
+                    ],
+                )
+            message.attach(FileAttachment(name=Path(path).name, content=content))
 
     def _to_folder_info(self, folder: Folder, depth: int) -> FolderInfo:
         children = []
