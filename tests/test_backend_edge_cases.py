@@ -58,6 +58,36 @@ def test_get_attachment_sanitizes_absolute_path(settings, tmp_path: Path, monkey
     assert not outside_target.exists()
 
 
+@pytest.mark.skipif(not hasattr(Path, "symlink_to"), reason="symlinks are POSIX-only here")
+def test_get_attachment_refuses_to_follow_dangling_symlink_at_target_name(
+    settings, tmp_path: Path, monkeypatch
+) -> None:
+    """A symlink planted at the sanitized attachment name, pointing at a file that
+    doesn't exist yet, must not be followed: Path.exists() reports False for a
+    dangling symlink, so a naive open("wb") would silently write through it and
+    escape EXCHANGE_ATTACHMENT_ROOT."""
+    backend = EWSExchangeBackend(settings)
+    outside_target = tmp_path.parent / "outside-target.txt"
+    assert not outside_target.exists()
+    (tmp_path / "evil.txt").symlink_to(outside_target)
+
+    attachment = FakeAttachment("att-1", "evil.txt", b"payload")
+    monkeypatch.setattr(
+        backend, "_fetch_item", lambda *a, **k: SimpleNamespace(attachments=[attachment])
+    )
+
+    request = GetAttachmentRequest(
+        email_id="email-1", attachment_id="att-1", save_path=str(tmp_path)
+    )
+    result = backend.get_attachment(request)
+
+    assert not outside_target.exists()
+    saved_path = Path(result.saved_path)
+    assert saved_path.parent == tmp_path
+    assert saved_path.name != "evil.txt"
+    assert saved_path.read_bytes() == b"payload"
+
+
 def test_get_attachment_rejects_declared_size_over_limit(
     settings, tmp_path: Path, monkeypatch
 ) -> None:
