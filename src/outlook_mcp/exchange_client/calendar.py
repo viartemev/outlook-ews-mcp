@@ -397,7 +397,15 @@ class CalendarOperationsMixin(BaseEWSBackend):
     _CALENDAR_FOLDER_CLASS = "IPF.Appointment"
 
     def list_calendars(self) -> list[CalendarInfo]:
-        default_id = self.account.calendar.id
+        try:
+            default_id = self.account.calendar.id
+            folders = [
+                folder
+                for folder in self.account.root.walk()
+                if getattr(folder, "folder_class", None) == self._CALENDAR_FOLDER_CLASS
+            ]
+        except Exception as exc:  # noqa: BLE001
+            raise self._map_exception(exc) from exc
         return [
             CalendarInfo(
                 id=folder.id,
@@ -405,6 +413,5 @@ class CalendarOperationsMixin(BaseEWSBackend):
                 is_default=folder.id == default_id,
                 owner_email=self.account.primary_smtp_address,
             )
-            for folder in self.account.root.walk()
-            if getattr(folder, "folder_class", None) == self._CALENDAR_FOLDER_CLASS
+            for folder in folders
         ]

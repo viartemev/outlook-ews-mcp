@@ -71,6 +71,52 @@ def test_send_email_rejects_attachment_over_limit(client, tmp_path: Path) -> Non
     assert "ATTACHMENT_MAX_SIZE_MB=1" in excinfo.value.details[0]["reason"]
 
 
+def test_send_email_rejects_too_many_attachments(client, tmp_path: Path) -> None:
+    client.settings.attachment_max_count = 2
+    paths = []
+    for i in range(3):
+        path = tmp_path / f"f{i}.txt"
+        path.write_text("hi", encoding="utf-8")
+        paths.append(str(path))
+
+    with pytest.raises(APIError) as excinfo:
+        send_email(
+            client,
+            {
+                "to": ["user@example.com"],
+                "subject": "Test",
+                "body": "Hello",
+                "attachments": paths,
+            },
+        )
+
+    assert excinfo.value.code == "validation_error"
+    assert "ATTACHMENT_MAX_COUNT=2" in excinfo.value.details[0]["reason"]
+
+
+def test_send_email_rejects_total_attachment_size_over_limit(client, tmp_path: Path) -> None:
+    client.settings.attachment_max_total_size_mb = 1
+    paths = []
+    for i in range(2):
+        path = tmp_path / f"f{i}.bin"
+        path.write_bytes(b"x" * (600 * 1024))
+        paths.append(str(path))
+
+    with pytest.raises(APIError) as excinfo:
+        send_email(
+            client,
+            {
+                "to": ["user@example.com"],
+                "subject": "Test",
+                "body": "Hello",
+                "attachments": paths,
+            },
+        )
+
+    assert excinfo.value.code == "validation_error"
+    assert "ATTACHMENT_MAX_TOTAL_SIZE_MB=1" in excinfo.value.details[0]["reason"]
+
+
 def test_send_email_rejects_attachment_outside_root(client, tmp_path: Path) -> None:
     root = tmp_path / "allowed"
     root.mkdir()

@@ -98,6 +98,78 @@ def test_get_attachment_rejects_content_over_limit_when_size_unknown(
     assert list(tmp_path.iterdir()) == []
 
 
+class FakeStreamingAttachment:
+    """Mimics exchangelib's FileAttachment.fp: a context manager streaming content
+    in chunks, the way the real GetAttachment service does."""
+
+    def __init__(
+        self, attachment_id: str, name: str, content: bytes, size: int | None = None
+    ) -> None:
+        self.attachment_id = SimpleNamespace(id=attachment_id)
+        self.name = name
+        self.content_type = "application/octet-stream"
+        self.size = size if size is not None else len(content)
+        self._content = content
+
+    class _Reader:
+        def __init__(self, content: bytes) -> None:
+            self._chunks = [content[i : i + 4] for i in range(0, len(content), 4)]
+
+        def read(self, _size: int) -> bytes:
+            return self._chunks.pop(0) if self._chunks else b""
+
+    @property
+    def fp(self):
+        return self
+
+    def __enter__(self):
+        return self._Reader(self._content)
+
+    def __exit__(self, *args):
+        return False
+
+
+def test_get_attachment_streams_via_fp_instead_of_content(
+    settings, tmp_path: Path, monkeypatch
+) -> None:
+    backend = EWSExchangeBackend(settings)
+    attachment = FakeStreamingAttachment("att-1", "note.txt", b"hello world, streamed")
+    monkeypatch.setattr(
+        backend, "_fetch_item", lambda *a, **k: SimpleNamespace(attachments=[attachment])
+    )
+
+    request = GetAttachmentRequest(
+        email_id="email-1", attachment_id="att-1", save_path=str(tmp_path)
+    )
+    result = backend.get_attachment(request)
+
+    assert Path(result.saved_path).read_bytes() == b"hello world, streamed"
+    assert result.size == len(b"hello world, streamed")
+
+
+def test_get_attachment_aborts_stream_over_limit_and_discards_partial_file(
+    settings, tmp_path: Path, monkeypatch
+) -> None:
+    """The size check must run as chunks arrive, not only after the whole
+    attachment has been buffered -- and a rejected download must not leave a
+    partial file behind."""
+    settings.attachment_max_size_mb = 1
+    backend = EWSExchangeBackend(settings)
+    attachment = FakeStreamingAttachment("att-1", "big.bin", b"x" * (2 * 1024 * 1024), size=None)
+    monkeypatch.setattr(
+        backend, "_fetch_item", lambda *a, **k: SimpleNamespace(attachments=[attachment])
+    )
+
+    request = GetAttachmentRequest(
+        email_id="email-1", attachment_id="att-1", save_path=str(tmp_path)
+    )
+    with pytest.raises(APIError) as excinfo:
+        backend.get_attachment(request)
+
+    assert excinfo.value.code == "validation_error"
+    assert list(tmp_path.iterdir()) == []
+
+
 def test_get_my_availability_computes_free_slots(settings, monkeypatch) -> None:
     backend = EWSExchangeBackend(settings)
     backend._account = SimpleNamespace(default_timezone=EWSTimeZone("Europe/Moscow"))

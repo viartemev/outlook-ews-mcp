@@ -4,7 +4,7 @@ import inspect
 import json
 from collections.abc import Callable
 from dataclasses import dataclass
-from typing import Any
+from typing import Annotated, Any
 
 from mcp.types import CallToolResult, TextContent
 from pydantic.fields import FieldInfo
@@ -25,6 +25,18 @@ def _field_default(field: FieldInfo) -> Any:
     if field.is_required():
         return inspect.Parameter.empty
     return field.get_default(call_default_factory=True)
+
+
+def _field_annotation(field: FieldInfo) -> Any:
+    """The field's type, carrying its Field(...) constraints (ge/le/min_length/...).
+
+    field.annotation alone drops that constraint metadata, so the JSON schema FastMCP
+    publishes for the tool would advertise a bare type with no bounds even though the
+    request model enforces them once the call comes in.
+    """
+    if field.metadata:
+        return Annotated[(field.annotation, *field.metadata)]
+    return field.annotation
 
 
 @dataclass(frozen=True)
@@ -74,15 +86,16 @@ def bind_mcp_tool(
     parameters: list[inspect.Parameter] = []
     annotations: dict[str, Any] = {"return": CallToolResult}
     for field_name, field in spec.request_model.model_fields.items():
+        annotation = _field_annotation(field)
         parameters.append(
             inspect.Parameter(
                 field_name,
                 inspect.Parameter.KEYWORD_ONLY,
                 default=_field_default(field),
-                annotation=field.annotation,
+                annotation=annotation,
             )
         )
-        annotations[field_name] = field.annotation
+        annotations[field_name] = annotation
 
     execute.__signature__ = inspect.Signature(  # type: ignore[attr-defined]
         parameters, return_annotation=CallToolResult

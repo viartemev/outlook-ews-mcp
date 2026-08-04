@@ -913,3 +913,38 @@ def test_search_emails_defaults_to_mail_folders_only(settings, monkeypatch) -> N
     backend.search_emails(SearchEmailsRequest(query="hello"))
 
     assert captured["folders"] == [mail_folder]
+
+
+def test_search_emails_maps_error_raised_while_walking_folders(settings) -> None:
+    """Regression guard: account.root.walk() used to run outside the try/except,
+    so an auth/network failure while walking the mailbox for a whole-mailbox
+    search escaped as a raw exchangelib exception instead of an APIError."""
+    backend = EWSExchangeBackend(settings)
+
+    class PoisonRoot:
+        def walk(self):
+            raise UnauthorizedError("access denied")
+
+    backend._account = SimpleNamespace(root=PoisonRoot())
+
+    with pytest.raises(AuthFailedError):
+        backend.search_emails(SearchEmailsRequest(query="hello"))
+
+
+def test_list_folders_maps_error_raised_while_walking_children(settings) -> None:
+    """Regression guard: the recursive folder walk in _to_folder_info ran outside
+    any try/except, so a failure partway through (e.g. auth expiring mid-walk)
+    escaped as a raw exchangelib exception instead of an APIError."""
+    from outlook_mcp.models import ListFoldersRequest
+
+    backend = EWSExchangeBackend(settings)
+
+    class PoisonChildren:
+        @property
+        def children(self):
+            raise UnauthorizedError("access denied")
+
+    backend._account = SimpleNamespace(root=PoisonChildren())
+
+    with pytest.raises(AuthFailedError):
+        backend.list_folders(ListFoldersRequest(parent="root", depth=2))

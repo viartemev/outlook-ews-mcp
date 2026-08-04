@@ -136,6 +136,18 @@ class RecurrencePattern(ExchangeModel):
     occurrences: int | None = Field(default=None, ge=1)
     days_of_week: list[WeekdayName] | None = None
 
+    @model_validator(mode="after")
+    def _validate_combination(self) -> "RecurrencePattern":
+        if self.end_date is not None and self.occurrences is not None:
+            raise ValueError("set either end_date or occurrences, not both")
+        if self.days_of_week is not None and self.type != "weekly":
+            raise ValueError("days_of_week only applies to type='weekly'")
+        if self.type == "yearly" and self.interval != 1:
+            # exchangelib's AbsoluteYearlyPattern has no interval field -- Exchange yearly
+            # recurrence always repeats every year, so any other interval can't be honored.
+            raise ValueError("interval is not supported for type='yearly'")
+        return self
+
 
 class ListEmailsRequest(ExchangeModel):
     folder: str = "inbox"
@@ -286,6 +298,12 @@ class CreateEventRequest(ExchangeModel):
     def validate_range(self) -> "CreateEventRequest":
         if self.end <= self.start:
             raise ValueError("end must be greater than start")
+        if (
+            self.recurrence
+            and self.recurrence.end_date is not None
+            and self.recurrence.end_date < self.start.date()
+        ):
+            raise ValueError("recurrence.end_date must not be before start")
         return self
 
 

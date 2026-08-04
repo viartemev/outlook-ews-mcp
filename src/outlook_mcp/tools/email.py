@@ -4,6 +4,7 @@ from pathlib import Path
 
 from pydantic import ValidationError
 
+from ..config import Settings
 from ..errors import APIError, validation_error_from_pydantic
 from ..exchange_client import ExchangeClient
 from ..models import (
@@ -55,9 +56,7 @@ def send_email(client: ExchangeClient, arguments: dict) -> dict:
     except ValidationError as exc:
         raise validation_error_from_pydantic(exc) from exc
 
-    _validate_attachments(
-        request.attachments, client.settings.attachment_max_size_mb, client.settings.attachment_root
-    )
+    _validate_attachments(request.attachments, client.settings)
     return dump_model(client.send_email(request))
 
 
@@ -66,9 +65,7 @@ def reply_email(client: ExchangeClient, arguments: dict) -> dict:
         request = ReplyEmailRequest.model_validate(arguments)
     except ValidationError as exc:
         raise validation_error_from_pydantic(exc) from exc
-    _validate_attachments(
-        request.attachments, client.settings.attachment_max_size_mb, client.settings.attachment_root
-    )
+    _validate_attachments(request.attachments, client.settings)
     return dump_model(client.reply_email(request))
 
 
@@ -77,9 +74,7 @@ def forward_email(client: ExchangeClient, arguments: dict) -> dict:
         request = ForwardEmailRequest.model_validate(arguments)
     except ValidationError as exc:
         raise validation_error_from_pydantic(exc) from exc
-    _validate_attachments(
-        request.attachments, client.settings.attachment_max_size_mb, client.settings.attachment_root
-    )
+    _validate_attachments(request.attachments, client.settings)
     return dump_model(client.forward_email(request))
 
 
@@ -136,9 +131,7 @@ def create_draft(client: ExchangeClient, arguments: dict) -> dict:
         request = DraftEmailRequest.model_validate(arguments)
     except ValidationError as exc:
         raise validation_error_from_pydantic(exc) from exc
-    _validate_attachments(
-        request.attachments, client.settings.attachment_max_size_mb, client.settings.attachment_root
-    )
+    _validate_attachments(request.attachments, client.settings)
     return dump_model(client.create_draft(request))
 
 
@@ -178,8 +171,21 @@ def _validate_within_root(paths: list[Path], root: Path | None, field: str) -> N
         )
 
 
-def _validate_attachments(attachments: list[Path], max_size_mb: int, root: Path | None) -> None:
-    _validate_within_root(attachments, root, "attachments")
+def _validate_attachments(attachments: list[Path], settings: Settings) -> None:
+    _validate_within_root(attachments, settings.attachment_root, "attachments")
+
+    if len(attachments) > settings.attachment_max_count:
+        raise APIError(
+            "validation_error",
+            "too many attachments",
+            details=[
+                {
+                    "field": "attachments",
+                    "reason": f"{len(attachments)} attachments exceed "
+                    f"ATTACHMENT_MAX_COUNT={settings.attachment_max_count}",
+                }
+            ],
+        )
 
     missing = [str(path) for path in attachments if not path.exists()]
     if missing:
@@ -191,12 +197,9 @@ def _validate_attachments(attachments: list[Path], max_size_mb: int, root: Path 
             ],
         )
 
-    max_size_bytes = max_size_mb * 1024 * 1024
-    oversized = [
-        {"path": str(path), "size": path.stat().st_size}
-        for path in attachments
-        if path.stat().st_size > max_size_bytes
-    ]
+    max_size_bytes = settings.attachment_max_size_mb * 1024 * 1024
+    sizes = [(path, path.stat().st_size) for path in attachments]
+    oversized = [{"path": str(path), "size": size} for path, size in sizes if size > max_size_bytes]
     if oversized:
         raise APIError(
             "validation_error",
@@ -204,8 +207,24 @@ def _validate_attachments(attachments: list[Path], max_size_mb: int, root: Path 
             details=[
                 {
                     "field": "attachments",
-                    "reason": f"file exceeds ATTACHMENT_MAX_SIZE_MB={max_size_mb}: {item['path']} ({item['size']} bytes)",
+                    "reason": f"file exceeds ATTACHMENT_MAX_SIZE_MB="
+                    f"{settings.attachment_max_size_mb}: {item['path']} ({item['size']} bytes)",
                 }
                 for item in oversized
+            ],
+        )
+
+    max_total_size_bytes = settings.attachment_max_total_size_mb * 1024 * 1024
+    total_size = sum(size for _, size in sizes)
+    if total_size > max_total_size_bytes:
+        raise APIError(
+            "validation_error",
+            "total attachment size exceeds the configured limit",
+            details=[
+                {
+                    "field": "attachments",
+                    "reason": f"combined size {total_size} bytes exceeds "
+                    f"ATTACHMENT_MAX_TOTAL_SIZE_MB={settings.attachment_max_total_size_mb}",
+                }
             ],
         )
