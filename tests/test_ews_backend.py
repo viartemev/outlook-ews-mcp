@@ -107,6 +107,29 @@ def test_find_free_slots_requires_every_attendee_free(settings) -> None:
     assert slots[0].start.hour == 9
 
 
+def test_find_free_slots_clamps_sub_5_minute_duration_to_ews_minimum(settings) -> None:
+    """EWS rejects merged_free_busy_interval below 5, so a short meeting duration
+    (e.g. 2 minutes) must still request a valid 5-minute sample, and slots must be
+    matched against the sample that covers each short slot's start time."""
+    backend = EWSExchangeBackend(settings)
+    captured: dict = {}
+    request = FindFreeSlotsRequest.model_validate(
+        {
+            "attendees": ["user@example.com"],
+            "duration": 2,
+            "start": "2026-04-13T09:00:00+03:00",
+            "end": "2026-04-13T09:10:00+03:00",
+        }
+    )
+    # Two 5-minute samples: first free ("0"), second busy ("1").
+    backend._account = _fake_account([SimpleNamespace(merged="01")], captured)
+
+    slots = backend.find_free_slots(request)
+
+    assert captured["merged_free_busy_interval"] == 5
+    assert [slot.start.minute for slot in slots] == [0, 2, 4]
+
+
 def test_find_free_slots_filters_by_work_hours(settings) -> None:
     backend = EWSExchangeBackend(settings)
     request = FindFreeSlotsRequest.model_validate(
