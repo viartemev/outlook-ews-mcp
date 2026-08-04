@@ -298,7 +298,21 @@ class BaseEWSBackend:
             raise self._map_exception(exc, item_id=item_id) from exc
         if isinstance(item, Exception):
             raise self._map_exception(item, item_id=item_id)
+        # Account.fetch() only uses `folder` to validate `only_fields` against that
+        # folder's allowed fields -- it does NOT restrict which item the id resolves
+        # to. Any item id in the mailbox fetches successfully regardless of the
+        # `folder` passed here, so callers relying on `folder` as a scoping boundary
+        # (contacts, calendar events, drafts) need this explicit re-check after the
+        # fetch, or a calendar_id/folder argument silently fails to constrain which
+        # item gets acted on.
+        if folder is not None and not self._item_in_folder(item, folder):
+            raise NotFoundError(item_id)
         return item
+
+    def _item_in_folder(self, item: Any, folder: Folder) -> bool:
+        parent_id = getattr(getattr(item, "parent_folder_id", None), "id", None)
+        folder_id = getattr(folder, "id", None)
+        return parent_id is not None and folder_id is not None and parent_id == folder_id
 
     def _mailbox(self, address: str) -> Mailbox:
         return Mailbox(email_address=address)
