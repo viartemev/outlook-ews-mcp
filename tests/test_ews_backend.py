@@ -15,7 +15,7 @@ from exchangelib.version import EXCHANGE_2016, Version
 import outlook_mcp.exchange_client.base as exchange_client_base
 import outlook_mcp.exchange_client.contacts as exchange_client_contacts
 import outlook_mcp.exchange_client.email as exchange_client_email
-from outlook_mcp.errors import APIError, AuthFailedError
+from outlook_mcp.errors import APIError, AuthFailedError, NotFoundError
 from outlook_mcp.exchange_client import EWSExchangeBackend
 from outlook_mcp.models import (
     ActionResult,
@@ -141,6 +141,44 @@ def test_fetch_item_raises_api_error_when_exchange_returns_error(settings) -> No
     assert excinfo.value.code == "exchange_error"
 
 
+def test_fetch_item_rejects_item_whose_parent_folder_does_not_match_requested_folder(
+    settings,
+) -> None:
+    """Account.fetch(folder=...) only uses `folder` to validate `only_fields` against
+    that folder's allowed fields -- it does NOT restrict which item an id resolves to.
+    Passing a calendar_id/folder as a scoping argument must not let an id belonging to
+    a different folder (e.g. a different calendar, or a personal contact when a GAL
+    lookup was intended) be fetched and acted on as if it lived in the requested one."""
+    backend = EWSExchangeBackend(settings)
+    item = SimpleNamespace(id="item-1", parent_folder_id=SimpleNamespace(id="folder-other"))
+    backend._account = SimpleNamespace(fetch=lambda **kwargs: iter([item]))
+    requested_folder = SimpleNamespace(id="folder-requested")
+
+    with pytest.raises(NotFoundError):
+        backend._fetch_item("item-1", folder=requested_folder)
+
+
+def test_fetch_item_accepts_item_whose_parent_folder_matches_requested_folder(settings) -> None:
+    backend = EWSExchangeBackend(settings)
+    item = SimpleNamespace(id="item-1", parent_folder_id=SimpleNamespace(id="folder-1"))
+    backend._account = SimpleNamespace(fetch=lambda **kwargs: iter([item]))
+    requested_folder = SimpleNamespace(id="folder-1")
+
+    assert backend._fetch_item("item-1", folder=requested_folder) is item
+
+
+def test_fetch_item_rejects_item_with_no_resolvable_parent_folder_when_scoped(settings) -> None:
+    """A missing parent_folder_id (or an unresolved folder id on the requested folder)
+    must fail closed rather than silently skipping the scoping check."""
+    backend = EWSExchangeBackend(settings)
+    item = SimpleNamespace(id="item-1", parent_folder_id=None)
+    backend._account = SimpleNamespace(fetch=lambda **kwargs: iter([item]))
+    requested_folder = SimpleNamespace(id="folder-1")
+
+    with pytest.raises(NotFoundError):
+        backend._fetch_item("item-1", folder=requested_folder)
+
+
 def test_get_contact_reads_notes_from_body_not_readonly_notes_field(settings) -> None:
     """Regression test: Contact.notes is read-only in exchangelib, so reading it
     always returned None. Outlook stores contact notes in the item body."""
@@ -160,12 +198,31 @@ def test_get_contact_reads_notes_from_body_not_readonly_notes_field(settings) ->
         manager=None,
         birthday=None,
         text_body="Met at the conference",
+        parent_folder_id=SimpleNamespace(id="contacts-1"),
     )
-    backend._account = SimpleNamespace(fetch=lambda **kwargs: iter([item]), contacts=object())
+    backend._account = SimpleNamespace(
+        fetch=lambda **kwargs: iter([item]), contacts=SimpleNamespace(id="contacts-1")
+    )
 
     contact = backend.get_contact(GetContactRequest(id="contact-1"))
 
     assert contact.notes == "Met at the conference"
+
+
+def test_get_contact_rejects_item_that_actually_lives_in_a_different_folder(settings) -> None:
+    """Regression: an id resolving to an item outside the personal Contacts folder
+    (e.g. moved to another folder, or belonging to a different item type entirely)
+    must not be returned as if it were a contact in Contacts -- Account.fetch(folder=...)
+    doesn't enforce that on its own."""
+    backend = EWSExchangeBackend(settings)
+    item = SimpleNamespace(id="contact-1", parent_folder_id=SimpleNamespace(id="some-other-folder"))
+    backend._account = SimpleNamespace(
+        fetch=lambda **kwargs: iter([item]), contacts=SimpleNamespace(id="contacts-1")
+    )
+
+    with pytest.raises(APIError) as excinfo:
+        backend.get_contact(GetContactRequest(id="contact-1"))
+    assert excinfo.value.code == "not_found"
 
 
 def test_get_contact_resolves_gal_address(settings, monkeypatch) -> None:
