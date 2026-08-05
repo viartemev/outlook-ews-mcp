@@ -378,13 +378,17 @@ class CalendarOperationsMixin(BaseEWSBackend):
     def find_free_slots(self, request: FindFreeSlotsRequest) -> list[FreeSlot]:
         start = self._to_ews_datetime(request.start)
         end = self._to_ews_datetime(request.end)
+        # EWS's free/busy sampling granularity is bounded to [5, 1440] minutes and
+        # is independent of the requested meeting duration -- a 1-minute meeting
+        # still has to be checked against 5-minute-wide free/busy samples.
+        sample_minutes = max(request.duration, 5)
         try:
             views = list(
                 self.account.protocol.get_free_busy_info(
                     accounts=[(str(address), "Required", False) for address in request.attendees],
                     start=start,
                     end=end,
-                    merged_free_busy_interval=request.duration,
+                    merged_free_busy_interval=sample_minutes,
                     requested_view="DetailedMerged",
                 )
             )
@@ -402,12 +406,13 @@ class CalendarOperationsMixin(BaseEWSBackend):
         slots: list[FreeSlot] = []
         cursor = start
         interval = timedelta(minutes=request.duration)
-        position = 0
+        sample_interval = timedelta(minutes=sample_minutes)
         # Stop once a full-length slot would no longer fit before `end` -- a
         # truncated final slot would be shorter than the requested duration and
         # so isn't actually usable for scheduling a meeting of that length.
         while cursor + interval <= end:
             slot_end = cursor + interval
+            position = (cursor - start) // sample_interval
             all_free = all(
                 position < len(merged) and merged[position] == "0" for merged in merged_per_attendee
             )
@@ -416,7 +421,6 @@ class CalendarOperationsMixin(BaseEWSBackend):
                     FreeSlot(start=cursor, end=slot_end, all_available=True, busy_attendees=[])
                 )
             cursor = slot_end
-            position += 1
         return slots
 
     def _parse_work_hours(self, work_hours: WorkHours | None) -> tuple[time, time] | None:

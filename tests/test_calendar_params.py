@@ -96,13 +96,16 @@ def test_calendar_id_must_reference_calendar_folder(settings, monkeypatch) -> No
     assert excinfo.value.code == "validation_error"
 
 
-def _fake_event(item_id: str, is_recurring: bool) -> SimpleNamespace:
+def _fake_event(
+    item_id: str, is_recurring: bool, parent_folder_id: str | None = None
+) -> SimpleNamespace:
     return SimpleNamespace(
         id=item_id,
         subject="Standup",
         start=datetime(2026, 4, 13, 9, 0, tzinfo=UTC),
         end=datetime(2026, 4, 13, 9, 30, tzinfo=UTC),
         is_recurring=is_recurring,
+        parent_folder_id=SimpleNamespace(id=parent_folder_id) if parent_folder_id else None,
     )
 
 
@@ -145,6 +148,7 @@ class FakeDeletableItem:
     def __init__(self) -> None:
         self.deleted_with: dict | None = None
         self.cancelled_with: dict | None = None
+        self.parent_folder_id = SimpleNamespace(id="cal-1")
 
     def delete(self, **kwargs) -> None:
         self.deleted_with = kwargs
@@ -157,7 +161,7 @@ def test_delete_event_sends_cancel_message_when_provided(settings) -> None:
     backend = EWSExchangeBackend(settings)
     item = FakeDeletableItem()
     backend._account = SimpleNamespace(
-        calendar=object(),
+        calendar=SimpleNamespace(id="cal-1"),
         fetch=lambda **kwargs: iter([item]),
     )
 
@@ -175,7 +179,7 @@ def test_delete_event_without_message_still_deletes(settings) -> None:
     backend = EWSExchangeBackend(settings)
     item = FakeDeletableItem()
     backend._account = SimpleNamespace(
-        calendar=object(),
+        calendar=SimpleNamespace(id="cal-1"),
         fetch=lambda **kwargs: iter([item]),
     )
 
@@ -233,14 +237,18 @@ def test_create_event_all_day_does_not_add_an_extra_day(settings, monkeypatch) -
 
 
 def test_get_event_uses_alternate_calendar_when_calendar_id_given(settings, monkeypatch) -> None:
-    default_calendar = object()
-    alt_calendar = object()
+    default_calendar = SimpleNamespace(id="cal-default")
+    alt_calendar = SimpleNamespace(id="cal-2")
     fetch_calls: list = []
     backend = EWSExchangeBackend(settings)
 
     def fetch(ids, folder=None):
         fetch_calls.append(folder)
-        return iter([_fake_event("event-1", False)])
+        # A real fetch resolves the item wherever it actually lives -- match
+        # parent_folder_id to whichever folder this call targeted so the
+        # scoping check in _fetch_item passes the same way a real EWS lookup
+        # of an item that really is in that folder would.
+        return iter([_fake_event("event-1", False, parent_folder_id=folder.id)])
 
     backend._account = SimpleNamespace(calendar=default_calendar, fetch=fetch)
     monkeypatch.setattr(
@@ -254,6 +262,28 @@ def test_get_event_uses_alternate_calendar_when_calendar_id_given(settings, monk
 
     backend.get_event(GetEventRequest(id="event-1"))
     assert fetch_calls[-1] is default_calendar
+
+
+def test_get_event_rejects_event_that_actually_lives_in_a_different_calendar(
+    settings, monkeypatch
+) -> None:
+    """Regression: exchangelib's Account.fetch(folder=...) only uses `folder` to
+    validate `only_fields`, not to restrict which item an id resolves to -- an event
+    id from a different calendar used to be returned as if it belonged to the
+    calendar_id the caller asked for."""
+    requested_calendar = SimpleNamespace(id="cal-requested")
+    backend = EWSExchangeBackend(settings)
+
+    def fetch(ids, folder=None):
+        # The id actually resolves to an event that lives in a different calendar.
+        return iter([_fake_event("event-1", False, parent_folder_id="cal-other")])
+
+    backend._account = SimpleNamespace(calendar=SimpleNamespace(id="cal-default"), fetch=fetch)
+    monkeypatch.setattr(backend, "_resolve_folder", lambda value: requested_calendar)
+
+    with pytest.raises(APIError) as excinfo:
+        backend.get_event(GetEventRequest(id="event-1", calendar_id="cal-requested"))
+    assert excinfo.value.code == "not_found"
 
 
 def test_work_hours_rejects_bad_time_format() -> None:

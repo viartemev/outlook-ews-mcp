@@ -1,11 +1,12 @@
 from __future__ import annotations
 
+import errno
 import os
 import stat
 import tempfile
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
-from typing import Any, BinaryIO
+from typing import Any
 
 from exchangelib import FileAttachment, Folder, HTMLBody, ItemAttachment, Message, Q
 from exchangelib.extended_properties import Flag
@@ -227,25 +228,33 @@ class EmailOperationsMixin(BaseEWSBackend):
             candidate = "attachment.bin"
         return candidate
 
-    def _open_unique_path(self, path: Path) -> tuple[Path, BinaryIO]:
-        """Atomically reserve a new regular file without following symlinks."""
+    def _create_new_file(self, path: Path) -> tuple[int, Path]:
+        """Atomically create a new regular file at path, refusing to follow symlinks.
+
+        Replaces a `path.exists()` check followed by a later `open("wb")`: a symlink
+        planted at that name -- pointing at a file that doesn't exist yet -- passes
+        `exists()` as False, so the later open would silently follow it and write
+        outside EXCHANGE_ATTACHMENT_ROOT. O_EXCL alone already rejects a path that
+        names an existing symlink (dangling or not) as EEXIST; O_NOFOLLOW is a
+        defense-in-depth backstop against platform differences in that behavior.
+        """
         stem = path.stem
         suffix = path.suffix
+        candidate = path
         index = 0
-        flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_NOFOLLOW", 0)
         while True:
-            candidate = path if index == 0 else path.with_name(f"{stem}-{index}{suffix}")
             try:
-                fd = os.open(candidate, flags, 0o600)
-            except FileExistsError:
+                fd = os.open(
+                    candidate,
+                    os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_NOFOLLOW", 0),
+                    0o600,
+                )
+                return fd, candidate
+            except OSError as exc:
+                if exc.errno not in (errno.EEXIST, errno.ELOOP):
+                    raise
                 index += 1
-                continue
-            try:
-                return candidate, os.fdopen(fd, "wb")
-            except Exception:
-                os.close(fd)
-                candidate.unlink(missing_ok=True)
-                raise
+                candidate = path.with_name(f"{stem}-{index}{suffix}")
 
     def list_emails(self, request: ListEmailsRequest) -> list[EmailSummary]:
         folder = self._resolve_folder(request.folder)
@@ -488,10 +497,9 @@ class EmailOperationsMixin(BaseEWSBackend):
                     )
                 self._check_attachment_size(getattr(attachment, "size", None), max_size_bytes)
                 filename = self._sanitize_attachment_filename(getattr(attachment, "name", None))
-                path, destination = self._open_unique_path(target_dir / filename)
+                fd, path = self._create_new_file(target_dir / filename)
                 try:
-                    with destination:
-                        size = self._save_attachment(attachment, destination, max_size_bytes)
+                    size = self._save_attachment(attachment, fd, max_size_bytes)
                 except APIError:
                     path.unlink(missing_ok=True)
                     raise
@@ -506,26 +514,27 @@ class EmailOperationsMixin(BaseEWSBackend):
                 )
         raise NotFoundError(request.attachment_id)
 
-    def _save_attachment(self, attachment: Any, destination: BinaryIO, max_size_bytes: int) -> int:
-        if not hasattr(attachment, "fp"):
-            content = attachment.content
-            self._check_attachment_size(len(content), max_size_bytes)
-            destination.write(content)
-            return len(content)
-        # FileAttachment.fp streams the content from the GetAttachment service in
-        # chunks instead of buffering the whole thing in memory (as .content does),
-        # so an oversized attachment can be caught -- and the partial file
-        # discarded by the caller -- without ever holding it all in RAM.
-        written = 0
-        with attachment.fp as source:
-            while True:
-                chunk = source.read(65536)
-                if not chunk:
-                    break
-                written += len(chunk)
-                self._check_attachment_size(written, max_size_bytes)
-                destination.write(chunk)
-        return written
+    def _save_attachment(self, attachment: Any, fd: int, max_size_bytes: int) -> int:
+        with os.fdopen(fd, "wb") as dest:
+            if not hasattr(attachment, "fp"):
+                content = attachment.content
+                self._check_attachment_size(len(content), max_size_bytes)
+                dest.write(content)
+                return len(content)
+            # FileAttachment.fp streams the content from the GetAttachment service in
+            # chunks instead of buffering the whole thing in memory (as .content does),
+            # so an oversized attachment can be caught -- and the partial file
+            # discarded by the caller -- without ever holding it all in RAM.
+            written = 0
+            with attachment.fp as source:
+                while True:
+                    chunk = source.read(65536)
+                    if not chunk:
+                        break
+                    written += len(chunk)
+                    self._check_attachment_size(written, max_size_bytes)
+                    dest.write(chunk)
+            return written
 
     def _check_attachment_size(self, size: int | None, max_size_bytes: int) -> None:
         if size is not None and size > max_size_bytes:

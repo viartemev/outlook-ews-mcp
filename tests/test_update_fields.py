@@ -14,8 +14,19 @@ from outlook_mcp.models import (
 )
 
 
+#: Shared folder id used by FakeSavableItem.parent_folder_id and _fake_folder(),
+#: so _fetch_item's real-vs-fake-folder scoping check (item.parent_folder_id.id ==
+#: folder.id) matches, the way a real fetch against that real folder would.
+_FAKE_FOLDER_ID = "folder-1"
+
+
+def _fake_folder() -> SimpleNamespace:
+    return SimpleNamespace(id=_FAKE_FOLDER_ID)
+
+
 class FakeSavableItem(SimpleNamespace):
     def __init__(self, **kwargs) -> None:
+        kwargs.setdefault("parent_folder_id", SimpleNamespace(id=_FAKE_FOLDER_ID))
         super().__init__(**kwargs)
         self.save_calls: list[dict] = []
 
@@ -73,7 +84,7 @@ def test_mark_email_flag_none_clears_status(settings) -> None:
 def test_update_event_saves_real_ews_field_names(settings) -> None:
     backend = EWSExchangeBackend(settings)
     item = FakeSavableItem(id="event-1", reminder_minutes_before_start=15, required_attendees=[])
-    calendar = object()
+    calendar = _fake_folder()
     backend._account = _account_with_item(item, calendar=calendar)
 
     request = UpdateEventRequest.model_validate(
@@ -103,7 +114,7 @@ def test_update_event_rejects_lone_start_past_existing_end(settings) -> None:
         start=datetime(2026, 4, 8, 9, 0, tzinfo=UTC),
         end=datetime(2026, 4, 8, 10, 0, tzinfo=UTC),
     )
-    backend._account = _account_with_item(item, calendar=object(), default_timezone=UTC)
+    backend._account = _account_with_item(item, calendar=_fake_folder(), default_timezone=UTC)
 
     request = UpdateEventRequest.model_validate(
         {"id": "event-1", "start": "2026-04-08T11:00:00+00:00"}
@@ -122,7 +133,7 @@ def test_update_event_empty_update_does_not_save_or_notify(settings) -> None:
         start=datetime(2026, 4, 8, 9, 0, tzinfo=UTC),
         end=datetime(2026, 4, 8, 10, 0, tzinfo=UTC),
     )
-    backend._account = _account_with_item(item, calendar=object(), default_timezone=UTC)
+    backend._account = _account_with_item(item, calendar=_fake_folder(), default_timezone=UTC)
 
     request = UpdateEventRequest.model_validate({"id": "event-1"})
     result = backend.update_event(request)
@@ -142,7 +153,7 @@ def test_update_event_explicit_null_clears_location_body_reminder(settings) -> N
         reminder_minutes_before_start=15,
         is_all_day=False,
     )
-    backend._account = _account_with_item(item, calendar=object())
+    backend._account = _account_with_item(item, calendar=_fake_folder())
 
     request = UpdateEventRequest.model_validate(
         {"id": "event-1", "location": None, "body": None, "reminder_minutes": None}
@@ -170,7 +181,7 @@ def test_update_event_all_day_update_floors_new_end_to_midnight(settings) -> Non
         start=datetime(2026, 4, 8, 0, 0, tzinfo=UTC),
         end=datetime(2026, 4, 9, 0, 0, tzinfo=UTC),
     )
-    backend._account = _account_with_item(item, calendar=object(), default_timezone=UTC)
+    backend._account = _account_with_item(item, calendar=_fake_folder(), default_timezone=UTC)
 
     # A mid-day timestamp for the new end must be floored to midnight rather than
     # saved as-is, or the all-day event would end up spanning part of a day.
@@ -187,7 +198,7 @@ def test_update_contact_empty_request_does_not_save(settings) -> None:
     update_fields=None writes every loaded field back, clobbering concurrent edits."""
     backend = EWSExchangeBackend(settings)
     item = FakeSavableItem(id="contact-1", display_name="Old Name")
-    backend._account = _account_with_item(item, contacts=object())
+    backend._account = _account_with_item(item, contacts=_fake_folder())
 
     request = UpdateContactRequest.model_validate({"id": "contact-1"})
     result = backend.update_contact(request)
@@ -199,7 +210,7 @@ def test_update_contact_empty_request_does_not_save(settings) -> None:
 def test_update_contact_omitted_fields_left_untouched(settings) -> None:
     backend = EWSExchangeBackend(settings)
     item = FakeSavableItem(id="contact-1", display_name="Old Name", job_title="Old Title")
-    backend._account = _account_with_item(item, contacts=object())
+    backend._account = _account_with_item(item, contacts=_fake_folder())
 
     request = UpdateContactRequest.model_validate({"id": "contact-1", "job_title": "New Title"})
     backend.update_contact(request)
@@ -212,7 +223,7 @@ def test_update_contact_omitted_fields_left_untouched(settings) -> None:
 def test_update_contact_explicit_null_clears_phone(settings) -> None:
     backend = EWSExchangeBackend(settings)
     item = FakeSavableItem(id="contact-1", phone_numbers=[SimpleNamespace(phone_number="+1000")])
-    backend._account = _account_with_item(item, contacts=object())
+    backend._account = _account_with_item(item, contacts=_fake_folder())
 
     request = UpdateContactRequest.model_validate({"id": "contact-1", "phone": None})
     backend.update_contact(request)
@@ -231,7 +242,7 @@ def test_update_contact_saves_real_ews_field_names(settings) -> None:
         email_addresses=[],
         phone_numbers=[],
     )
-    backend._account = _account_with_item(item, contacts=object())
+    backend._account = _account_with_item(item, contacts=_fake_folder())
 
     request = UpdateContactRequest.model_validate(
         {

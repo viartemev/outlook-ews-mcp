@@ -18,14 +18,13 @@ from exchangelib.errors import (
 from exchangelib.ewsdatetime import EWSTimeZone
 from exchangelib.folders import Inbox
 from exchangelib import CalendarItem, Message
-from exchangelib.properties import ParentFolderId
 from exchangelib.restriction import Q, Restriction
 from exchangelib.version import EXCHANGE_2016, Version
 
 import outlook_mcp.exchange_client.base as exchange_client_base
 import outlook_mcp.exchange_client.contacts as exchange_client_contacts
 import outlook_mcp.exchange_client.email as exchange_client_email
-from outlook_mcp.errors import APIError, AuthFailedError
+from outlook_mcp.errors import APIError, AuthFailedError, NotFoundError
 from outlook_mcp.exchange_client import EWSExchangeBackend
 from outlook_mcp.models import (
     ActionResult,
@@ -150,16 +149,27 @@ def test_find_free_slots_requires_every_attendee_free(settings) -> None:
     assert slots[0].start.hour == 9
 
 
-def test_find_free_slots_rejects_duration_below_ews_resolution() -> None:
-    with pytest.raises(ValueError, match="greater than or equal to 5"):
-        FindFreeSlotsRequest.model_validate(
-            {
-                "attendees": ["user@example.com"],
-                "duration": 2,
-                "start": "2026-04-13T09:00:00+03:00",
-                "end": "2026-04-13T09:10:00+03:00",
-            }
-        )
+def test_find_free_slots_clamps_sub_5_minute_duration_to_ews_minimum(settings) -> None:
+    """EWS rejects merged_free_busy_interval below 5, so a short meeting duration
+    (e.g. 2 minutes) must still request a valid 5-minute sample, and slots must be
+    matched against the sample that covers each short slot's start time."""
+    backend = EWSExchangeBackend(settings)
+    captured: dict = {}
+    request = FindFreeSlotsRequest.model_validate(
+        {
+            "attendees": ["user@example.com"],
+            "duration": 2,
+            "start": "2026-04-13T09:00:00+03:00",
+            "end": "2026-04-13T09:10:00+03:00",
+        }
+    )
+    # Two 5-minute samples: first free ("0"), second busy ("1").
+    backend._account = _fake_account([SimpleNamespace(merged="01")], captured)
+
+    slots = backend.find_free_slots(request)
+
+    assert captured["merged_free_busy_interval"] == 5
+    assert [slot.start.minute for slot in slots] == [0, 2, 4]
 
 
 def test_find_free_slots_filters_by_work_hours(settings) -> None:
@@ -196,22 +206,42 @@ def test_fetch_item_raises_api_error_when_exchange_returns_error(settings) -> No
     assert excinfo.value.code == "exchange_error"
 
 
-def test_fetch_item_rejects_item_from_another_folder(settings) -> None:
+def test_fetch_item_rejects_item_whose_parent_folder_does_not_match_requested_folder(
+    settings,
+) -> None:
+    """Account.fetch(folder=...) only uses `folder` to validate `only_fields` against
+    that folder's allowed fields -- it does NOT restrict which item an id resolves to.
+    Passing a calendar_id/folder as a scoping argument must not let an id belonging to
+    a different folder (e.g. a different calendar, or a personal contact when a GAL
+    lookup was intended) be fetched and acted on as if it lived in the requested one."""
     backend = EWSExchangeBackend(settings)
-    message = Message(
-        id="message-1",
-        parent_folder_id=ParentFolderId(id="other-folder", changekey=None),
-    )
-    backend._account = SimpleNamespace(fetch=lambda **kwargs: iter([message]))
+    item = SimpleNamespace(id="item-1", parent_folder_id=SimpleNamespace(id="folder-other"))
+    backend._account = SimpleNamespace(fetch=lambda **kwargs: iter([item]))
+    requested_folder = SimpleNamespace(id="folder-requested")
 
-    with pytest.raises(APIError) as excinfo:
-        backend._fetch_item(
-            "message-1",
-            folder=SimpleNamespace(id="drafts-folder"),
-            expected_type=Message,
-        )
+    with pytest.raises(NotFoundError):
+        backend._fetch_item("item-1", folder=requested_folder)
 
-    assert excinfo.value.code == "not_found"
+
+def test_fetch_item_accepts_item_whose_parent_folder_matches_requested_folder(settings) -> None:
+    backend = EWSExchangeBackend(settings)
+    item = SimpleNamespace(id="item-1", parent_folder_id=SimpleNamespace(id="folder-1"))
+    backend._account = SimpleNamespace(fetch=lambda **kwargs: iter([item]))
+    requested_folder = SimpleNamespace(id="folder-1")
+
+    assert backend._fetch_item("item-1", folder=requested_folder) is item
+
+
+def test_fetch_item_rejects_item_with_no_resolvable_parent_folder_when_scoped(settings) -> None:
+    """A missing parent_folder_id (or an unresolved folder id on the requested folder)
+    must fail closed rather than silently skipping the scoping check."""
+    backend = EWSExchangeBackend(settings)
+    item = SimpleNamespace(id="item-1", parent_folder_id=None)
+    backend._account = SimpleNamespace(fetch=lambda **kwargs: iter([item]))
+    requested_folder = SimpleNamespace(id="folder-1")
+
+    with pytest.raises(NotFoundError):
+        backend._fetch_item("item-1", folder=requested_folder)
 
 
 def test_fetch_item_rejects_wrong_item_type(settings) -> None:
@@ -244,12 +274,31 @@ def test_get_contact_reads_notes_from_body_not_readonly_notes_field(settings) ->
         manager=None,
         birthday=None,
         text_body="Met at the conference",
+        parent_folder_id=SimpleNamespace(id="contacts-1"),
     )
-    backend._account = SimpleNamespace(fetch=lambda **kwargs: iter([item]), contacts=object())
+    backend._account = SimpleNamespace(
+        fetch=lambda **kwargs: iter([item]), contacts=SimpleNamespace(id="contacts-1")
+    )
 
     contact = backend.get_contact(GetContactRequest(id="contact-1"))
 
     assert contact.notes == "Met at the conference"
+
+
+def test_get_contact_rejects_item_that_actually_lives_in_a_different_folder(settings) -> None:
+    """Regression: an id resolving to an item outside the personal Contacts folder
+    (e.g. moved to another folder, or belonging to a different item type entirely)
+    must not be returned as if it were a contact in Contacts -- Account.fetch(folder=...)
+    doesn't enforce that on its own."""
+    backend = EWSExchangeBackend(settings)
+    item = SimpleNamespace(id="contact-1", parent_folder_id=SimpleNamespace(id="some-other-folder"))
+    backend._account = SimpleNamespace(
+        fetch=lambda **kwargs: iter([item]), contacts=SimpleNamespace(id="contacts-1")
+    )
+
+    with pytest.raises(APIError) as excinfo:
+        backend.get_contact(GetContactRequest(id="contact-1"))
+    assert excinfo.value.code == "not_found"
 
 
 def test_get_contact_resolves_gal_address(settings, monkeypatch) -> None:
@@ -739,10 +788,11 @@ def test_reply_email_saves_draft_attaches_files_then_sends(settings, tmp_path) -
     attachment_path = tmp_path / "note.txt"
     attachment_path.write_text("hi")
     events: list[tuple] = []
-    drafts_folder = object()
+    drafts_folder = SimpleNamespace(id="drafts-folder")
 
     class FakeMessage:
         id = "sent-1"
+        parent_folder_id = SimpleNamespace(id="drafts-folder")
 
         def attach(self, attachment):
             events.append(("attach", attachment.name))
@@ -792,10 +842,11 @@ def test_forward_email_saves_draft_attaches_files_then_sends(settings, tmp_path)
     attachment_path = tmp_path / "note.txt"
     attachment_path.write_text("hi")
     events: list[tuple] = []
-    drafts_folder = object()
+    drafts_folder = SimpleNamespace(id="drafts-folder")
 
     class FakeMessage:
         id = "sent-1"
+        parent_folder_id = SimpleNamespace(id="drafts-folder")
 
         def attach(self, attachment):
             events.append(("attach", attachment.name))

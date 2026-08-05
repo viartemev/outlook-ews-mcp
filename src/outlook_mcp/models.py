@@ -347,7 +347,7 @@ class RespondToInviteRequest(ExchangeModel):
 
 class FindFreeSlotsRequest(ExchangeModel):
     attendees: list[EmailStr] = Field(min_length=1)
-    duration: int = Field(ge=5, le=1440)
+    duration: int = Field(ge=1, le=1440)
     start: datetime
     end: datetime
     work_hours: WorkHours | None = None
