@@ -13,10 +13,11 @@ cp .env.example .env
 
 ```bash
 uv run --python 3.12 --with '.[dev]' ruff check .
+uv run --python 3.12 --with '.[dev]' ruff format --check .
 uv run --python 3.12 --with '.[dev]' pytest -q
 ```
 
-Both run in CI (GitHub Actions and GitLab CI) on every push and pull/merge request.
+All run in CI (GitHub Actions and GitLab CI) on every push and pull/merge request.
 
 ## Testing without a real Exchange server
 
@@ -30,7 +31,7 @@ Follow the same pattern for new tests: build the smallest fake that supports the
 ## Pull requests
 
 - Keep PRs focused — one fix or feature per PR.
-- Add or update tests for any behavior change; `pytest -q` and `ruff check .` must pass.
+- Add or update tests for any behavior change; tests, lint, and format checks must pass.
 - Update `README.md` if you change configuration, tool behavior, or the tool catalog.
 - Describe what real-server behavior prompted the change when fixing an Exchange/EWS-specific bug (timezone handling, address formats, etc.) — these are easy to regress silently.
 

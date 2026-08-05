@@ -152,8 +152,8 @@ class FakeExchangeBackend:
     def create_draft(self, request: DraftEmailRequest) -> ActionResult:
         return ActionResult(id="draft-1", status="draft")
 
-    def send_draft(self, request: SendDraftRequest) -> ActionResult:
-        return ActionResult(id=request.id, status="sent")
+    def send_draft(self, request: SendDraftRequest) -> SendResult:
+        return SendResult(id=request.id, status="sent")
 
     def get_attachment(self, request: GetAttachmentRequest) -> AttachmentResult:
         target = request.save_path or Path("/tmp/test.txt")
@@ -276,7 +276,10 @@ def anyio_backend() -> str:
 
 @pytest.fixture
 def settings() -> Settings:
+    # _env_file=None keeps a developer's local .env out of the test run -- otherwise
+    # their real EXCHANGE_* values could leak into test behavior and failure output.
     return Settings(
+        _env_file=None,
         EXCHANGE_SERVER="https://mail.example.com/EWS/Exchange.asmx",
         EXCHANGE_USERNAME="DOMAIN\\user",
         EXCHANGE_PASSWORD="secret",

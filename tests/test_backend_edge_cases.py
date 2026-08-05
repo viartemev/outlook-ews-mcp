@@ -58,6 +58,26 @@ def test_get_attachment_sanitizes_absolute_path(settings, tmp_path: Path, monkey
     assert not outside_target.exists()
 
 
+def test_get_attachment_does_not_follow_dangling_symlink(
+    settings, tmp_path: Path, monkeypatch
+) -> None:
+    backend = EWSExchangeBackend(settings)
+    outside_target = tmp_path.parent / "outside-via-symlink.txt"
+    (tmp_path / "note.txt").symlink_to(outside_target)
+    attachment = FakeAttachment("att-1", "note.txt", b"payload")
+    monkeypatch.setattr(
+        backend, "_fetch_item", lambda *a, **k: SimpleNamespace(attachments=[attachment])
+    )
+
+    result = backend.get_attachment(
+        GetAttachmentRequest(email_id="email-1", attachment_id="att-1", save_path=str(tmp_path))
+    )
+
+    assert Path(result.saved_path).name == "note-1.txt"
+    assert Path(result.saved_path).read_bytes() == b"payload"
+    assert not outside_target.exists()
+
+
 def test_get_attachment_rejects_declared_size_over_limit(
     settings, tmp_path: Path, monkeypatch
 ) -> None:

@@ -13,14 +13,6 @@ from .exchange_client import ExchangeClient
 from .models import ExchangeModel
 
 
-def normalize_tool_arguments(arguments: dict[str, Any] | None) -> dict[str, Any]:
-    """Unwrap legacy clients that nest tool args under a single ``kwargs`` key."""
-    arguments = dict(arguments or {})
-    if len(arguments) == 1 and "kwargs" in arguments and isinstance(arguments["kwargs"], dict):
-        return dict(arguments["kwargs"])
-    return arguments
-
-
 def _field_default(field: FieldInfo) -> Any:
     if field.is_required():
         return inspect.Parameter.empty
@@ -47,9 +39,9 @@ class ToolSpec:
     description: str
     handler: Callable[[ExchangeClient, dict[str, Any]], Any]
     request_model: type[ExchangeModel] | None = None
-    #: Documents the handler's success payload shape; not enforced as an MCP output
-    #: schema (see bind_mcp_tool — every tool reports isError via CallToolResult, and
-    #: error payloads don't share this shape, so FastMCP's schema validation can't apply).
+    #: Validated by ToolRegistry for successful calls. FastMCP output-schema
+    #: validation remains disabled because error payloads intentionally use a
+    #: different shape and are returned with CallToolResult.isError=true.
     response_model: Any = None
     read_only: bool = False
     destructive: bool = False
@@ -62,7 +54,7 @@ def bind_mcp_tool(
     """Build a FastMCP tool function with a schema derived from ``spec``."""
 
     def execute(**arguments: Any) -> CallToolResult:
-        payload, is_error = registry_call(spec.name, normalize_tool_arguments(arguments))
+        payload, is_error = registry_call(spec.name, arguments)
         structured = payload if isinstance(payload, dict) else {"result": payload}
         return CallToolResult(
             content=[TextContent(type="text", text=json.dumps(payload, ensure_ascii=False))],

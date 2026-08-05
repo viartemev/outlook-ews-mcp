@@ -6,9 +6,19 @@ from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
-from exchangelib.errors import ErrorInvalidIdMalformed, UnauthorizedError
+from exchangelib.errors import (
+    ErrorAccessDenied,
+    ErrorInvalidIdMalformed,
+    ErrorIrresolvableConflict,
+    ErrorItemNotFound,
+    ErrorItemSavePropertyError,
+    ErrorTimeoutExpired,
+    UnauthorizedError,
+)
 from exchangelib.ewsdatetime import EWSTimeZone
 from exchangelib.folders import Inbox
+from exchangelib import CalendarItem, Message
+from exchangelib.properties import ParentFolderId
 from exchangelib.restriction import Q, Restriction
 from exchangelib.version import EXCHANGE_2016, Version
 
@@ -55,6 +65,39 @@ def _fake_account(views, captured: dict | None = None) -> SimpleNamespace:
         default_timezone=EWSTimeZone("Europe/Moscow"),
         protocol=SimpleNamespace(get_free_busy_info=get_free_busy_info),
     )
+
+
+def test_map_exception_classifies_by_exchangelib_type_not_message_text(settings) -> None:
+    """Each of these must be matched by its actual exchangelib exception class, not
+    by substring-matching the (English, server-supplied) exception message."""
+    backend = EWSExchangeBackend(settings)
+
+    conflict = backend._map_exception(ErrorIrresolvableConflict("conflict, retry"))
+    assert conflict.code == "conflict"
+
+    timeout = backend._map_exception(ErrorTimeoutExpired("the operation timed out"))
+    assert timeout.code == "timeout"
+
+    not_found = backend._map_exception(ErrorItemNotFound("no such item"), item_id="item-1")
+    assert not_found.code == "not_found"
+    assert not_found.extra["id"] == "item-1"
+
+    # An invalid/read-only property in the save request is not a concurrent-edit
+    # conflict and must not be reported as one.
+    save_property = backend._map_exception(ErrorItemSavePropertyError("bad property"))
+    assert save_property.code == "exchange_error"
+
+    permission = backend._map_exception(ErrorAccessDenied("localized server message"))
+    assert permission.code == "permission_denied"
+
+
+def test_map_exception_does_not_log_raw_exchange_message(settings, caplog) -> None:
+    backend = EWSExchangeBackend(settings)
+    secret_detail = "mail.internal.example user@example.com"
+
+    backend._map_exception(ErrorInvalidIdMalformed(secret_detail))
+
+    assert secret_detail not in caplog.text
 
 
 def test_find_free_slots_accepts_generator_response(settings) -> None:
@@ -107,6 +150,18 @@ def test_find_free_slots_requires_every_attendee_free(settings) -> None:
     assert slots[0].start.hour == 9
 
 
+def test_find_free_slots_rejects_duration_below_ews_resolution() -> None:
+    with pytest.raises(ValueError, match="greater than or equal to 5"):
+        FindFreeSlotsRequest.model_validate(
+            {
+                "attendees": ["user@example.com"],
+                "duration": 2,
+                "start": "2026-04-13T09:00:00+03:00",
+                "end": "2026-04-13T09:10:00+03:00",
+            }
+        )
+
+
 def test_find_free_slots_filters_by_work_hours(settings) -> None:
     backend = EWSExchangeBackend(settings)
     request = FindFreeSlotsRequest.model_validate(
@@ -139,6 +194,35 @@ def test_fetch_item_raises_api_error_when_exchange_returns_error(settings) -> No
         backend.get_email(GetEmailRequest(id="not-an-ews-id"))
 
     assert excinfo.value.code == "exchange_error"
+
+
+def test_fetch_item_rejects_item_from_another_folder(settings) -> None:
+    backend = EWSExchangeBackend(settings)
+    message = Message(
+        id="message-1",
+        parent_folder_id=ParentFolderId(id="other-folder", changekey=None),
+    )
+    backend._account = SimpleNamespace(fetch=lambda **kwargs: iter([message]))
+
+    with pytest.raises(APIError) as excinfo:
+        backend._fetch_item(
+            "message-1",
+            folder=SimpleNamespace(id="drafts-folder"),
+            expected_type=Message,
+        )
+
+    assert excinfo.value.code == "not_found"
+
+
+def test_fetch_item_rejects_wrong_item_type(settings) -> None:
+    backend = EWSExchangeBackend(settings)
+    event = CalendarItem(id="event-1")
+    backend._account = SimpleNamespace(fetch=lambda **kwargs: iter([event]))
+
+    with pytest.raises(APIError) as excinfo:
+        backend._fetch_item("event-1", expected_type=Message)
+
+    assert excinfo.value.code == "not_found"
 
 
 def test_get_contact_reads_notes_from_body_not_readonly_notes_field(settings) -> None:
@@ -177,7 +261,13 @@ def test_get_contact_resolves_gal_address(settings, monkeypatch) -> None:
         file_as=None,
         given_name="Ivan",
         surname="Ivanov",
-        email_addresses=[SimpleNamespace(label="EmailAddress1", email="ivan@example.com")],
+        email_addresses=[
+            SimpleNamespace(
+                label="EmailAddress1",
+                email="X500:/o=ORG/ou=Exchange Administrative Group/cn=ivan",
+            ),
+            SimpleNamespace(label="EmailAddress2", email="SMTP:ivan@example.com"),
+        ],
         phone_numbers=[SimpleNamespace(label="BusinessPhone", phone_number="+79990000000")],
         physical_addresses=[],
         company_name="Example",
@@ -287,10 +377,14 @@ def test_search_contacts_matches_personal_contact_by_email_not_just_display_name
     )
     captured: dict = {}
 
+    class FakeQuerySet(list):
+        def only(self, *fields):
+            return self
+
     class FakeContactsFolder:
         def filter(self, restriction):
             captured["restriction"] = restriction
-            return [matched_contact]
+            return FakeQuerySet([matched_contact])
 
     backend._account = SimpleNamespace(contacts=FakeContactsFolder(), protocol=object())
 
@@ -336,7 +430,13 @@ def test_search_contacts_gal_result_id_is_resolvable_by_get_contact(settings, mo
         id="AAA=opaque-ad-object-id",
         display_name="Ivan Ivanov",
         file_as=None,
-        email_addresses=[SimpleNamespace(label="EmailAddress1", email="ivan@example.com")],
+        email_addresses=[
+            SimpleNamespace(
+                label="EmailAddress1",
+                email="X500:/o=ORG/ou=Exchange Administrative Group/cn=ivan",
+            ),
+            SimpleNamespace(label="EmailAddress2", email="SMTP:ivan@example.com"),
+        ],
         phone_numbers=[],
         company_name=None,
         job_title=None,
@@ -357,6 +457,7 @@ def test_search_contacts_gal_result_id_is_resolvable_by_get_contact(settings, mo
 
     assert len(results) == 1
     assert results[0].id == "ivan@example.com"
+    assert results[0].email_addresses == ["ivan@example.com"]
 
     def fetch(ids, folder=None):
         raise AssertionError("GAL contacts must not be fetched from the personal contacts folder")
@@ -366,6 +467,37 @@ def test_search_contacts_gal_result_id_is_resolvable_by_get_contact(settings, mo
 
     assert contact.source == "gal"
     assert contact.display_name == "Ivan Ivanov"
+
+
+def test_search_contacts_skips_gal_result_without_smtp_address(settings, monkeypatch) -> None:
+    backend = EWSExchangeBackend(settings)
+    gal_contact = SimpleNamespace(
+        id="AAA=opaque-ad-object-id",
+        display_name="Legacy Recipient",
+        file_as=None,
+        email_addresses=[
+            SimpleNamespace(
+                label="EmailAddress1",
+                email="X500:/o=ORG/ou=Exchange Administrative Group/cn=legacy",
+            )
+        ],
+        phone_numbers=[],
+        company_name=None,
+        job_title=None,
+        department=None,
+    )
+
+    class FakeResolveNames:
+        def __init__(self, protocol) -> None:
+            self.protocol = protocol
+
+        def call(self, **kwargs):
+            yield SimpleNamespace(email_address="/o=ORG/ou=legacy"), gal_contact
+
+    monkeypatch.setattr(exchange_client_contacts, "ResolveNames", FakeResolveNames)
+    backend._account = SimpleNamespace(contacts=object(), protocol=object())
+
+    assert backend.search_contacts(SearchContactsRequest(query="legacy", source="gal")) == []
 
 
 def test_get_contact_explicit_source_bypasses_at_sign_heuristic(settings, monkeypatch) -> None:
@@ -599,7 +731,7 @@ def test_reply_email_sends_response_object_when_no_attachments(settings) -> None
     result = backend.reply_email(ReplyEmailRequest(id="msg-1", body="Reply body"))
 
     assert events == [("create_reply", "Re: Hello", "Reply body"), ("send",)]
-    assert result == SendResult(id="msg-1", status="sent")
+    assert result == SendResult(id=None, status="sent")
 
 
 def test_reply_email_saves_draft_attaches_files_then_sends(settings, tmp_path) -> None:
@@ -652,7 +784,7 @@ def test_reply_email_saves_draft_attaches_files_then_sends(settings, tmp_path) -
         ("attach", "note.txt"),
         ("send",),
     ]
-    assert result == SendResult(id="sent-1", status="sent")
+    assert result == SendResult(id=None, status="sent")
 
 
 def test_forward_email_saves_draft_attaches_files_then_sends(settings, tmp_path) -> None:
@@ -705,7 +837,7 @@ def test_forward_email_saves_draft_attaches_files_then_sends(settings, tmp_path)
         ("attach", "note.txt"),
         ("send",),
     ]
-    assert result == SendResult(id="sent-1", status="sent")
+    assert result == SendResult(id=None, status="sent")
 
 
 @pytest.mark.skipif(not hasattr(os, "mkfifo"), reason="FIFOs are POSIX-only")
@@ -770,7 +902,7 @@ def test_attach_files_bounds_read_and_reports_oversize_from_actual_bytes(
         backend._attach_files(FakeMessage(), [oversized])
 
     assert excinfo.value.code == "validation_error"
-    assert "ATTACHMENT_MAX_SIZE_MB=1" in excinfo.value.details[0]["reason"]
+    assert "EXCHANGE_ATTACHMENT_MAX_SIZE_MB=1" in excinfo.value.details[0]["reason"]
 
 
 def test_move_email_returns_new_id_mutated_in_place_by_move(settings) -> None:
@@ -857,6 +989,9 @@ def test_list_emails_from_address_filter_uses_author_field_not_a_subfield(settin
     captured: dict = {}
 
     class FakeQuerySet:
+        def only(self, *fields):
+            return self
+
         def order_by(self, *args):
             return self
 
@@ -931,6 +1066,9 @@ def test_search_emails_matches_subject_or_body_or_sender_in_one_pass(settings) -
             captured["restriction"] = restriction
             return self
 
+        def only(self, *fields):
+            return self
+
         def order_by(self, *args):
             return self
 
@@ -967,6 +1105,9 @@ def test_search_emails_defaults_to_mail_folders_only(settings, monkeypatch) -> N
             captured["folders"] = folders
 
         def filter(self, restriction):
+            return self
+
+        def only(self, *fields):
             return self
 
         def order_by(self, *args):

@@ -3,7 +3,11 @@ name: CI
 on:
   push:
     branches: [main]
+    tags: ["v*"]
   pull_request:
+
+env:
+  UV_VERSION: "0.12.1"
 
 jobs:
   lint:
@@ -11,14 +15,19 @@ jobs:
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
       - uses: astral-sh/setup-uv@caf0cab7a618c569241d31dcd442f54681755d39 # v3.2.4
+        with:
+          version: ${{ env.UV_VERSION }}
       - run: uv sync --frozen --extra dev
       - run: uv run ruff check .
+      - run: uv run ruff format --check .
 
   typecheck:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
       - uses: astral-sh/setup-uv@caf0cab7a618c569241d31dcd442f54681755d39 # v3.2.4
+        with:
+          version: ${{ env.UV_VERSION }}
       - run: uv sync --frozen --extra dev
       - run: uv run mypy src
 
@@ -30,6 +39,8 @@ jobs:
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
       - uses: astral-sh/setup-uv@caf0cab7a618c569241d31dcd442f54681755d39 # v3.2.4
+        with:
+          version: ${{ env.UV_VERSION }}
       - run: uv sync --frozen --extra dev --python ${{ matrix.python-version }}
       - run: uv run pytest -q --cov=outlook_mcp --cov-report=term-missing --cov-fail-under=70
 
@@ -38,5 +49,32 @@ jobs:
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
       - uses: astral-sh/setup-uv@caf0cab7a618c569241d31dcd442f54681755d39 # v3.2.4
+        with:
+          version: ${{ env.UV_VERSION }}
       - run: uv sync --frozen --extra dev
       - run: uv run --with pip-audit pip-audit --strict --local
+
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: astral-sh/setup-uv@caf0cab7a618c569241d31dcd442f54681755d39 # v3.2.4
+        with:
+          version: ${{ env.UV_VERSION }}
+      - run: uv build
+
+  publish-pypi:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: [lint, typecheck, test, security, build]
+    runs-on: ubuntu-latest
+    environment: pypi
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: astral-sh/setup-uv@caf0cab7a618c569241d31dcd442f54681755d39 # v3.2.4
+        with:
+          version: ${{ env.UV_VERSION }}
+      - run: uv build
+      - run: uv publish --trusted-publishing always

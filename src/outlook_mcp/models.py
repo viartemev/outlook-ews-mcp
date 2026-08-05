@@ -64,6 +64,10 @@ class Attachment(ExchangeModel):
     name: str
     size: int | None = None
     content_type: str | None = None
+    # False for an embedded Exchange item (a forwarded email/calendar invite/contact
+    # attached as an item rather than a file) -- get_attachment can only save file
+    # attachments to disk, not these.
+    downloadable: bool = True
 
 
 class EmailSummary(ExchangeModel):
@@ -343,7 +347,7 @@ class RespondToInviteRequest(ExchangeModel):
 
 class FindFreeSlotsRequest(ExchangeModel):
     attendees: list[EmailStr] = Field(min_length=1)
-    duration: int = Field(ge=1, le=1440)
+    duration: int = Field(ge=5, le=1440)
     start: datetime
     end: datetime
     work_hours: WorkHours | None = None
@@ -369,7 +373,10 @@ class FreeSlot(ExchangeModel):
 
 
 class SendResult(ExchangeModel):
-    id: str
+    # EWS doesn't hand back a usable id for a send: send-and-save typically returns
+    # none at all, and a reply/forward/draft-send's only candidate ids (the source
+    # item, the now-invalidated draft) refer to a different or no-longer-valid item.
+    id: str | None = None
     status: str
     warning: str | None = None
 

@@ -87,7 +87,9 @@ def test_update_event_saves_real_ews_field_names(settings) -> None:
     result = backend.update_event(request)
 
     assert item.reminder_minutes_before_start == 30
+    assert item.reminder_is_set is True
     assert item.save_calls[-1]["update_fields"] == [
+        "reminder_is_set",
         "reminder_minutes_before_start",
         "required_attendees",
     ]
@@ -124,6 +126,71 @@ def test_update_event_empty_update_does_not_save_or_notify(settings) -> None:
 
     request = UpdateEventRequest.model_validate({"id": "event-1"})
     result = backend.update_event(request)
+
+    assert item.save_calls == []
+    assert result.updated_fields == []
+
+
+def test_update_event_explicit_null_clears_location_body_reminder(settings) -> None:
+    """location/body/reminder_minutes must be clearable via explicit null, the same
+    way update_contact already treats an explicit null as "clear this field"."""
+    backend = EWSExchangeBackend(settings)
+    item = FakeSavableItem(
+        id="event-1",
+        location="Room 1",
+        body="Agenda",
+        reminder_minutes_before_start=15,
+        is_all_day=False,
+    )
+    backend._account = _account_with_item(item, calendar=object())
+
+    request = UpdateEventRequest.model_validate(
+        {"id": "event-1", "location": None, "body": None, "reminder_minutes": None}
+    )
+    result = backend.update_event(request)
+
+    assert item.location is None
+    assert item.body is None
+    assert item.reminder_minutes_before_start == 0
+    assert item.reminder_is_set is False
+    assert item.save_calls[-1]["update_fields"] == [
+        "location",
+        "body",
+        "reminder_is_set",
+        "reminder_minutes_before_start",
+    ]
+    assert result.updated_fields == ["location", "body", "reminder_minutes"]
+
+
+def test_update_event_all_day_update_floors_new_end_to_midnight(settings) -> None:
+    backend = EWSExchangeBackend(settings)
+    item = FakeSavableItem(
+        id="event-1",
+        is_all_day=True,
+        start=datetime(2026, 4, 8, 0, 0, tzinfo=UTC),
+        end=datetime(2026, 4, 9, 0, 0, tzinfo=UTC),
+    )
+    backend._account = _account_with_item(item, calendar=object(), default_timezone=UTC)
+
+    # A mid-day timestamp for the new end must be floored to midnight rather than
+    # saved as-is, or the all-day event would end up spanning part of a day.
+    request = UpdateEventRequest.model_validate(
+        {"id": "event-1", "end": "2026-04-10T15:30:00+00:00"}
+    )
+    backend.update_event(request)
+
+    assert item.end == datetime(2026, 4, 10, 0, 0, tzinfo=UTC)
+
+
+def test_update_contact_empty_request_does_not_save(settings) -> None:
+    """An id-only UpdateContactRequest has nothing to change -- saving anyway with
+    update_fields=None writes every loaded field back, clobbering concurrent edits."""
+    backend = EWSExchangeBackend(settings)
+    item = FakeSavableItem(id="contact-1", display_name="Old Name")
+    backend._account = _account_with_item(item, contacts=object())
+
+    request = UpdateContactRequest.model_validate({"id": "contact-1"})
+    result = backend.update_contact(request)
 
     assert item.save_calls == []
     assert result.updated_fields == []

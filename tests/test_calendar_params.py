@@ -7,7 +7,7 @@ import pytest
 from exchangelib.errors import UnauthorizedError
 
 import outlook_mcp.exchange_client.calendar as calendar_module
-from outlook_mcp.errors import AuthFailedError
+from outlook_mcp.errors import APIError, AuthFailedError
 from outlook_mcp.exchange_client import EWSExchangeBackend
 from outlook_mcp.models import (
     CreateEventRequest,
@@ -82,6 +82,18 @@ class FakeCalendarFolder:
 
     def view(self, start, end):
         return self._items
+
+
+def test_calendar_id_must_reference_calendar_folder(settings, monkeypatch) -> None:
+    backend = EWSExchangeBackend(settings)
+    folder = SimpleNamespace(folder_class="IPF.Note")
+    monkeypatch.setattr(backend, "_resolve_folder", lambda folder_id: folder)
+    backend._account = SimpleNamespace(calendar=object())
+
+    with pytest.raises(APIError) as excinfo:
+        backend._calendar_folder("not-a-calendar")
+
+    assert excinfo.value.code == "validation_error"
 
 
 def _fake_event(item_id: str, is_recurring: bool) -> SimpleNamespace:

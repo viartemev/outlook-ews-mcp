@@ -1,19 +1,8 @@
 from __future__ import annotations
 
-from outlook_mcp.mcp_tools import ToolSpec, bind_mcp_tool, normalize_tool_arguments
+from outlook_mcp.mcp_tools import ToolSpec, bind_mcp_tool
 from outlook_mcp.models import EmailSummary, ListEmailsRequest, SearchContactsRequest
 from outlook_mcp.server import build_mcp_server, build_registry
-
-
-def test_normalize_tool_arguments_unwraps_legacy_kwargs() -> None:
-    assert normalize_tool_arguments({"kwargs": {"folder": "inbox", "limit": 5}}) == {
-        "folder": "inbox",
-        "limit": 5,
-    }
-
-
-def test_normalize_tool_arguments_keeps_flat_payload() -> None:
-    assert normalize_tool_arguments({"folder": "inbox"}) == {"folder": "inbox"}
 
 
 def test_bind_mcp_tool_exposes_request_schema(client, settings) -> None:
@@ -95,8 +84,29 @@ def test_build_mcp_server_registers_typed_tools(client, settings) -> None:
     assert "kwargs" not in list_emails_tool.parameters["properties"]
 
 
-def test_registry_accepts_legacy_kwargs_wrapper(client, settings) -> None:
+def test_state_replacing_tools_are_marked_destructive(client, settings) -> None:
+    server = build_mcp_server(settings=settings, client=client)
+
+    for name in [
+        "send_email",
+        "reply_email",
+        "forward_email",
+        "move_email",
+        "mark_email",
+        "send_draft",
+        "create_event",
+        "update_event",
+        "respond_to_invite",
+        "update_contact",
+    ]:
+        assert server._tool_manager._tools[name].annotations.destructiveHint is True
+
+    for name in ["list_emails", "copy_email", "create_folder", "create_contact"]:
+        assert server._tool_manager._tools[name].annotations.destructiveHint is False
+
+
+def test_registry_rejects_legacy_kwargs_wrapper(client, settings) -> None:
     registry = build_registry(settings=settings, client=client)
     payload, is_error = registry.call("search_contacts", {"kwargs": {"query": "ivan"}})
-    assert is_error is False
-    assert payload[0]["id"] == "contact-1"
+    assert is_error is True
+    assert payload["error"] == "validation_error"

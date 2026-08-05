@@ -61,7 +61,11 @@ class CalendarOperationsMixin(BaseEWSBackend):
             my_response=self._normalize_response(getattr(item, "my_response_type", None)),
             online_meeting_url=str(online_url) if online_url else None,
             body=body_text or None,
-            reminder_minutes=getattr(item, "reminder_minutes_before_start", None),
+            reminder_minutes=(
+                getattr(item, "reminder_minutes_before_start", None)
+                if getattr(item, "reminder_is_set", False)
+                else None
+            ),
             categories=list(getattr(item, "categories", None) or []),
             recurrence_pattern={"value": str(recurrence)} if recurrence else None,
             importance=self._normalize_importance(getattr(item, "importance", None)),
@@ -121,7 +125,15 @@ class CalendarOperationsMixin(BaseEWSBackend):
         return free_slots
 
     def _calendar_folder(self, calendar_id: str | None) -> Any:
-        return self.account.calendar if not calendar_id else self._resolve_folder(calendar_id)
+        folder = self.account.calendar if not calendar_id else self._resolve_folder(calendar_id)
+        folder_class = getattr(folder, "folder_class", None)
+        if calendar_id and folder_class is not None and folder_class != self._CALENDAR_FOLDER_CLASS:
+            raise APIError(
+                "validation_error",
+                "calendar_id does not reference a calendar folder",
+                details=[{"field": "calendar_id", "reason": "folder is not IPF.Appointment"}],
+            )
+        return folder
 
     def list_events(self, request: ListEventsRequest) -> list[CalendarEvent]:
         folder = self._calendar_folder(request.calendar_id)
@@ -137,7 +149,11 @@ class CalendarOperationsMixin(BaseEWSBackend):
         return [self._to_calendar_event(item) for item in items]
 
     def get_event(self, request: GetEventRequest) -> CalendarEvent:
-        item = self._fetch_item(request.id, folder=self._calendar_folder(request.calendar_id))
+        item = self._fetch_item(
+            request.id,
+            folder=self._calendar_folder(request.calendar_id),
+            expected_type=CalendarItem,
+        )
         return self._to_calendar_event(item)
 
     def _build_recurrence(self, pattern: RecurrencePattern, start: datetime) -> Recurrence:
@@ -199,6 +215,7 @@ class CalendarOperationsMixin(BaseEWSBackend):
             is_all_day=request.is_all_day,
             categories=request.categories,
             importance=request.importance.capitalize(),
+            reminder_is_set=request.reminder_minutes is not None,
             reminder_minutes_before_start=request.reminder_minutes,
             recurrence=self._build_recurrence(request.recurrence, start)
             if request.recurrence
@@ -222,9 +239,26 @@ class CalendarOperationsMixin(BaseEWSBackend):
             raise self._map_exception(exc) from exc
 
     def update_event(self, request: UpdateEventRequest) -> ActionResult:
-        item = self._fetch_item(request.id, folder=self._calendar_folder(request.calendar_id))
+        item = self._fetch_item(
+            request.id,
+            folder=self._calendar_folder(request.calendar_id),
+            expected_type=CalendarItem,
+        )
         resolved_start = self._to_ews_datetime(request.start) if request.start else None
         resolved_end = self._to_ews_datetime(request.end) if request.end else None
+        if getattr(item, "is_all_day", False):
+            # All-day appointments are midnight-to-midnight with an exclusive end
+            # date; floor any caller-supplied bound to midnight of its own day so a
+            # partial update can't drift the event to start/end mid-day.
+            tz = self.account.default_timezone
+            if resolved_start is not None:
+                resolved_start = self._to_ews_datetime(
+                    datetime.combine(resolved_start.date(), time.min, tzinfo=tz)
+                )
+            if resolved_end is not None:
+                resolved_end = self._to_ews_datetime(
+                    datetime.combine(resolved_end.date(), time.min, tzinfo=tz)
+                )
         if resolved_start is not None or resolved_end is not None:
             # Only touch the existing item's start/end when one side of the range
             # is actually changing -- a lone new start/end must still be checked
@@ -244,17 +278,32 @@ class CalendarOperationsMixin(BaseEWSBackend):
                 )
         updated_fields: list[str] = []
         save_fields: list[str] = []
-        for field in ["subject", "start", "end", "location", "body", "reminder_minutes"]:
+        for field in ["subject", "start", "end"]:
             value = getattr(request, field)
             if value is not None:
                 if field == "start":
                     value = resolved_start
                 elif field == "end":
                     value = resolved_end
-                target = "reminder_minutes_before_start" if field == "reminder_minutes" else field
-                setattr(item, target, value)
+                setattr(item, field, value)
                 updated_fields.append(field)
-                save_fields.append(target)
+                save_fields.append(field)
+        # location/body/reminder_minutes are nullable clear targets: a field present
+        # in the request (even as null) means "clear it"; an omitted field means
+        # "leave it untouched". Mirrors the fields_set handling in update_contact.
+        fields_set = request.model_fields_set
+        for request_field, item_field in [("location", "location"), ("body", "body")]:
+            if request_field not in fields_set:
+                continue
+            setattr(item, item_field, getattr(request, request_field))
+            updated_fields.append(request_field)
+            save_fields.append(item_field)
+        if "reminder_minutes" in fields_set:
+            reminder_minutes = request.reminder_minutes
+            item.reminder_is_set = reminder_minutes is not None
+            item.reminder_minutes_before_start = reminder_minutes or 0
+            updated_fields.append("reminder_minutes")
+            save_fields.extend(["reminder_is_set", "reminder_minutes_before_start"])
         if request.add_attendees:
             current = list(getattr(item, "required_attendees", None) or [])
             current.extend(
@@ -291,7 +340,11 @@ class CalendarOperationsMixin(BaseEWSBackend):
             raise self._map_exception(exc, item_id=request.id) from exc
 
     def delete_event(self, request: DeleteEventRequest) -> ActionResult:
-        item = self._fetch_item(request.id, folder=self._calendar_folder(request.calendar_id))
+        item = self._fetch_item(
+            request.id,
+            folder=self._calendar_folder(request.calendar_id),
+            expected_type=CalendarItem,
+        )
         try:
             if request.notify_attendees and request.cancel_message:
                 item.cancel(body=request.cancel_message)
@@ -306,7 +359,11 @@ class CalendarOperationsMixin(BaseEWSBackend):
             raise self._map_exception(exc, item_id=request.id) from exc
 
     def respond_to_invite(self, request: RespondToInviteRequest) -> ActionResult:
-        item = self._fetch_item(request.id, folder=self._calendar_folder(request.calendar_id))
+        item = self._fetch_item(
+            request.id,
+            folder=self._calendar_folder(request.calendar_id),
+            expected_type=CalendarItem,
+        )
         try:
             if request.response == "accept":
                 item.accept(body=request.message)

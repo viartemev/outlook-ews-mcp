@@ -27,9 +27,18 @@ def _mask_email(value: str | None) -> str | None:
 
 
 def _sanitize_mailbox(payload: dict[str, Any]) -> dict[str, Any]:
-    sanitized = dict(payload)
-    sanitized["email_address"] = _mask_email(payload.get("email_address"))
-    return sanitized
+    # display_name, timezone, and exchange_version can all help identify the mailbox
+    # owner or the organization's infrastructure, so the default (non-include-data)
+    # output keeps only the masked address and drops the rest.
+    return {"email_address": _mask_email(payload.get("email_address"))}
+
+
+def _sanitize_ping(payload: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "status": payload.get("status"),
+        "server": "<redacted>",
+        "latency_ms": payload.get("latency_ms"),
+    }
 
 
 def main() -> None:
@@ -53,8 +62,8 @@ def main() -> None:
 
     include_data = _env_flag("OUTLOOK_MCP_SMOKE_INCLUDE_DATA")
     payload: dict[str, Any] = {
-        "ping_exchange": ping,
-        "mailbox_info": _sanitize_mailbox(mailbox),
+        "ping_exchange": ping if include_data else _sanitize_ping(ping),
+        "mailbox_info": mailbox if include_data else _sanitize_mailbox(mailbox),
         "recent_inbox_count": len(inbox),
         "upcoming_events_count": len(events),
         "data_included": include_data,

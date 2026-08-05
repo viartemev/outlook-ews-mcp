@@ -18,6 +18,12 @@ def test_build_mcp_server_passes_sse_host_and_port_to_constructor(
     assert server.settings.port == 9999
 
 
+def test_build_mcp_server_uses_distribution_name(client, settings) -> None:
+    server = build_mcp_server(settings=settings, client=client)
+
+    assert server.name == "outlook-ews-mcp"
+
+
 def test_main_stdio_runs_with_no_arguments(
     monkeypatch, client: ExchangeClient, settings: Settings
 ) -> None:

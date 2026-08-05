@@ -9,7 +9,7 @@
 `outlook-ews-mcp` is an MCP server for on-prem Microsoft Exchange via EWS (`exchangelib`).
 It gives MCP-compatible clients access to email, calendar, contacts, folders, attachments, and availability data through a single, testable Python service.
 
-> Note: this project was previously referred to as `outlook-mcp`. It was renamed because that name is already taken on PyPI by an unrelated project — use `outlook-ews-mcp` for `pip`/`uvx` installs and for the CLI commands below.
+> Note: this project was previously referred to as `outlook-mcp`. It was renamed because that name is already taken on PyPI by an unrelated project. The distribution and CLI name is `outlook-ews-mcp`; until the first tagged PyPI release, install it from this repository as shown below.
 
 ## Short description
 
@@ -29,7 +29,7 @@ Secure MCP server for on-prem Microsoft Exchange (EWS) with tools for email, cal
 - MCP transport via `stdio` and `SSE`
 - centralized error mapping and a single `ExchangeClient` abstraction
 - privacy-safer smoke check output by default
-- Docker support and GitLab CI/CD pipeline included
+- Docker support plus GitHub and GitLab CI/CD pipelines included
 
 ## Tool catalog
 
@@ -89,7 +89,7 @@ What the current code does:
 - does **not** contain telemetry, analytics, or third-party data export logic
 - keeps secrets in environment variables / `.env`
 - ignores local secret files via `.gitignore` (`.env`, `.env.*`, while keeping `.env.example`)
-- logs only tool name, status, duration, and error code; it does **not** log message bodies, attachment contents, or passwords
+- structured MCP error responses and server logs do not include raw Exchange exception text, message bodies, attachment contents, or passwords; successful tools return the mailbox data they were asked for
 - excludes `.env`, tests, caches, and VCS metadata from Docker build context via `.dockerignore`
 
 What you should still be careful with:
@@ -128,12 +128,13 @@ EXCHANGE_ALLOW_INSECURE_BASIC_AUTH=false
 EXCHANGE_VERSION=EXCHANGE_2016
 EXCHANGE_TIMEOUT=30
 EXCHANGE_MAX_RETRY_WAIT_SECONDS=90
-EXCHANGE_TIMEZONE=Europe/Moscow
+EXCHANGE_TIMEZONE_FALLBACK=Europe/Moscow
 EXCHANGE_IMPERSONATE_AS=
-ATTACHMENT_MAX_SIZE_MB=10
-ATTACHMENT_MAX_COUNT=10
-ATTACHMENT_MAX_TOTAL_SIZE_MB=25
+EXCHANGE_ATTACHMENT_MAX_SIZE_MB=10
+EXCHANGE_ATTACHMENT_MAX_COUNT=10
+EXCHANGE_ATTACHMENT_MAX_TOTAL_SIZE_MB=25
 EXCHANGE_ATTACHMENT_ROOT=
+EXCHANGE_EMAIL_BODY_MAX_CHARS=200000
 MCP_TRANSPORT=stdio
 MCP_SSE_HOST=127.0.0.1
 MCP_SSE_PORT=8080
@@ -143,13 +144,16 @@ LOG_FILE=
 
 Notes:
 - set `EXCHANGE_EMAIL_ADDRESS` when `EXCHANGE_USERNAME` is not an SMTP address
-- `OAuth2` is reserved in config, but this build currently supports live auth with `NTLM` or `Basic`
 - `EXCHANGE_ALLOW_INSECURE_BASIC_AUTH` only matters with `EXCHANGE_AUTH_TYPE=Basic` and an `http://` `EXCHANGE_SERVER`; startup fails otherwise unless it's set `true`
 - `EXCHANGE_IMPERSONATE_AS` enables mailbox impersonation when Exchange permissions are configured accordingly
-- `ATTACHMENT_MAX_SIZE_MB` is enforced both on local files attached to outgoing email and on attachments downloaded via `get_attachment`
-- `ATTACHMENT_MAX_COUNT` and `ATTACHMENT_MAX_TOTAL_SIZE_MB` cap the number and combined size of attachments on a single `send_email`/`reply_email`/`forward_email`/`create_draft` call
+- `EXCHANGE_TIMEZONE_FALLBACK` is only used when Exchange reports a timezone as an unresolvable GUID id; normal operations (naive datetimes, all-day event math) use the mailbox's own default timezone instead
+- `EXCHANGE_ATTACHMENT_MAX_SIZE_MB` is enforced both on local files attached to outgoing email and on attachments downloaded via `get_attachment`
+- `EXCHANGE_ATTACHMENT_MAX_COUNT` and `EXCHANGE_ATTACHMENT_MAX_TOTAL_SIZE_MB` cap the number and combined size of attachments on a single `send_email`/`reply_email`/`forward_email`/`create_draft` call
 - `EXCHANGE_ATTACHMENT_ROOT` is unset (unrestricted) by default; set it to an absolute directory to confine both `attachments` paths (send/reply/forward/create_draft) and `get_attachment`'s `save_path` to that directory tree
 - `EXCHANGE_MAX_RETRY_WAIT_SECONDS` is a total backoff time budget (exchangelib retries transient errors with exponential backoff until this many seconds have elapsed), not a retry count; set to `0` to disable retries and fail fast on the first error
+- `EXCHANGE_EMAIL_BODY_MAX_CHARS` caps `get_email`'s `body_text`/`body_html`; a message beyond the cap is truncated and `truncated: true` is set on the response instead of returning an unbounded MCP payload
+- send operations return `id: null` when EWS does not provide a durable ID for the sent copy (notably replies, forwards, and sent drafts)
+- attachment metadata includes `downloadable`; embedded Exchange item attachments have `downloadable: false` and cannot be saved by `get_attachment`
 
 ## Claude Desktop example
 
@@ -193,11 +197,11 @@ docker run --rm --env-file .env outlook-ews-mcp
 
 ## CI/CD
 
-The repository includes both a GitHub Actions workflow (`.github/workflows/ci.yml`) and a GitLab CI pipeline (`.gitlab-ci.yml`), each running the same `lint` (ruff) and `test` (pytest) stages on pushes and pull/merge requests.
+GitHub Actions and GitLab CI both run lint, formatting, type checks, tests, dependency audit, and package builds. Both use the uv version pinned in `pyproject.toml`.
 
-GitLab CI additionally has:
-- `build` — builds Python package artifacts into `dist/`
-- `release` — builds and pushes a Docker image to the GitLab Container Registry on the default branch and on tags
+GitHub additionally publishes tagged releases (`v*`) to PyPI with OIDC trusted publishing. Before the first release, configure a PyPI pending publisher for repository `viartemev/outlook-ews-mcp`, workflow `ci.yml`, and environment `pypi`; no long-lived PyPI token is stored in GitHub.
+
+GitLab additionally builds and pushes a Docker image to the GitLab Container Registry on the default branch and on tags.
 
 Default image tagging behavior:
 - default branch: pushes `:$CI_COMMIT_SHORT_SHA` and `:latest`

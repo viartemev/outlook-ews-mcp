@@ -25,14 +25,27 @@ from ..models import (
 from .base import BaseEWSBackend
 
 
+#: Fields ContactSummary actually reads -- restricting the fetch to these avoids
+#: exchangelib issuing an extra GetItem per contact and loading full notes/addresses.
+_CONTACT_SUMMARY_FIELDS = (
+    "display_name",
+    "file_as",
+    "email_addresses",
+    "phone_numbers",
+    "company_name",
+    "job_title",
+    "department",
+)
+
+
 class ContactOperationsMixin(BaseEWSBackend):
     def _contact_summary_from_contact(
         self, contact: Contact, source: Literal["personal", "gal"]
     ) -> ContactSummary:
         emails = [
-            entry.email
+            smtp
             for entry in getattr(contact, "email_addresses", None) or []
-            if getattr(entry, "email", None)
+            if (smtp := self._smtp_address(getattr(entry, "email", None)))
         ]
         phones = [
             entry.phone_number
@@ -66,7 +79,9 @@ class ContactOperationsMixin(BaseEWSBackend):
                 | Q(email_addresses__EmailAddress3__icontains=query)
             )
             try:
-                qs = self.account.contacts.filter(contact_filter)[: request.limit]
+                qs = self.account.contacts.filter(contact_filter).only(*_CONTACT_SUMMARY_FIELDS)[
+                    : request.limit
+                ]
                 results.extend(
                     self._contact_summary_from_contact(contact, "personal") for contact in qs
                 )
@@ -106,16 +121,26 @@ class ContactOperationsMixin(BaseEWSBackend):
                             ),
                             None,
                         )
-                        summary.id = mailbox_email or contact_smtp or summary.id
+                        resolved_smtp = mailbox_email or contact_smtp
+                        if resolved_smtp is None:
+                            continue
+                        summary.id = resolved_smtp
+                        if all(
+                            known.lower() != resolved_smtp.lower()
+                            for known in summary.email_addresses
+                        ):
+                            summary.email_addresses.insert(0, resolved_smtp)
                         results.append(summary)
                     elif mailbox is not None:
+                        if mailbox_email is None:
+                            continue
                         results.append(
                             ContactSummary(
-                                id=mailbox_email or request.query,
+                                id=mailbox_email,
                                 display_name=getattr(mailbox, "name", None)
                                 or mailbox_email
                                 or request.query,
-                                email_addresses=[mailbox_email] if mailbox_email else [],
+                                email_addresses=[mailbox_email],
                                 phone_numbers=[],
                                 source="gal",
                             )
@@ -130,7 +155,7 @@ class ContactOperationsMixin(BaseEWSBackend):
         source = request.source or ("gal" if "@" in request.id else "personal")
         if source == "gal":
             return self._get_gal_contact(request.id)
-        item = self._fetch_item(request.id, folder=self.account.contacts)
+        item = self._fetch_item(request.id, folder=self.account.contacts, expected_type=Contact)
         return self._contact_full_from_item(item, item_id=item.id, source="personal")
 
     def _get_gal_contact(self, address: str) -> ContactFull:
@@ -184,7 +209,12 @@ class ContactOperationsMixin(BaseEWSBackend):
             if prefix.lower() != "smtp":
                 return None
             address = remainder.strip()
-        return address or None
+        # A bare X.500 distinguished name (no "SMTP:"/"EX:" prefix at all, since a DN
+        # has no colon to partition on) looks like "/o=ORG/ou=.../cn=Recipients/cn=...".
+        # That's never a valid SMTP address, so reject anything that isn't email-shaped.
+        if not address or "@" not in address or address.startswith("/"):
+            return None
+        return address
 
     def _to_contact_emails(self, entries: Any) -> list[ContactEmailAddress]:
         result: list[ContactEmailAddress] = []
@@ -257,7 +287,7 @@ class ContactOperationsMixin(BaseEWSBackend):
             raise self._map_exception(exc) from exc
 
     def update_contact(self, request: UpdateContactRequest) -> ActionResult:
-        contact = self._fetch_item(request.id, folder=self.account.contacts)
+        contact = self._fetch_item(request.id, folder=self.account.contacts, expected_type=Contact)
         updated_fields: list[str] = []
         save_fields: list[str] = []
         # A field name in `fields_set` means the caller explicitly included it in the
@@ -293,14 +323,18 @@ class ContactOperationsMixin(BaseEWSBackend):
             )
             updated_fields.append("phone")
             save_fields.append("phone_numbers")
+        if not save_fields:
+            # Nothing to change -- saving anyway with update_fields=None writes every
+            # loaded field back, which can clobber a concurrent edit to this contact.
+            return ActionResult(id=request.id, status="updated", updated_fields=updated_fields)
         try:
-            contact.save(update_fields=save_fields or None)
+            contact.save(update_fields=save_fields)
             return ActionResult(id=request.id, status="updated", updated_fields=updated_fields)
         except Exception as exc:  # noqa: BLE001
             raise self._map_exception(exc, item_id=request.id) from exc
 
     def delete_contact(self, request: DeleteContactRequest) -> ActionResult:
-        contact = self._fetch_item(request.id, folder=self.account.contacts)
+        contact = self._fetch_item(request.id, folder=self.account.contacts, expected_type=Contact)
         try:
             contact.move_to_trash()
             return ActionResult(id=request.id, status="deleted")

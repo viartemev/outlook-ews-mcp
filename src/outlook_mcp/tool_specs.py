@@ -87,6 +87,7 @@ TOOL_SPECS: list[ToolSpec] = [
         send_email,
         request_model=models.SendEmailRequest,
         response_model=models.SendResult,
+        destructive=True,
     ),
     ToolSpec(
         "reply_email",
@@ -94,6 +95,7 @@ TOOL_SPECS: list[ToolSpec] = [
         reply_email,
         request_model=models.ReplyEmailRequest,
         response_model=models.SendResult,
+        destructive=True,
     ),
     ToolSpec(
         "forward_email",
@@ -101,6 +103,7 @@ TOOL_SPECS: list[ToolSpec] = [
         forward_email,
         request_model=models.ForwardEmailRequest,
         response_model=models.SendResult,
+        destructive=True,
     ),
     ToolSpec(
         "move_email",
@@ -108,6 +111,7 @@ TOOL_SPECS: list[ToolSpec] = [
         move_email,
         request_model=models.FolderActionRequest,
         response_model=models.ActionResult,
+        destructive=True,
     ),
     ToolSpec(
         "copy_email",
@@ -130,6 +134,7 @@ TOOL_SPECS: list[ToolSpec] = [
         mark_email,
         request_model=models.MarkEmailRequest,
         response_model=models.ActionResult,
+        destructive=True,
     ),
     ToolSpec(
         "list_folders",
@@ -158,7 +163,8 @@ TOOL_SPECS: list[ToolSpec] = [
         "Send a draft email",
         send_draft,
         request_model=models.SendDraftRequest,
-        response_model=models.ActionResult,
+        response_model=models.SendResult,
+        destructive=True,
     ),
     ToolSpec(
         "get_attachment",
@@ -189,6 +195,7 @@ TOOL_SPECS: list[ToolSpec] = [
         create_event,
         request_model=models.CreateEventRequest,
         response_model=models.CreateEventResult,
+        destructive=True,
     ),
     ToolSpec(
         "update_event",
@@ -196,6 +203,7 @@ TOOL_SPECS: list[ToolSpec] = [
         update_event,
         request_model=models.UpdateEventRequest,
         response_model=models.ActionResult,
+        destructive=True,
     ),
     ToolSpec(
         "delete_event",
@@ -211,6 +219,7 @@ TOOL_SPECS: list[ToolSpec] = [
         respond_to_invite,
         request_model=models.RespondToInviteRequest,
         response_model=models.ActionResult,
+        destructive=True,
     ),
     ToolSpec(
         "find_free_slots",
@@ -264,6 +273,7 @@ TOOL_SPECS: list[ToolSpec] = [
         update_contact,
         request_model=models.UpdateContactRequest,
         response_model=models.ActionResult,
+        destructive=True,
     ),
     ToolSpec(
         "delete_contact",

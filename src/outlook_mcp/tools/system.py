@@ -1,12 +1,6 @@
 from __future__ import annotations
 
-from ..exchange_client import ExchangeClient
-from ..models import dump_model
+from .common import tool_handler
 
-
-def ping_exchange(client: ExchangeClient, arguments: dict) -> dict:
-    return dump_model(client.ping())
-
-
-def get_mailbox_info(client: ExchangeClient, arguments: dict) -> dict:
-    return dump_model(client.get_mailbox_info())
+ping_exchange = tool_handler("ping")
+get_mailbox_info = tool_handler("get_mailbox_info")

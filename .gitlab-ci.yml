@@ -14,6 +14,7 @@ stages:
 
 variables:
   UV_CACHE_DIR: .uv-cache
+  UV_VERSION: "0.12.1"
   PIP_DISABLE_PIP_VERSION_CHECK: "1"
   PYTHONDONTWRITEBYTECODE: "1"
   PYTHONUNBUFFERED: "1"
@@ -27,7 +28,7 @@ cache:
   image: python:3.12-slim@sha256:57cd7c3a7a273101a6485ba99423ee568157882804b1124b4dd04266317710de
   before_script:
     - python --version
-    - pip install --no-cache-dir uv
+    - pip install --no-cache-dir "uv==$UV_VERSION"
     - uv sync --frozen --extra dev
 
 lint:
@@ -35,6 +36,7 @@ lint:
   <<: *default_python_job
   script:
     - uv run ruff check .
+    - uv run ruff format --check .
 
 typecheck:
   stage: typecheck

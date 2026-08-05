@@ -53,3 +53,28 @@ def test_ntlm_over_http_allowed():
         )
     )
     assert settings.exchange_auth_type == "NTLM"
+
+
+def test_email_body_limit_uses_exchange_prefixed_alias():
+    settings = Settings(**_kwargs(EXCHANGE_EMAIL_BODY_MAX_CHARS=1234))
+
+    assert settings.email_body_max_chars == 1234
+
+
+def test_oauth2_is_rejected_until_implemented():
+    with pytest.raises(ValidationError):
+        Settings(**_kwargs(EXCHANGE_AUTH_TYPE="OAuth2"))
+
+
+def test_attachment_limits_use_exchange_prefixed_aliases():
+    settings = Settings(
+        **_kwargs(
+            EXCHANGE_ATTACHMENT_MAX_SIZE_MB=11,
+            EXCHANGE_ATTACHMENT_MAX_COUNT=12,
+            EXCHANGE_ATTACHMENT_MAX_TOTAL_SIZE_MB=26,
+        )
+    )
+
+    assert settings.attachment_max_size_mb == 11
+    assert settings.attachment_max_count == 12
+    assert settings.attachment_max_total_size_mb == 26
