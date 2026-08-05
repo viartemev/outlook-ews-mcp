@@ -84,6 +84,18 @@ class FakeCalendarFolder:
         return self._items
 
 
+def test_calendar_id_must_reference_calendar_folder(settings, monkeypatch) -> None:
+    backend = EWSExchangeBackend(settings)
+    folder = SimpleNamespace(folder_class="IPF.Note")
+    monkeypatch.setattr(backend, "_resolve_folder", lambda folder_id: folder)
+    backend._account = SimpleNamespace(calendar=object())
+
+    with pytest.raises(APIError) as excinfo:
+        backend._calendar_folder("not-a-calendar")
+
+    assert excinfo.value.code == "validation_error"
+
+
 def _fake_event(
     item_id: str, is_recurring: bool, parent_folder_id: str | None = None
 ) -> SimpleNamespace:

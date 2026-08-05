@@ -1,1 +1,1 @@
-"""Tool implementations for outlook-mcp."""
+"""Tool implementations for outlook-ews-mcp."""

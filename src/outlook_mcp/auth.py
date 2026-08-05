@@ -1,6 +1,7 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
+from typing import Literal
 
 from .config import Settings
 from .errors import APIError
@@ -8,9 +9,9 @@ from .errors import APIError
 
 @dataclass(slots=True)
 class AuthContext:
-    auth_type: str
+    auth_type: Literal["NTLM", "Basic"]
     username: str
-    password: str
+    password: str = field(repr=False)
     primary_smtp_address: str
     impersonate_as: str | None = None
 
@@ -32,10 +33,11 @@ def build_auth_context(settings: Settings) -> AuthContext:
                 }
             ],
         )
+    plaintext_password = settings.exchange_password.get_secret_value()
     return AuthContext(
         auth_type=settings.exchange_auth_type,
         username=settings.exchange_username,
-        password=settings.exchange_password,
+        password=plaintext_password,
         primary_smtp_address=primary_smtp_address,
         impersonate_as=settings.exchange_impersonate_as,
     )

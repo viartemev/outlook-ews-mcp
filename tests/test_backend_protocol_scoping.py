@@ -60,14 +60,14 @@ def test_timezone_fallback_follows_the_most_recently_active_backend() -> None:
     moscow_backend = EWSExchangeBackend(
         _settings(
             EXCHANGE_SERVER="https://mail1.example.com/EWS/Exchange.asmx",
-            EXCHANGE_TIMEZONE="Europe/Moscow",
+            EXCHANGE_TIMEZONE_FALLBACK="Europe/Moscow",
         )
     )
     new_york_backend = EWSExchangeBackend(
         _settings(
             EXCHANGE_SERVER="https://mail2.example.com/EWS/Exchange.asmx",
             EXCHANGE_USERNAME="other-user@example.com",
-            EXCHANGE_TIMEZONE="America/New_York",
+            EXCHANGE_TIMEZONE_FALLBACK="America/New_York",
         )
     )
 

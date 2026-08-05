@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from outlook_mcp.smoke import _env_flag, _mask_email, _sanitize_mailbox
+from outlook_mcp.smoke import _env_flag, _mask_email, _sanitize_mailbox, _sanitize_ping
 
 
 def test_mask_email() -> None:
@@ -9,17 +9,33 @@ def test_mask_email() -> None:
     assert _mask_email(None) is None
 
 
-def test_sanitize_mailbox_masks_email() -> None:
+def test_sanitize_mailbox_masks_email_and_drops_identifying_fields() -> None:
     payload = {
         "email_address": "user@example.com",
         "display_name": "Test User",
         "timezone": "Europe/Moscow",
+        "exchange_version": "2019",
     }
 
     result = _sanitize_mailbox(payload)
 
-    assert result["email_address"] == "us**@example.com"
-    assert result["display_name"] == "Test User"
+    assert result == {"email_address": "us**@example.com"}
+
+
+def test_sanitize_ping_redacts_server() -> None:
+    payload = {
+        "status": "ok",
+        "server": "mail.internal.company.com",
+        "version": "Exchange2019_CU15",
+        "latency_ms": 12,
+    }
+
+    result = _sanitize_ping(payload)
+
+    assert result["server"] == "<redacted>"
+    assert result["status"] == "ok"
+    assert result["latency_ms"] == 12
+    assert "version" not in result
 
 
 def test_env_flag(monkeypatch) -> None:

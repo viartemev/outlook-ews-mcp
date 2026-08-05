@@ -8,7 +8,7 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
 
-from exchangelib import FileAttachment, Folder, HTMLBody, Message, Q
+from exchangelib import FileAttachment, Folder, HTMLBody, ItemAttachment, Message, Q
 from exchangelib.extended_properties import Flag
 from exchangelib.fields import InvalidField
 from exchangelib.folders import FolderCollection
@@ -47,6 +47,24 @@ except InvalidField:
 #: PidTagFlagStatus values: None = not flagged, 1 = completed, 2 = flagged.
 _FLAG_STATUS = {"flagged": 2, "complete": 1, "none": None}
 
+#: Fields EmailSummary actually reads -- restricting the fetch to these avoids
+#: exchangelib issuing an extra GetItem per message and loading full body/
+#: attachments/headers just to render a one-line summary.
+_EMAIL_SUMMARY_FIELDS = (
+    "subject",
+    "author",
+    "sender",
+    "to_recipients",
+    "datetime_received",
+    "datetime_sent",
+    "datetime_created",
+    "is_read",
+    "has_attachments",
+    "text_body",
+    "importance",
+    "categories",
+)
+
 
 class EmailOperationsMixin(BaseEWSBackend):
     def _to_email_summary(self, item: Any) -> EmailSummary:
@@ -76,10 +94,19 @@ class EmailOperationsMixin(BaseEWSBackend):
             name=getattr(attachment, "name", "attachment"),
             size=getattr(attachment, "size", None),
             content_type=getattr(attachment, "content_type", None),
+            downloadable=not isinstance(attachment, ItemAttachment),
         )
 
     def _to_email_full(self, item: Any) -> EmailFull:
         body_text, body_html = self._extract_message_body(item)
+        max_chars = self.settings.email_body_max_chars
+        truncated = False
+        if len(body_text) > max_chars:
+            body_text = body_text[:max_chars]
+            truncated = True
+        if body_html is not None and len(body_html) > max_chars:
+            body_html = body_html[:max_chars]
+            truncated = True
         return EmailFull(
             **self._to_email_summary(item).model_dump(by_alias=True),
             cc=self._recipients(getattr(item, "cc_recipients", None)),
@@ -91,7 +118,7 @@ class EmailOperationsMixin(BaseEWSBackend):
             ],
             conversation_id=getattr(getattr(item, "conversation_id", None), "id", None),
             headers=self._headers_to_dict(getattr(item, "headers", None)),
-            truncated=False,
+            truncated=truncated,
         )
 
     def _preview(self, item: Any) -> str:
@@ -154,7 +181,7 @@ class EmailOperationsMixin(BaseEWSBackend):
                     details=[
                         {
                             "field": "attachments",
-                            "reason": f"file exceeds ATTACHMENT_MAX_SIZE_MB="
+                            "reason": f"file exceeds EXCHANGE_ATTACHMENT_MAX_SIZE_MB="
                             f"{self.settings.attachment_max_size_mb}: {path}",
                         }
                     ],
@@ -167,7 +194,7 @@ class EmailOperationsMixin(BaseEWSBackend):
                     details=[
                         {
                             "field": "attachments",
-                            "reason": f"combined size exceeds ATTACHMENT_MAX_TOTAL_SIZE_MB="
+                            "reason": f"combined size exceeds EXCHANGE_ATTACHMENT_MAX_TOTAL_SIZE_MB="
                             f"{self.settings.attachment_max_total_size_mb}",
                         }
                     ],
@@ -219,7 +246,7 @@ class EmailOperationsMixin(BaseEWSBackend):
             try:
                 fd = os.open(
                     candidate,
-                    os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW,
+                    os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_NOFOLLOW", 0),
                     0o600,
                 )
                 return fd, candidate
@@ -231,7 +258,7 @@ class EmailOperationsMixin(BaseEWSBackend):
 
     def list_emails(self, request: ListEmailsRequest) -> list[EmailSummary]:
         folder = self._resolve_folder(request.folder)
-        qs = folder.all().order_by("-datetime_received")
+        qs = folder.all().only(*_EMAIL_SUMMARY_FIELDS).order_by("-datetime_received")
         filters: dict[str, Any] = {}
         if request.from_address:
             # 'author' is a MailboxField, not an IndexedField, so EWS only supports filtering the field
@@ -262,7 +289,7 @@ class EmailOperationsMixin(BaseEWSBackend):
         return [self._to_email_summary(item) for item in items]
 
     def get_email(self, request: GetEmailRequest) -> EmailFull:
-        item = self._fetch_item(request.id)
+        item = self._fetch_item(request.id, expected_type=Message)
         return self._to_email_full(item)
 
     #: Standard EWS folder class for mail folders; excludes calendar/contacts/tasks
@@ -288,7 +315,9 @@ class EmailOperationsMixin(BaseEWSBackend):
                 | Q(text_body__icontains=request.query)
                 | Q(author__icontains=request.query)
             )
-            qs = searchable.filter(query).order_by("-datetime_received")
+            qs = (
+                searchable.filter(query).only(*_EMAIL_SUMMARY_FIELDS).order_by("-datetime_received")
+            )
             items = list(qs[: request.limit])
         except Exception as exc:  # noqa: BLE001
             raise self._map_exception(exc) from exc
@@ -298,12 +327,13 @@ class EmailOperationsMixin(BaseEWSBackend):
         message = self._make_message(request)
         try:
             message.send_and_save()
-            return SendResult(id=message.id or "", status="sent")
+            # send_and_save() doesn't hand back the id of the sent-and-saved copy.
+            return SendResult(id=message.id or None, status="sent")
         except Exception as exc:  # noqa: BLE001
             raise self._map_exception(exc) from exc
 
     def reply_email(self, request: ReplyEmailRequest) -> SendResult:
-        item = self._fetch_item(request.id)
+        item = self._fetch_item(request.id, expected_type=Message)
         try:
             subject = f"Re: {item.subject or ''}"
             response = (
@@ -311,38 +341,39 @@ class EmailOperationsMixin(BaseEWSBackend):
                 if request.reply_all
                 else item.create_reply(subject=subject, body=request.body)
             )
-            return self._send_response_object(response, request.attachments, fallback_id=request.id)
+            return self._send_response_object(response, request.attachments)
         except Exception as exc:  # noqa: BLE001
             raise self._map_exception(exc, item_id=request.id) from exc
 
     def forward_email(self, request: ForwardEmailRequest) -> SendResult:
-        item = self._fetch_item(request.id)
+        item = self._fetch_item(request.id, expected_type=Message)
         try:
             response = item.create_forward(
                 subject=f"Fwd: {item.subject or ''}",
                 body=request.comment or "",
                 to_recipients=[self._mailbox(address) for address in request.to],
             )
-            return self._send_response_object(response, request.attachments, fallback_id=request.id)
+            return self._send_response_object(response, request.attachments)
         except Exception as exc:  # noqa: BLE001
             raise self._map_exception(exc, item_id=request.id) from exc
 
-    def _send_response_object(
-        self, response: Any, attachments: list[Path], fallback_id: str
-    ) -> SendResult:
+    def _send_response_object(self, response: Any, attachments: list[Path]) -> SendResult:
         # create_reply/create_reply_all/create_forward response objects have no attachments
         # field of their own, so attachments require saving as a draft first, then attaching.
+        # Neither path hands back a trustworthy id for the sent message: response.send()
+        # doesn't save/return the sent item at all, and the draft's id stops being valid
+        # the moment message.send() moves it out of Drafts -- so no id is fabricated here.
         if not attachments:
             response.send()
-            return SendResult(id=fallback_id, status="sent")
+            return SendResult(id=None, status="sent")
         draft = response.save(self.account.drafts)
-        message = self._fetch_item(draft.id)
+        message = self._fetch_item(draft.id, folder=self.account.drafts, expected_type=Message)
         self._attach_files(message, attachments)
         message.send()
-        return SendResult(id=message.id or fallback_id, status="sent")
+        return SendResult(id=None, status="sent")
 
     def move_email(self, request: FolderActionRequest) -> ActionResult:
-        item = self._fetch_item(request.id)
+        item = self._fetch_item(request.id, expected_type=Message)
         destination = self._resolve_folder(request.folder)
         try:
             # item.move() returns None and mutates item.id/changekey in place.
@@ -352,7 +383,7 @@ class EmailOperationsMixin(BaseEWSBackend):
             raise self._map_exception(exc, item_id=request.id) from exc
 
     def copy_email(self, request: FolderActionRequest) -> ActionResult:
-        item = self._fetch_item(request.id)
+        item = self._fetch_item(request.id, expected_type=Message)
         destination = self._resolve_folder(request.folder)
         try:
             # item.copy() returns an (id, changekey) tuple for the new item, unlike item.move().
@@ -368,7 +399,7 @@ class EmailOperationsMixin(BaseEWSBackend):
             raise self._map_exception(exc, item_id=request.id) from exc
 
     def delete_email(self, request: DeleteEmailRequest) -> ActionResult:
-        item = self._fetch_item(request.id)
+        item = self._fetch_item(request.id, expected_type=Message)
         try:
             if request.hard_delete:
                 item.delete()
@@ -379,7 +410,7 @@ class EmailOperationsMixin(BaseEWSBackend):
             raise self._map_exception(exc, item_id=request.id) from exc
 
     def mark_email(self, request: MarkEmailRequest) -> ActionResult:
-        item = self._fetch_item(request.id)
+        item = self._fetch_item(request.id, expected_type=Message)
         updated_fields: list[str] = []
         save_fields: list[str] = []
         if request.read is not None:
@@ -433,30 +464,48 @@ class EmailOperationsMixin(BaseEWSBackend):
         except Exception as exc:  # noqa: BLE001
             raise self._map_exception(exc) from exc
 
-    def send_draft(self, request: SendDraftRequest) -> ActionResult:
-        item = self._fetch_item(request.id, folder=self.account.drafts)
+    def send_draft(self, request: SendDraftRequest) -> SendResult:
+        item = self._fetch_item(request.id, folder=self.account.drafts, expected_type=Message)
         try:
             item.send_and_save()
-            return ActionResult(id=request.id, status="sent")
+            # The draft's own id stops being valid the moment it's sent (it moves out
+            # of Drafts), so request.id must not be echoed back as if still usable.
+            return SendResult(id=None, status="sent")
         except Exception as exc:  # noqa: BLE001
             raise self._map_exception(exc, item_id=request.id) from exc
 
     def get_attachment(self, request: GetAttachmentRequest) -> AttachmentResult:
-        item = self._fetch_item(request.email_id)
+        item = self._fetch_item(request.email_id, expected_type=Message)
         target_dir = Path(request.save_path) if request.save_path else Path(tempfile.gettempdir())
         target_dir.mkdir(parents=True, exist_ok=True)
         max_size_bytes = self.settings.attachment_max_size_mb * 1024 * 1024
         for attachment in getattr(item, "attachments", None) or []:
             attachment_id = getattr(getattr(attachment, "attachment_id", None), "id", None)
             if attachment_id == request.attachment_id:
+                if isinstance(attachment, ItemAttachment):
+                    raise APIError(
+                        "validation_error",
+                        "attachment is an embedded Exchange item and cannot be "
+                        "downloaded as a file",
+                        details=[
+                            {
+                                "field": "attachment_id",
+                                "reason": "embedded item attachments (email/calendar/"
+                                "contact items) are not supported by get_attachment",
+                            }
+                        ],
+                    )
                 self._check_attachment_size(getattr(attachment, "size", None), max_size_bytes)
                 filename = self._sanitize_attachment_filename(getattr(attachment, "name", None))
                 fd, path = self._create_new_file(target_dir / filename)
                 try:
                     size = self._save_attachment(attachment, fd, max_size_bytes)
-                except Exception:
+                except APIError:
                     path.unlink(missing_ok=True)
                     raise
+                except Exception as exc:  # noqa: BLE001
+                    path.unlink(missing_ok=True)
+                    raise self._map_exception(exc, item_id=request.email_id) from exc
                 return AttachmentResult(
                     filename=filename,
                     size=size,
@@ -496,7 +545,7 @@ class EmailOperationsMixin(BaseEWSBackend):
                     {
                         "field": "attachment_id",
                         "reason": f"attachment size {size} bytes exceeds "
-                        f"ATTACHMENT_MAX_SIZE_MB={self.settings.attachment_max_size_mb}",
+                        f"EXCHANGE_ATTACHMENT_MAX_SIZE_MB={self.settings.attachment_max_size_mb}",
                     }
                 ],
             )

@@ -98,7 +98,7 @@ class ExchangeClient:
     def create_draft(self, request: DraftEmailRequest) -> ActionResult:
         return self.backend.create_draft(request)
 
-    def send_draft(self, request: SendDraftRequest) -> ActionResult:
+    def send_draft(self, request: SendDraftRequest) -> SendResult:
         return self.backend.send_draft(request)
 
     def get_attachment(self, request: GetAttachmentRequest) -> AttachmentResult:

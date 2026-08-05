@@ -103,7 +103,7 @@ class UnconfiguredExchangeBackend:
     def create_draft(self, request: DraftEmailRequest) -> ActionResult:
         self._raise()
 
-    def send_draft(self, request: SendDraftRequest) -> ActionResult:
+    def send_draft(self, request: SendDraftRequest) -> SendResult:
         self._raise()
 
     def get_attachment(self, request: GetAttachmentRequest) -> AttachmentResult:

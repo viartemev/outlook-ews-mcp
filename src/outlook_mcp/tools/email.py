@@ -2,10 +2,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from pydantic import ValidationError
-
 from ..config import Settings
-from ..errors import APIError, validation_error_from_pydantic
+from ..errors import APIError
 from ..exchange_client import ExchangeClient
 from ..models import (
     CreateFolderRequest,
@@ -22,135 +20,40 @@ from ..models import (
     SendDraftRequest,
     SendEmailRequest,
     ForwardEmailRequest,
-    dump_model,
 )
+from .common import tool_handler
 
 
-def list_emails(client: ExchangeClient, arguments: dict) -> list[dict]:
-    try:
-        request = ListEmailsRequest.model_validate(arguments)
-    except ValidationError as exc:
-        raise validation_error_from_pydantic(exc) from exc
-    return dump_model(client.list_emails(request))
-
-
-def get_email(client: ExchangeClient, arguments: dict) -> dict:
-    try:
-        request = GetEmailRequest.model_validate(arguments)
-    except ValidationError as exc:
-        raise validation_error_from_pydantic(exc) from exc
-    return dump_model(client.get_email(request))
-
-
-def search_emails(client: ExchangeClient, arguments: dict) -> list[dict]:
-    try:
-        request = SearchEmailsRequest.model_validate(arguments)
-    except ValidationError as exc:
-        raise validation_error_from_pydantic(exc) from exc
-    return dump_model(client.search_emails(request))
-
-
-def send_email(client: ExchangeClient, arguments: dict) -> dict:
-    try:
-        request = SendEmailRequest.model_validate(arguments)
-    except ValidationError as exc:
-        raise validation_error_from_pydantic(exc) from exc
-
+def _validate_outgoing_attachments(client: ExchangeClient, request) -> None:
     _validate_attachments(request.attachments, client.settings)
-    return dump_model(client.send_email(request))
 
 
-def reply_email(client: ExchangeClient, arguments: dict) -> dict:
-    try:
-        request = ReplyEmailRequest.model_validate(arguments)
-    except ValidationError as exc:
-        raise validation_error_from_pydantic(exc) from exc
-    _validate_attachments(request.attachments, client.settings)
-    return dump_model(client.reply_email(request))
-
-
-def forward_email(client: ExchangeClient, arguments: dict) -> dict:
-    try:
-        request = ForwardEmailRequest.model_validate(arguments)
-    except ValidationError as exc:
-        raise validation_error_from_pydantic(exc) from exc
-    _validate_attachments(request.attachments, client.settings)
-    return dump_model(client.forward_email(request))
-
-
-def move_email(client: ExchangeClient, arguments: dict) -> dict:
-    try:
-        request = FolderActionRequest.model_validate(arguments)
-    except ValidationError as exc:
-        raise validation_error_from_pydantic(exc) from exc
-    return dump_model(client.move_email(request))
-
-
-def copy_email(client: ExchangeClient, arguments: dict) -> dict:
-    try:
-        request = FolderActionRequest.model_validate(arguments)
-    except ValidationError as exc:
-        raise validation_error_from_pydantic(exc) from exc
-    return dump_model(client.copy_email(request))
-
-
-def delete_email(client: ExchangeClient, arguments: dict) -> dict:
-    try:
-        request = DeleteEmailRequest.model_validate(arguments)
-    except ValidationError as exc:
-        raise validation_error_from_pydantic(exc) from exc
-    return dump_model(client.delete_email(request))
-
-
-def mark_email(client: ExchangeClient, arguments: dict) -> dict:
-    try:
-        request = MarkEmailRequest.model_validate(arguments)
-    except ValidationError as exc:
-        raise validation_error_from_pydantic(exc) from exc
-    return dump_model(client.mark_email(request))
-
-
-def list_folders(client: ExchangeClient, arguments: dict) -> list[dict]:
-    try:
-        request = ListFoldersRequest.model_validate(arguments)
-    except ValidationError as exc:
-        raise validation_error_from_pydantic(exc) from exc
-    return dump_model(client.list_folders(request))
-
-
-def create_folder(client: ExchangeClient, arguments: dict) -> dict:
-    try:
-        request = CreateFolderRequest.model_validate(arguments)
-    except ValidationError as exc:
-        raise validation_error_from_pydantic(exc) from exc
-    return dump_model(client.create_folder(request))
-
-
-def create_draft(client: ExchangeClient, arguments: dict) -> dict:
-    try:
-        request = DraftEmailRequest.model_validate(arguments)
-    except ValidationError as exc:
-        raise validation_error_from_pydantic(exc) from exc
-    _validate_attachments(request.attachments, client.settings)
-    return dump_model(client.create_draft(request))
-
-
-def send_draft(client: ExchangeClient, arguments: dict) -> dict:
-    try:
-        request = SendDraftRequest.model_validate(arguments)
-    except ValidationError as exc:
-        raise validation_error_from_pydantic(exc) from exc
-    return dump_model(client.send_draft(request))
-
-
-def get_attachment(client: ExchangeClient, arguments: dict) -> dict:
-    try:
-        request = GetAttachmentRequest.model_validate(arguments)
-    except ValidationError as exc:
-        raise validation_error_from_pydantic(exc) from exc
+def _validate_attachment_destination(client: ExchangeClient, request) -> None:
     if request.save_path is not None:
         _validate_within_root([request.save_path], client.settings.attachment_root, "save_path")
-    return dump_model(client.get_attachment(request))
+
+
+list_emails = tool_handler("list_emails", ListEmailsRequest)
+get_email = tool_handler("get_email", GetEmailRequest)
+search_emails = tool_handler("search_emails", SearchEmailsRequest)
+send_email = tool_handler("send_email", SendEmailRequest, before=_validate_outgoing_attachments)
+reply_email = tool_handler("reply_email", ReplyEmailRequest, before=_validate_outgoing_attachments)
+forward_email = tool_handler(
+    "forward_email", ForwardEmailRequest, before=_validate_outgoing_attachments
+)
+move_email = tool_handler("move_email", FolderActionRequest)
+copy_email = tool_handler("copy_email", FolderActionRequest)
+delete_email = tool_handler("delete_email", DeleteEmailRequest)
+mark_email = tool_handler("mark_email", MarkEmailRequest)
+list_folders = tool_handler("list_folders", ListFoldersRequest)
+create_folder = tool_handler("create_folder", CreateFolderRequest)
+create_draft = tool_handler(
+    "create_draft", DraftEmailRequest, before=_validate_outgoing_attachments
+)
+send_draft = tool_handler("send_draft", SendDraftRequest)
+get_attachment = tool_handler(
+    "get_attachment", GetAttachmentRequest, before=_validate_attachment_destination
+)
 
 
 def _validate_within_root(paths: list[Path], root: Path | None, field: str) -> None:
@@ -182,7 +85,7 @@ def _validate_attachments(attachments: list[Path], settings: Settings) -> None:
                 {
                     "field": "attachments",
                     "reason": f"{len(attachments)} attachments exceed "
-                    f"ATTACHMENT_MAX_COUNT={settings.attachment_max_count}",
+                    f"EXCHANGE_ATTACHMENT_MAX_COUNT={settings.attachment_max_count}",
                 }
             ],
         )
@@ -222,7 +125,7 @@ def _validate_attachments(attachments: list[Path], settings: Settings) -> None:
             details=[
                 {
                     "field": "attachments",
-                    "reason": f"file exceeds ATTACHMENT_MAX_SIZE_MB="
+                    "reason": f"file exceeds EXCHANGE_ATTACHMENT_MAX_SIZE_MB="
                     f"{settings.attachment_max_size_mb}: {item['path']} ({item['size']} bytes)",
                 }
                 for item in oversized
@@ -239,7 +142,7 @@ def _validate_attachments(attachments: list[Path], settings: Settings) -> None:
                 {
                     "field": "attachments",
                     "reason": f"combined size {total_size} bytes exceeds "
-                    f"ATTACHMENT_MAX_TOTAL_SIZE_MB={settings.attachment_max_total_size_mb}",
+                    f"EXCHANGE_ATTACHMENT_MAX_TOTAL_SIZE_MB={settings.attachment_max_total_size_mb}",
                 }
             ],
         )

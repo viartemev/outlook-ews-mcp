@@ -5,10 +5,13 @@ import sys
 import time
 from typing import Any
 
+from pydantic import TypeAdapter
+
 from .config import Settings, get_settings
 from .errors import APIError, normalize_exception
 from .exchange_client import ExchangeClient, build_default_backend
-from .mcp_tools import normalize_tool_arguments, register_mcp_tools
+from .mcp_tools import register_mcp_tools
+from .models import dump_model
 from .tool_specs import TOOL_SPECS
 
 logger = logging.getLogger(__name__)
@@ -35,11 +38,14 @@ class ToolRegistry:
     def __init__(self, client: ExchangeClient) -> None:
         self.client = client
         self._specs = {spec.name: spec for spec in TOOL_SPECS}
+        self._response_adapters = {
+            spec.name: TypeAdapter(spec.response_model)
+            for spec in TOOL_SPECS
+            if spec.response_model is not None
+        }
 
-    def call(
-        self, name: str, arguments: dict[str, Any] | None = None
-    ) -> tuple[dict[str, Any], bool]:
-        arguments = normalize_tool_arguments(arguments)
+    def call(self, name: str, arguments: dict[str, Any] | None = None) -> tuple[Any, bool]:
+        arguments = dict(arguments or {})
         spec = self._specs.get(name)
         if not spec:
             error = APIError("not_found", f"unknown tool: {name}")
@@ -48,21 +54,21 @@ class ToolRegistry:
         started = time.perf_counter()
         try:
             result = spec.handler(self.client, arguments)
+            adapter = self._response_adapters.get(name)
+            if adapter is not None:
+                result = dump_model(adapter.validate_python(result))
             duration_ms = round((time.perf_counter() - started) * 1000)
             logger.info("tool=%s status=ok duration_ms=%s", name, duration_ms)
             return result, False
         except Exception as exc:  # noqa: BLE001
             api_error = normalize_exception(exc)
             duration_ms = round((time.perf_counter() - started) * 1000)
-            # Unclassified exceptions get a sanitized client-facing message (see
-            # normalize_exception); log the real exception here, server-side only,
-            # so it stays diagnosable without leaking internals to the MCP client.
             logger.warning(
-                "tool=%s status=error duration_ms=%s error=%s",
+                "tool=%s status=error duration_ms=%s error=%s exception_type=%s",
                 name,
                 duration_ms,
                 api_error.code,
-                exc_info=exc if not isinstance(exc, APIError) else None,
+                type(exc).__name__,
             )
             return api_error.to_dict(), True
 
@@ -84,7 +90,7 @@ def build_mcp_server(settings: Settings | None = None, client: ExchangeClient | 
 
     settings = settings or get_settings()
     registry = build_registry(settings=settings, client=client)
-    server = FastMCP("outlook-mcp", host=settings.mcp_sse_host, port=settings.mcp_sse_port)
+    server = FastMCP("outlook-ews-mcp", host=settings.mcp_sse_host, port=settings.mcp_sse_port)
     register_mcp_tools(server, registry, TOOL_SPECS)
     return server
 

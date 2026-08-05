@@ -1,4 +1,4 @@
-"""outlook-mcp package."""
+"""outlook-ews-mcp package."""
 
 __all__ = ["__version__"]
 

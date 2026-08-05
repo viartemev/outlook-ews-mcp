@@ -5,7 +5,7 @@ from pathlib import Path
 from typing import Literal
 from urllib.parse import urlparse
 
-from pydantic import Field, model_validator
+from pydantic import Field, SecretStr, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -19,10 +19,10 @@ class Settings(BaseSettings):
 
     exchange_server: str = Field(alias="EXCHANGE_SERVER")
     exchange_username: str = Field(alias="EXCHANGE_USERNAME")
-    exchange_password: str = Field(alias="EXCHANGE_PASSWORD")
+    exchange_password: SecretStr = Field(alias="EXCHANGE_PASSWORD")
     exchange_email_address: str | None = Field(default=None, alias="EXCHANGE_EMAIL_ADDRESS")
     exchange_verify_ssl: bool = Field(default=True, alias="EXCHANGE_VERIFY_SSL")
-    exchange_auth_type: Literal["NTLM", "Basic", "OAuth2"] = Field(
+    exchange_auth_type: Literal["NTLM", "Basic"] = Field(
         default="NTLM",
         alias="EXCHANGE_AUTH_TYPE",
     )
@@ -34,14 +34,26 @@ class Settings(BaseSettings):
     exchange_max_retry_wait: int = Field(
         default=90, alias="EXCHANGE_MAX_RETRY_WAIT_SECONDS", ge=0, le=3600
     )
-    exchange_timezone: str = Field(default="Europe/Moscow", alias="EXCHANGE_TIMEZONE")
+    # Only used as a fallback when Exchange reports a timezone as an unresolvable GUID
+    # (not applied as a general default -- naive datetimes and all-day math use
+    # account.default_timezone instead, see exchange_client/base.py).
+    exchange_timezone_fallback: str = Field(
+        default="Europe/Moscow", alias="EXCHANGE_TIMEZONE_FALLBACK"
+    )
     exchange_impersonate_as: str | None = Field(default=None, alias="EXCHANGE_IMPERSONATE_AS")
-    attachment_max_size_mb: int = Field(default=10, alias="ATTACHMENT_MAX_SIZE_MB", ge=1, le=100)
-    attachment_max_count: int = Field(default=10, alias="ATTACHMENT_MAX_COUNT", ge=1, le=100)
+    attachment_max_size_mb: int = Field(
+        default=10, alias="EXCHANGE_ATTACHMENT_MAX_SIZE_MB", ge=1, le=100
+    )
+    attachment_max_count: int = Field(
+        default=10, alias="EXCHANGE_ATTACHMENT_MAX_COUNT", ge=1, le=100
+    )
     attachment_max_total_size_mb: int = Field(
-        default=25, alias="ATTACHMENT_MAX_TOTAL_SIZE_MB", ge=1, le=500
+        default=25, alias="EXCHANGE_ATTACHMENT_MAX_TOTAL_SIZE_MB", ge=1, le=500
     )
     attachment_root: Path | None = Field(default=None, alias="EXCHANGE_ATTACHMENT_ROOT")
+    email_body_max_chars: int = Field(
+        default=200_000, alias="EXCHANGE_EMAIL_BODY_MAX_CHARS", ge=1_000, le=5_000_000
+    )
 
     mcp_transport: Literal["stdio", "sse"] = Field(default="stdio", alias="MCP_TRANSPORT")
     mcp_sse_host: str = Field(default="127.0.0.1", alias="MCP_SSE_HOST")

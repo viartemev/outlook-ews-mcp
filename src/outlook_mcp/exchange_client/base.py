@@ -2,13 +2,13 @@ from __future__ import annotations
 
 import logging
 import re
-import warnings
 from collections.abc import Iterable
 from contextvars import ContextVar
 from datetime import UTC, datetime
 from typing import Any, Literal
 from urllib.parse import urlparse
 
+from exchangelib import version as ews_version
 from exchangelib import (
     Account,
     BASIC,
@@ -24,8 +24,12 @@ from exchangelib import (
 )
 from exchangelib.ewsdatetime import EWSDateTime
 from exchangelib.errors import (
-    ErrorItemSavePropertyError,
+    ErrorAccessDenied,
     ErrorFolderSavePropertyError,
+    ErrorIrresolvableConflict,
+    ErrorItemNotFound,
+    ErrorItemSavePropertyError,
+    ErrorTimeoutExpired,
     RateLimitError,
     ResponseMessageError,
     TransportError,
@@ -33,11 +37,10 @@ from exchangelib.errors import (
     UnauthorizedError,
 )
 from exchangelib.folders import FolderCollection
+from exchangelib.items import Item
 from exchangelib.properties import ItemId
 from exchangelib.protocol import BaseProtocol, FailFast, FaultTolerance
-from exchangelib import version as ews_version
 from exchangelib.version import Build, Version
-from urllib3.exceptions import InsecureRequestWarning
 
 from ..auth import build_auth_context
 from ..config import Settings
@@ -78,23 +81,11 @@ class BaseEWSBackend:
     def account(self) -> Account:
         if self._account is None:
             self._account = self._build_account()
-        _active_timezone_fallback.set(self.settings.exchange_timezone)
+        _active_timezone_fallback.set(self.settings.exchange_timezone_fallback)
         return self._account
 
     def _build_account(self) -> Account:
         auth = build_auth_context(self.settings)
-        if auth.auth_type == "OAuth2":
-            raise APIError(
-                "validation_error",
-                "OAuth2 is not wired in this build yet",
-                details=[
-                    {
-                        "field": "EXCHANGE_AUTH_TYPE",
-                        "reason": "supported values for live checks are NTLM or Basic",
-                    }
-                ],
-            )
-
         self._configure_timezone_fallback()
         retry_policy = (
             FailFast()
@@ -188,7 +179,6 @@ class BaseEWSBackend:
         protocol.raw_session = raw_session_with_verify
 
         if not verify_ssl:
-            warnings.filterwarnings("ignore", category=InsecureRequestWarning)
             logger.warning("SSL certificate verification is disabled for Exchange connections")
 
     def _configure_timezone_fallback(self) -> None:
@@ -204,11 +194,7 @@ class BaseEWSBackend:
             except UnknownTimeZone:
                 fallback_timezone = _active_timezone_fallback.get()
                 if fallback_timezone and isinstance(ms_id, str) and _GUID_TIMEZONE_RE.match(ms_id):
-                    logger.info(
-                        "Mapping unknown Exchange timezone id %s to configured timezone %s",
-                        ms_id,
-                        fallback_timezone,
-                    )
+                    logger.info("Mapping unknown Exchange timezone id to configured fallback")
                     return cls(fallback_timezone)
                 raise
 
@@ -289,7 +275,12 @@ class BaseEWSBackend:
             return item
         return None
 
-    def _fetch_item(self, item_id: str, folder: Folder | None = None) -> Any:
+    def _fetch_item(
+        self,
+        item_id: str,
+        folder: Folder | None = None,
+        expected_type: type[Item] | tuple[type[Item], ...] | None = None,
+    ) -> Any:
         try:
             item = next(self.account.fetch(ids=[ItemId(id=item_id, changekey=None)], folder=folder))
         except StopIteration as exc:
@@ -305,6 +296,12 @@ class BaseEWSBackend:
         # (contacts, calendar events, drafts) need this explicit re-check after the
         # fetch, or a calendar_id/folder argument silently fails to constrain which
         # item gets acted on.
+        if (
+            isinstance(item, Item)
+            and expected_type is not None
+            and not isinstance(item, expected_type)
+        ):
+            raise NotFoundError(item_id)
         if folder is not None and not self._item_in_folder(item, folder):
             raise NotFoundError(item_id)
         return item
@@ -368,13 +365,18 @@ class BaseEWSBackend:
             html = str(body)
         return text, html
 
+    #: Defensive bound on a single header's value -- internet headers are normally
+    #: well under this, but nothing stops a message from arriving with a pathological
+    #: one (e.g. a hostile X-* header) that would otherwise inflate the MCP response.
+    _MAX_HEADER_VALUE_LENGTH = 4096
+
     def _headers_to_dict(self, headers: Any) -> dict[str, str]:
         result: dict[str, str] = {}
         for header in headers or []:
             name = getattr(header, "name", None)
             value = getattr(header, "value", None)
             if name and value is not None:
-                result[str(name)] = str(value)
+                result[str(name)] = str(value)[: self._MAX_HEADER_VALUE_LENGTH]
         return result
 
     def _to_ews_datetime(self, value: datetime) -> EWSDateTime:
@@ -389,29 +391,41 @@ class BaseEWSBackend:
     def _map_exception(self, exc: Exception, item_id: str | None = None) -> APIError:
         if isinstance(exc, APIError):
             return exc
-        message = str(exc)
         if isinstance(exc, UnauthorizedError):
             return AuthFailedError()
+        if isinstance(exc, ErrorAccessDenied):
+            return PermissionDeniedError()
         if isinstance(exc, RateLimitError):
             return ExchangeUnavailableError("exchange throttling or rate limit encountered")
-        if isinstance(exc, (ErrorItemSavePropertyError, ErrorFolderSavePropertyError)):
-            logger.warning("Exchange save-property conflict: %s", message)
+        if isinstance(exc, ErrorIrresolvableConflict):
+            # The only one of this group that's an actual optimistic-concurrency
+            # conflict (item was modified since it was last synced).
+            logger.warning("Exchange conflict")
             return ConflictError()
+        if isinstance(exc, ErrorTimeoutExpired):
+            return TimeoutAPIError(self.settings.exchange_timeout)
+        if isinstance(exc, ErrorItemNotFound):
+            if item_id:
+                return NotFoundError(item_id)
+            logger.warning("Exchange item not found")
+            return APIError("not_found", "item was not found")
+        if isinstance(exc, (ErrorItemSavePropertyError, ErrorFolderSavePropertyError)):
+            # An invalid/read-only property in the save request -- not a concurrent-
+            # edit conflict, so this must not be reported as ConflictError.
+            logger.warning("Exchange save-property error")
+            return APIError(
+                "exchange_error", "exchange rejected one or more properties in the request"
+            )
         # ResponseMessageError subclasses TransportError, so it has to be matched first.
         if isinstance(exc, ResponseMessageError):
-            lowered = message.lower()
-            if "not found" in lowered and item_id:
-                return NotFoundError(item_id)
-            if "access is denied" in lowered or "permission" in lowered:
-                return PermissionDeniedError()
-            logger.warning("Unmapped Exchange response error: %s", message)
+            logger.warning("Unmapped Exchange response error: %s", type(exc).__name__)
             return APIError("exchange_error", "exchange rejected the request")
-        if isinstance(exc, (TransportError, TimeoutError)):
-            if "timed out" in message.lower():
-                return TimeoutAPIError(self.settings.exchange_timeout)
-            logger.warning("Exchange transport error: %s", message)
+        if isinstance(exc, TimeoutError):
+            return TimeoutAPIError(self.settings.exchange_timeout)
+        if isinstance(exc, TransportError):
+            logger.warning("Exchange transport error: %s", type(exc).__name__)
             return ExchangeUnavailableError("exchange is unavailable")
-        logger.warning("Unmapped Exchange exception: %s", message)
+        logger.warning("Unmapped Exchange exception: %s", type(exc).__name__)
         return ExchangeUnavailableError("exchange is unavailable")
 
     def ping(self) -> PingResult:
