@@ -880,6 +880,81 @@ def test_reply_email_saves_draft_attaches_files_then_sends(settings, tmp_path) -
     assert result == SendResult(id=None, status="sent")
 
 
+@pytest.mark.parametrize(
+    ("original", "expected"),
+    [
+        ("Hello", "Re: Hello"),
+        # Replying inside a thread must not stack markers: a few rounds of
+        # "Re: Re: Re: " and the subject is unreadable.
+        ("Re: Hello", "Re: Hello"),
+        ("RE: Hello", "RE: Hello"),
+        ("Re[2]: Hello", "Re[2]: Hello"),
+        ("Ответ: Привет", "Ответ: Привет"),
+        # A forward marker is not a reply marker -- Outlook sends "RE: FW: ...".
+        ("FW: Hello", "Re: FW: Hello"),
+        ("", "Re:"),
+    ],
+)
+def test_reply_email_does_not_stack_reply_prefixes(settings, original, expected) -> None:
+    backend = EWSExchangeBackend(settings)
+    captured: list[str] = []
+
+    class FakeResponse:
+        def send(self):
+            pass
+
+    class FakeItem:
+        subject = original
+
+        def create_reply(self, subject, body):
+            captured.append(subject)
+            return FakeResponse()
+
+    def fetch(ids, folder=None):
+        yield FakeItem()
+
+    backend._account = SimpleNamespace(fetch=fetch)
+
+    backend.reply_email(ReplyEmailRequest(id="msg-1", body="Reply body"))
+
+    assert captured == [expected]
+
+
+@pytest.mark.parametrize(
+    ("original", "expected"),
+    [
+        ("Hello", "Fwd: Hello"),
+        ("Fwd: Hello", "Fwd: Hello"),
+        ("FW: Hello", "FW: Hello"),
+        ("Пересл: Привет", "Пересл: Привет"),
+        ("Re: Hello", "Fwd: Re: Hello"),
+    ],
+)
+def test_forward_email_does_not_stack_forward_prefixes(settings, original, expected) -> None:
+    backend = EWSExchangeBackend(settings)
+    captured: list[str] = []
+
+    class FakeResponse:
+        def send(self):
+            pass
+
+    class FakeItem:
+        subject = original
+
+        def create_forward(self, subject, body, to_recipients):
+            captured.append(subject)
+            return FakeResponse()
+
+    def fetch(ids, folder=None):
+        yield FakeItem()
+
+    backend._account = SimpleNamespace(fetch=fetch)
+
+    backend.forward_email(ForwardEmailRequest(id="msg-1", to=["user@example.com"]))
+
+    assert captured == [expected]
+
+
 def test_forward_email_saves_draft_attaches_files_then_sends(settings, tmp_path) -> None:
     backend = EWSExchangeBackend(settings)
     attachment_path = tmp_path / "note.txt"

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import errno
 import os
+import re
 import stat
 import tempfile
 from datetime import UTC, datetime, timedelta
@@ -64,6 +65,24 @@ _EMAIL_SUMMARY_FIELDS = (
     "importance",
     "categories",
 )
+
+#: Reply/forward markers Outlook writes, in the locales this server sees. The
+#: optional bracketed number covers the counted form Exchange sometimes uses
+#: ("Re[2]: ").
+_REPLY_PREFIX_RE = re.compile(r"^\s*(?:re|ответ|отв)\s*(?:\[\d+\])?\s*:", re.IGNORECASE)
+_FORWARD_PREFIX_RE = re.compile(r"^\s*(?:fw|fwd|пересл)\s*(?:\[\d+\])?\s*:", re.IGNORECASE)
+
+
+def reply_subject(value: str | None) -> str:
+    """Prefix with ``Re:`` unless the subject already carries a reply marker."""
+    subject = (value or "").strip()
+    return subject if _REPLY_PREFIX_RE.match(subject) else f"Re: {subject}".strip()
+
+
+def forward_subject(value: str | None) -> str:
+    """Prefix with ``Fwd:`` unless the subject already carries a forward marker."""
+    subject = (value or "").strip()
+    return subject if _FORWARD_PREFIX_RE.match(subject) else f"Fwd: {subject}".strip()
 
 
 class EmailOperationsMixin(BaseEWSBackend):
@@ -338,7 +357,7 @@ class EmailOperationsMixin(BaseEWSBackend):
     def reply_email(self, request: ReplyEmailRequest) -> SendResult:
         item = self._fetch_item(request.id, expected_type=Message)
         try:
-            subject = f"Re: {item.subject or ''}"
+            subject = reply_subject(item.subject)
             response = (
                 item.create_reply_all(subject=subject, body=request.body)
                 if request.reply_all
@@ -352,7 +371,7 @@ class EmailOperationsMixin(BaseEWSBackend):
         item = self._fetch_item(request.id, expected_type=Message)
         try:
             response = item.create_forward(
-                subject=f"Fwd: {item.subject or ''}",
+                subject=forward_subject(item.subject),
                 body=request.comment or "",
                 to_recipients=[self._mailbox(address) for address in request.to],
             )
