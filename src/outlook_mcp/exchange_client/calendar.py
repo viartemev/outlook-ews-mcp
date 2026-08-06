@@ -460,6 +460,11 @@ class CalendarOperationsMixin(BaseEWSBackend):
     def list_calendars(self) -> list[CalendarInfo]:
         try:
             default_id = self.account.calendar.id
+            # Unlike _get_folder_by_id (which avoids walk() because it already knows the
+            # target id), discovering *every* calendar folder in the tree has no id to look
+            # up -- walk() is the only way. It costs one batched Deep-traversal FindFolder
+            # call, cached on `self.account.root` for the process lifetime, not one call per
+            # folder, so it doesn't carry the same scaling cost as issue #5 was about.
             folders = [
                 folder
                 for folder in self.account.root.walk()

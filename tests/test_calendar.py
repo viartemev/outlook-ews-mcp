@@ -49,3 +49,18 @@ def test_find_free_slots(client) -> None:
         },
     )
     assert result[0]["all_available"] is True
+
+
+def test_find_free_slots_start_at_23_00_does_not_overflow_hour(client) -> None:
+    """Regression guard: a slot starting at 23:00 must roll over into the next
+    day instead of crashing (datetime.replace(hour=24) raises ValueError)."""
+    result = find_free_slots(
+        client,
+        {
+            "attendees": ["user@example.com"],
+            "duration": 60,
+            "start": datetime(2026, 4, 8, 23, 0, tzinfo=UTC).isoformat(),
+            "end": datetime(2026, 4, 9, 6, 0, tzinfo=UTC).isoformat(),
+        },
+    )
+    assert result[0]["end"] == "2026-04-09T00:00:00Z"

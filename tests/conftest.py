@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 import pytest
@@ -214,7 +214,7 @@ class FakeExchangeBackend:
         return [
             FreeSlot(
                 start=request.start,
-                end=request.start.replace(hour=request.start.hour + 1),
+                end=request.start + timedelta(hours=1),
                 all_available=True,
             )
         ]

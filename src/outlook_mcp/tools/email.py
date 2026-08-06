@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+from typing import Any
 
 from ..config import Settings
 from ..errors import APIError
@@ -24,11 +25,15 @@ from ..models import (
 from .common import tool_handler
 
 
-def _validate_outgoing_attachments(client: ExchangeClient, request) -> None:
+# request is whichever subtype tool_handler validated (DraftEmailRequest /
+# SendEmailRequest / ReplyEmailRequest / ForwardEmailRequest, or
+# GetAttachmentRequest below) -- narrower than the shared ExchangeModel base
+# these hooks are declared against in RequestHook, so it's typed as Any here.
+def _validate_outgoing_attachments(client: ExchangeClient, request: Any) -> None:
     _validate_attachments(request.attachments, client.settings)
 
 
-def _validate_attachment_destination(client: ExchangeClient, request) -> None:
+def _validate_attachment_destination(client: ExchangeClient, request: Any) -> None:
     if request.save_path is not None:
         _validate_within_root([request.save_path], client.settings.attachment_root, "save_path")
 

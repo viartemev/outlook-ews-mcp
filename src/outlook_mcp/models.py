@@ -534,6 +534,7 @@ class UpdateContactRequest(ExchangeModel):
 
 class DeleteContactRequest(ExchangeModel):
     id: str
+    hard_delete: bool = False
 
 
 def dump_model(
