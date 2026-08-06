@@ -67,6 +67,51 @@ def _fake_account(views, captured: dict | None = None) -> SimpleNamespace:
     )
 
 
+@pytest.mark.parametrize(
+    ("configured", "expected"),
+    [
+        ("mail.example.com", "https://mail.example.com/EWS/Exchange.asmx"),
+        ("https://mail.example.com", "https://mail.example.com/EWS/Exchange.asmx"),
+        ("https://mail.example.com/", "https://mail.example.com/EWS/Exchange.asmx"),
+        (
+            "https://mail.example.com/EWS/Exchange.asmx",
+            "https://mail.example.com/EWS/Exchange.asmx",
+        ),
+        (
+            "https://mail.example.com/ews/exchange.asmx",
+            "https://mail.example.com/ews/exchange.asmx",
+        ),
+        # A URL copied from a browser keeps its trailing slash. That used to miss
+        # the suffix check and get a second "/EWS/Exchange.asmx" appended, leaving
+        # a silently unreachable endpoint.
+        (
+            "https://mail.example.com/EWS/Exchange.asmx/",
+            "https://mail.example.com/EWS/Exchange.asmx",
+        ),
+        (
+            "  https://mail.example.com/EWS/Exchange.asmx  ",
+            "https://mail.example.com/EWS/Exchange.asmx",
+        ),
+        ("http://mail.example.com", "http://mail.example.com/EWS/Exchange.asmx"),
+    ],
+)
+def test_normalize_service_endpoint(settings, configured, expected) -> None:
+    backend = EWSExchangeBackend(settings)
+
+    assert backend._normalize_service_endpoint(configured) == expected
+
+
+def test_normalize_service_endpoint_never_repeats_the_ews_path(settings) -> None:
+    backend = EWSExchangeBackend(settings)
+
+    for configured in (
+        "mail.example.com",
+        "https://mail.example.com/EWS/Exchange.asmx",
+        "https://mail.example.com/EWS/Exchange.asmx/",
+    ):
+        assert backend._normalize_service_endpoint(configured).count("Exchange.asmx") == 1
+
+
 def test_map_exception_classifies_by_exchangelib_type_not_message_text(settings) -> None:
     """Each of these must be matched by its actual exchangelib exception class, not
     by substring-matching the (English, server-supplied) exception message."""
