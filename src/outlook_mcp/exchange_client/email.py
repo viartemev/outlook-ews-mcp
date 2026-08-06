@@ -10,7 +10,7 @@ from pathlib import Path
 from typing import Any
 
 from exchangelib import FileAttachment, Folder, HTMLBody, ItemAttachment, Message, Q
-from exchangelib.extended_properties import Flag
+from exchangelib.extended_properties import ExtendedProperty, Flag
 from exchangelib.fields import InvalidField
 from exchangelib.folders import FolderCollection
 
@@ -40,10 +40,32 @@ from ..models import (
 )
 from .base import BaseEWSBackend
 
-try:
-    Message.get_field_by_fieldname("flag_status")
-except InvalidField:
-    Message.register("flag_status", Flag)
+
+class FlagStartDate(ExtendedProperty):
+    """PidLidTaskStartDate -- the "start" half of an Outlook follow-up flag."""
+
+    distinguished_property_set_id = "Task"
+    property_id = 0x8104
+    property_type = "SystemTime"
+
+
+class FlagDueDate(ExtendedProperty):
+    """PidLidTaskDueDate -- the "due by" half of an Outlook follow-up flag."""
+
+    distinguished_property_set_id = "Task"
+    property_id = 0x8105
+    property_type = "SystemTime"
+
+
+for _field_name, _field_cls in (
+    ("flag_status", Flag),
+    ("flag_start_date", FlagStartDate),
+    ("flag_due_date", FlagDueDate),
+):
+    try:
+        Message.get_field_by_fieldname(_field_name)
+    except InvalidField:
+        Message.register(_field_name, _field_cls)
 
 #: PidTagFlagStatus values: None = not flagged, 1 = completed, 2 = flagged.
 _FLAG_STATUS = {"flagged": 2, "complete": 1, "none": None}
@@ -443,10 +465,25 @@ class EmailOperationsMixin(BaseEWSBackend):
             item.importance = request.importance.capitalize()
             updated_fields.append("importance")
             save_fields.append("importance")
-        if request.flag is not None:
-            item.flag_status = _FLAG_STATUS[request.flag]
+        flag = request.flag
+        if flag is None and (
+            request.flag_start_date is not None or request.flag_due_date is not None
+        ):
+            # Outlook renders nothing for a due date on an unflagged message, so
+            # dates alone mean "flag it, due then".
+            flag = "flagged"
+        if flag is not None:
+            item.flag_status = _FLAG_STATUS[flag]
             updated_fields.append("flag")
             save_fields.append("flag_status")
+        if request.flag_start_date is not None:
+            item.flag_start_date = self._to_ews_datetime(request.flag_start_date)
+            updated_fields.append("flag_start_date")
+            save_fields.append("flag_start_date")
+        if request.flag_due_date is not None:
+            item.flag_due_date = self._to_ews_datetime(request.flag_due_date)
+            updated_fields.append("flag_due_date")
+            save_fields.append("flag_due_date")
         if not save_fields:
             # Nothing to change -- saving anyway would still write every loaded field back.
             return ActionResult(id=request.id, status="updated", updated_fields=updated_fields)

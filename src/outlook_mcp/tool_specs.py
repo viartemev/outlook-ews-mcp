@@ -130,7 +130,8 @@ TOOL_SPECS: list[ToolSpec] = [
     ),
     ToolSpec(
         "mark_email",
-        "Update email flags",
+        "Update read state, importance, or the follow-up flag "
+        "(optionally with start and due dates)",
         mark_email,
         request_model=models.MarkEmailRequest,
         response_model=models.ActionResult,

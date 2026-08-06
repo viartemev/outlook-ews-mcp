@@ -210,6 +210,22 @@ class MarkEmailRequest(ExchangeModel):
     read: bool | None = None
     flag: Literal["flagged", "complete", "none"] | None = None
     importance: Literal["low", "normal", "high"] | None = None
+    flag_start_date: datetime | None = None
+    flag_due_date: datetime | None = None
+
+    @model_validator(mode="after")
+    def validate_flag_dates(self) -> "MarkEmailRequest":
+        if (
+            self.flag_start_date is not None
+            and self.flag_due_date is not None
+            and self.flag_due_date < self.flag_start_date
+        ):
+            raise ValueError("flag_due_date must not be earlier than flag_start_date")
+        if self.flag == "none" and (
+            self.flag_start_date is not None or self.flag_due_date is not None
+        ):
+            raise ValueError("flag dates cannot be combined with flag='none'")
+        return self
 
 
 class ListFoldersRequest(ExchangeModel):

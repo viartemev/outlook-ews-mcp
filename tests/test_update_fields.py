@@ -81,6 +81,68 @@ def test_mark_email_flag_none_clears_status(settings) -> None:
     assert item.save_calls[-1]["update_fields"] == ["flag_status"]
 
 
+def test_mark_email_saves_flag_dates_as_extended_properties(settings) -> None:
+    from exchangelib.ewsdatetime import EWSTimeZone
+
+    backend = EWSExchangeBackend(settings)
+    item = FakeSavableItem(id="email-1")
+    backend._account = _account_with_item(item, default_timezone=EWSTimeZone("UTC"))
+
+    request = MarkEmailRequest.model_validate(
+        {
+            "id": "email-1",
+            "flag": "flagged",
+            "flag_start_date": "2026-08-01T09:00:00+00:00",
+            "flag_due_date": "2026-08-10T18:00:00+00:00",
+        }
+    )
+    result = backend.mark_email(request)
+
+    assert item.flag_status == 2
+    assert item.flag_due_date == datetime(2026, 8, 10, 18, 0, tzinfo=UTC)
+    assert item.save_calls[-1]["update_fields"] == [
+        "flag_status",
+        "flag_start_date",
+        "flag_due_date",
+    ]
+    assert result.updated_fields == ["flag", "flag_start_date", "flag_due_date"]
+
+
+def test_mark_email_flags_implicitly_when_given_only_a_due_date(settings) -> None:
+    """Outlook renders nothing for a due date on an unflagged message, so dates
+    on their own have to imply flag='flagged'."""
+    from exchangelib.ewsdatetime import EWSTimeZone
+
+    backend = EWSExchangeBackend(settings)
+    item = FakeSavableItem(id="email-1")
+    backend._account = _account_with_item(item, default_timezone=EWSTimeZone("UTC"))
+
+    request = MarkEmailRequest.model_validate(
+        {"id": "email-1", "flag_due_date": "2026-08-10T18:00:00+00:00"}
+    )
+    backend.mark_email(request)
+
+    assert item.flag_status == 2
+
+
+def test_mark_email_rejects_a_due_date_before_its_start_date() -> None:
+    with pytest.raises(ValueError, match="flag_due_date must not be earlier"):
+        MarkEmailRequest.model_validate(
+            {
+                "id": "email-1",
+                "flag_start_date": "2026-08-10T18:00:00+00:00",
+                "flag_due_date": "2026-08-09T18:00:00+00:00",
+            }
+        )
+
+
+def test_mark_email_rejects_flag_dates_combined_with_flag_none() -> None:
+    with pytest.raises(ValueError, match="cannot be combined with flag='none'"):
+        MarkEmailRequest.model_validate(
+            {"id": "email-1", "flag": "none", "flag_due_date": "2026-08-10T18:00:00+00:00"}
+        )
+
+
 def test_update_event_saves_real_ews_field_names(settings) -> None:
     backend = EWSExchangeBackend(settings)
     item = FakeSavableItem(id="event-1", reminder_minutes_before_start=15, required_attendees=[])
