@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import anyio
+
 from outlook_mcp.mcp_tools import ToolSpec, bind_mcp_tool
 from outlook_mcp.models import EmailSummary, ListEmailsRequest, SearchContactsRequest
 from outlook_mcp.server import build_mcp_server, build_registry
@@ -71,7 +73,9 @@ def test_bind_mcp_tool_routes_flat_arguments(client, settings) -> None:
         request_model=SearchContactsRequest,
     )
     tool_fn = bind_mcp_tool(registry.call, spec)
-    result = tool_fn(query="ivan")
+    # Tool functions are coroutines so FastMCP awaits them instead of running
+    # blocking Exchange work on the event loop thread.
+    result = anyio.run(lambda: tool_fn(query="ivan"))
     assert result.isError is False
     assert result.structuredContent["result"][0]["id"] == "contact-1"
 

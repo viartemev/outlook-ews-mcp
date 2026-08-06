@@ -138,11 +138,13 @@ EXCHANGE_EMAIL_BODY_MAX_CHARS=200000
 MCP_TRANSPORT=stdio
 MCP_SSE_HOST=127.0.0.1
 MCP_SSE_PORT=8080
+MCP_MAX_CONCURRENCY=1
 LOG_LEVEL=INFO
 LOG_FILE=
 ```
 
 Notes:
+- `MCP_MAX_CONCURRENCY` is how many tool calls execute at once; the rest queue and are never refused. See [Request queue](#request-queue).
 - set `EXCHANGE_EMAIL_ADDRESS` when `EXCHANGE_USERNAME` is not an SMTP address
 - `EXCHANGE_ALLOW_INSECURE_BASIC_AUTH` only matters with `EXCHANGE_AUTH_TYPE=Basic` and an `http://` `EXCHANGE_SERVER`; startup fails otherwise unless it's set `true`
 - `EXCHANGE_IMPERSONATE_AS` enables mailbox impersonation when Exchange permissions are configured accordingly
@@ -154,6 +156,27 @@ Notes:
 - `EXCHANGE_EMAIL_BODY_MAX_CHARS` caps `get_email`'s `body_text`/`body_html`; a message beyond the cap is truncated and `truncated: true` is set on the response instead of returning an unbounded MCP payload
 - send operations return `id: null` when EWS does not provide a durable ID for the sent copy (notably replies, forwards, and sent drafts)
 - attachment metadata includes `downloadable`; embedded Exchange item attachments have `downloadable: false` and cannot be saved by `get_attachment`
+
+## Request queue
+
+Clients issue several tool calls in parallel. Exchange work is blocking, so the
+server runs it in worker threads and admits calls through one shared FIFO queue.
+
+- **Nothing is refused.** There is no queue limit and no "server busy" error:
+  callers wait their turn and are served in the order they arrived.
+- **`MCP_MAX_CONCURRENCY`** (default `1`) sets how many run at once. One mailbox,
+  one conversation with Exchange, predictable load -- raise it deliberately.
+- **The transport stays responsive while work is in flight.** Tools are awaited
+  rather than run on the event loop thread, so finished responses go out
+  immediately and pings are answered while a long call is still running.
+- **There is no per-call timeout, deliberately.** A thread blocked on a socket
+  read cannot be killed from outside; the runtime can only stop *waiting* for it,
+  which abandons the thread along with the EWS session it holds. exchangelib's
+  session pool has a hard maximum and hands out sessions in a loop with no
+  give-up path, so leaked sessions eventually starve it and every later call
+  blocks forever. A slow call is waited out instead, bounded by
+  `EXCHANGE_TIMEOUT` plus `EXCHANGE_MAX_RETRY_WAIT_SECONDS` at the socket, where
+  a read can genuinely be cut off. Overruns are logged.
 
 ## Claude Desktop example
 
