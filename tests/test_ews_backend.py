@@ -28,6 +28,7 @@ from outlook_mcp.errors import APIError, AuthFailedError, NotFoundError
 from outlook_mcp.exchange_client import EWSExchangeBackend
 from outlook_mcp.models import (
     ActionResult,
+    DeleteContactRequest,
     FindFreeSlotsRequest,
     FolderActionRequest,
     ForwardEmailRequest,
@@ -589,6 +590,44 @@ def test_get_contact_explicit_source_bypasses_at_sign_heuristic(settings, monkey
 
     assert contact.source == "gal"
     assert contact.display_name == "Ivan Ivanov"
+
+
+def test_delete_contact_soft_deletes_by_default(settings) -> None:
+    backend = EWSExchangeBackend(settings)
+    contacts_folder = SimpleNamespace(id="contacts-folder")
+    calls: list[str] = []
+    contact = SimpleNamespace(
+        id="contact-1",
+        parent_folder_id=SimpleNamespace(id="contacts-folder"),
+        move_to_trash=lambda: calls.append("move_to_trash"),
+        delete=lambda: calls.append("delete"),
+    )
+    backend._account = SimpleNamespace(fetch=lambda **kwargs: iter([contact]), contacts=contacts_folder)
+
+    result = backend.delete_contact(DeleteContactRequest(id="contact-1"))
+
+    assert calls == ["move_to_trash"]
+    assert result.status == "deleted"
+
+
+def test_delete_contact_hard_delete_bypasses_trash(settings) -> None:
+    """Mirrors delete_email's hard_delete option so callers can permanently
+    remove a contact instead of just moving it to Deleted Items."""
+    backend = EWSExchangeBackend(settings)
+    contacts_folder = SimpleNamespace(id="contacts-folder")
+    calls: list[str] = []
+    contact = SimpleNamespace(
+        id="contact-1",
+        parent_folder_id=SimpleNamespace(id="contacts-folder"),
+        move_to_trash=lambda: calls.append("move_to_trash"),
+        delete=lambda: calls.append("delete"),
+    )
+    backend._account = SimpleNamespace(fetch=lambda **kwargs: iter([contact]), contacts=contacts_folder)
+
+    result = backend.delete_contact(DeleteContactRequest(id="contact-1", hard_delete=True))
+
+    assert calls == ["delete"]
+    assert result.status == "deleted"
 
 
 def _fake_account_for_folder_resolution(root) -> SimpleNamespace:

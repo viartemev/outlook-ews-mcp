@@ -336,7 +336,10 @@ class ContactOperationsMixin(BaseEWSBackend):
     def delete_contact(self, request: DeleteContactRequest) -> ActionResult:
         contact = self._fetch_item(request.id, folder=self.account.contacts, expected_type=Contact)
         try:
-            contact.move_to_trash()
+            if request.hard_delete:
+                contact.delete()
+            else:
+                contact.move_to_trash()
             return ActionResult(id=request.id, status="deleted")
         except Exception as exc:  # noqa: BLE001
             raise self._map_exception(exc, item_id=request.id) from exc
