@@ -16,6 +16,8 @@ from outlook_mcp.models import (
     ContactFull,
     ContactSummary,
     CreateContactRequest,
+    CategorizeEmailRequest,
+    CategoryUsage,
     CreateEventRequest,
     CreateEventResult,
     DeleteContactRequest,
@@ -34,6 +36,7 @@ from outlook_mcp.models import (
     GetContactRequest,
     GetEmailRequest,
     GetEventRequest,
+    ListCategoriesRequest,
     ListEmailsRequest,
     ListEventsRequest,
     ListFoldersRequest,
@@ -131,6 +134,27 @@ class FakeExchangeBackend:
             field for field in ["read", "flag", "importance"] if getattr(request, field) is not None
         ]
         return ActionResult(id=request.id, status="updated", updated_fields=updated_fields)
+
+    def categorize_email(self, request: CategorizeEmailRequest) -> ActionResult:
+        existing = ["Existing"]
+        if request.mode == "set":
+            categories = list(request.categories)
+        elif request.mode == "add":
+            categories = existing + [name for name in request.categories if name not in existing]
+        else:
+            categories = [name for name in existing if name not in request.categories]
+        return ActionResult(
+            id=request.id,
+            status="updated",
+            updated_fields=["categories"],
+            categories=categories,
+        )
+
+    def list_categories(self, request: ListCategoriesRequest) -> list[CategoryUsage]:
+        return [
+            CategoryUsage(name="Important", count=7),
+            CategoryUsage(name="Later", count=2),
+        ]
 
     def list_folders(self, request: ListFoldersRequest) -> list[FolderInfo]:
         return [

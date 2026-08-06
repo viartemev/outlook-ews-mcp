@@ -228,6 +228,31 @@ class MarkEmailRequest(ExchangeModel):
         return self
 
 
+class CategorizeEmailRequest(ExchangeModel):
+    id: str
+    categories: list[str] = Field(default_factory=list)
+    #: ``set`` with an empty list clears every category on the message.
+    mode: Literal["set", "add", "remove"] = "set"
+
+    @model_validator(mode="after")
+    def validate_categories(self) -> "CategorizeEmailRequest":
+        if self.mode in {"add", "remove"} and not self.categories:
+            raise ValueError(f"categories must not be empty when mode is '{self.mode}'")
+        if any(not name.strip() for name in self.categories):
+            raise ValueError("category names must not be blank")
+        return self
+
+
+class ListCategoriesRequest(ExchangeModel):
+    folders: list[str] = Field(default_factory=lambda: ["inbox"], min_length=1)
+    limit: int = Field(default=200, ge=1, le=1000)
+
+
+class CategoryUsage(ExchangeModel):
+    name: str
+    count: int
+
+
 class ListFoldersRequest(ExchangeModel):
     parent: str | None = None
     depth: int = Field(default=2, ge=0, le=10)
@@ -440,6 +465,8 @@ class ActionResult(ExchangeModel):
     new_folder: str | None = None
     new_id: str | None = None
     path: str | None = None
+    #: Categories the message carries after the change.
+    categories: list[str] | None = None
 
 
 class AttachmentResult(ExchangeModel):

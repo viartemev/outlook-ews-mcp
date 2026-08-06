@@ -8,6 +8,7 @@ import pytest
 from outlook_mcp.errors import APIError
 from outlook_mcp.exchange_client import EWSExchangeBackend
 from outlook_mcp.models import (
+    CategorizeEmailRequest,
     MarkEmailRequest,
     UpdateContactRequest,
     UpdateEventRequest,
@@ -141,6 +142,88 @@ def test_mark_email_rejects_flag_dates_combined_with_flag_none() -> None:
         MarkEmailRequest.model_validate(
             {"id": "email-1", "flag": "none", "flag_due_date": "2026-08-10T18:00:00+00:00"}
         )
+
+
+def test_categorize_email_set_replaces_every_category(settings) -> None:
+    backend = EWSExchangeBackend(settings)
+    item = FakeSavableItem(id="email-1", categories=["Old"])
+    backend._account = _account_with_item(item)
+
+    result = backend.categorize_email(
+        CategorizeEmailRequest.model_validate(
+            {"id": "email-1", "categories": ["Red", "Blue"], "mode": "set"}
+        )
+    )
+
+    assert item.categories == ["Red", "Blue"]
+    assert item.save_calls[-1]["update_fields"] == ["categories"]
+    assert result.categories == ["Red", "Blue"]
+
+
+def test_categorize_email_set_empty_clears_the_property(settings) -> None:
+    """Exchange clears the property on None; an empty list leaves it in place."""
+    backend = EWSExchangeBackend(settings)
+    item = FakeSavableItem(id="email-1", categories=["Old"])
+    backend._account = _account_with_item(item)
+
+    result = backend.categorize_email(
+        CategorizeEmailRequest.model_validate({"id": "email-1", "categories": []})
+    )
+
+    assert item.categories is None
+    assert result.categories == []
+
+
+def test_categorize_email_add_is_case_insensitive_but_keeps_the_stored_spelling(
+    settings,
+) -> None:
+    backend = EWSExchangeBackend(settings)
+    item = FakeSavableItem(id="email-1", categories=["Important"])
+    backend._account = _account_with_item(item)
+
+    result = backend.categorize_email(
+        CategorizeEmailRequest.model_validate(
+            {"id": "email-1", "categories": ["important", "Later"], "mode": "add"}
+        )
+    )
+
+    assert item.categories == ["Important", "Later"]
+    assert result.categories == ["Important", "Later"]
+
+
+def test_categorize_email_remove_is_case_insensitive(settings) -> None:
+    backend = EWSExchangeBackend(settings)
+    item = FakeSavableItem(id="email-1", categories=["Important", "Later"])
+    backend._account = _account_with_item(item)
+
+    backend.categorize_email(
+        CategorizeEmailRequest.model_validate(
+            {"id": "email-1", "categories": ["IMPORTANT"], "mode": "remove"}
+        )
+    )
+
+    assert item.categories == ["Later"]
+
+
+def test_categorize_email_does_not_save_an_unchanged_list(settings) -> None:
+    backend = EWSExchangeBackend(settings)
+    item = FakeSavableItem(id="email-1", categories=["Important"])
+    backend._account = _account_with_item(item)
+
+    result = backend.categorize_email(
+        CategorizeEmailRequest.model_validate(
+            {"id": "email-1", "categories": ["Nope"], "mode": "remove"}
+        )
+    )
+
+    assert item.save_calls == []
+    assert result.updated_fields == []
+    assert result.categories == ["Important"]
+
+
+def test_categorize_email_rejects_an_empty_add(settings) -> None:
+    with pytest.raises(ValueError, match="must not be empty when mode is 'add'"):
+        CategorizeEmailRequest.model_validate({"id": "email-1", "categories": [], "mode": "add"})
 
 
 def test_update_event_saves_real_ews_field_names(settings) -> None:

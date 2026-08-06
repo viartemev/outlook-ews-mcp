@@ -21,6 +21,7 @@ from .tools.contacts import (
     update_contact,
 )
 from .tools.email import (
+    categorize_email,
     copy_email,
     create_draft,
     create_folder,
@@ -28,6 +29,7 @@ from .tools.email import (
     forward_email,
     get_attachment,
     get_email,
+    list_categories,
     list_emails,
     list_folders,
     mark_email,
@@ -136,6 +138,23 @@ TOOL_SPECS: list[ToolSpec] = [
         request_model=models.MarkEmailRequest,
         response_model=models.ActionResult,
         destructive=True,
+    ),
+    ToolSpec(
+        "categorize_email",
+        "Set, add, or remove Outlook categories (the coloured labels) on an email",
+        categorize_email,
+        request_model=models.CategorizeEmailRequest,
+        response_model=models.ActionResult,
+        destructive=True,
+    ),
+    ToolSpec(
+        "list_categories",
+        "List the categories in use, with counts. Collected from the most recent "
+        "messages of the given folders, not from the mailbox master category list.",
+        list_categories,
+        request_model=models.ListCategoriesRequest,
+        response_model=list[models.CategoryUsage],
+        read_only=True,
     ),
     ToolSpec(
         "list_folders",

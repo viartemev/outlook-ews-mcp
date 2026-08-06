@@ -5,6 +5,7 @@ import os
 import re
 import stat
 import tempfile
+from collections import Counter
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
@@ -19,6 +20,8 @@ from ..models import (
     ActionResult,
     Attachment,
     AttachmentResult,
+    CategorizeEmailRequest,
+    CategoryUsage,
     CreateFolderRequest,
     DeleteEmailRequest,
     DraftEmailRequest,
@@ -29,6 +32,7 @@ from ..models import (
     ForwardEmailRequest,
     GetAttachmentRequest,
     GetEmailRequest,
+    ListCategoriesRequest,
     ListEmailsRequest,
     ListFoldersRequest,
     MarkEmailRequest,
@@ -105,6 +109,19 @@ def forward_subject(value: str | None) -> str:
     """Prefix with ``Fwd:`` unless the subject already carries a forward marker."""
     subject = (value or "").strip()
     return subject if _FORWARD_PREFIX_RE.match(subject) else f"Fwd: {subject}".strip()
+
+
+def _dedupe_categories(values: list[str]) -> list[str]:
+    """Trim and drop case-insensitive duplicates, keeping the first spelling seen."""
+    result: list[str] = []
+    seen: set[str] = set()
+    for value in values:
+        name = value.strip()
+        key = name.casefold()
+        if name and key not in seen:
+            seen.add(key)
+            result.append(name)
+    return result
 
 
 class EmailOperationsMixin(BaseEWSBackend):
@@ -492,6 +509,53 @@ class EmailOperationsMixin(BaseEWSBackend):
             return ActionResult(id=request.id, status="updated", updated_fields=updated_fields)
         except Exception as exc:  # noqa: BLE001
             raise self._map_exception(exc, item_id=request.id) from exc
+
+    def categorize_email(self, request: CategorizeEmailRequest) -> ActionResult:
+        item = self._fetch_item(request.id, expected_type=Message)
+        current = list(getattr(item, "categories", None) or [])
+        if request.mode == "set":
+            updated = _dedupe_categories(request.categories)
+        elif request.mode == "add":
+            updated = _dedupe_categories([*current, *request.categories])
+        else:
+            removed = {name.strip().casefold() for name in request.categories}
+            updated = [name for name in current if name.strip().casefold() not in removed]
+        if updated == current:
+            return ActionResult(
+                id=request.id, status="updated", updated_fields=[], categories=updated
+            )
+        # Exchange clears the property on None; an empty list is not the same thing.
+        item.categories = updated or None
+        try:
+            item.save(update_fields=["categories"])
+        except Exception as exc:  # noqa: BLE001
+            raise self._map_exception(exc, item_id=request.id) from exc
+        return ActionResult(
+            id=request.id,
+            status="updated",
+            updated_fields=["categories"],
+            categories=updated,
+        )
+
+    def list_categories(self, request: ListCategoriesRequest) -> list[CategoryUsage]:
+        counts: Counter[str] = Counter()
+        labels: dict[str, str] = {}
+        for name in request.folders:
+            folder = self._resolve_folder(name)
+            qs = folder.all().only("categories", "datetime_received")
+            try:
+                items = list(qs.order_by("-datetime_received")[: request.limit])
+            except Exception as exc:  # noqa: BLE001
+                raise self._map_exception(exc) from exc
+            for item in items:
+                for category in getattr(item, "categories", None) or []:
+                    label = category.strip()
+                    if not label:
+                        continue
+                    key = label.casefold()
+                    labels.setdefault(key, label)
+                    counts[key] += 1
+        return [CategoryUsage(name=labels[key], count=count) for key, count in counts.most_common()]
 
     def list_folders(self, request: ListFoldersRequest) -> list[FolderInfo]:
         folder = self._resolve_folder(request.parent)

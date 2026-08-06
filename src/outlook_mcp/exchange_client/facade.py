@@ -9,6 +9,8 @@ from ..models import (
     CalendarEvent,
     ContactFull,
     ContactSummary,
+    CategorizeEmailRequest,
+    CategoryUsage,
     CreateEventRequest,
     CreateEventResult,
     CreateContactRequest,
@@ -28,6 +30,7 @@ from ..models import (
     GetContactRequest,
     GetEmailRequest,
     GetEventRequest,
+    ListCategoriesRequest,
     ListEmailsRequest,
     ListEventsRequest,
     ListFoldersRequest,
@@ -88,6 +91,12 @@ class ExchangeClient:
 
     def mark_email(self, request: MarkEmailRequest) -> ActionResult:
         return self.backend.mark_email(request)
+
+    def categorize_email(self, request: CategorizeEmailRequest) -> ActionResult:
+        return self.backend.categorize_email(request)
+
+    def list_categories(self, request: ListCategoriesRequest) -> list[CategoryUsage]:
+        return self.backend.list_categories(request)
 
     def list_folders(self, request: ListFoldersRequest) -> list[FolderInfo]:
         return self.backend.list_folders(request)
