@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import datetime, time, timedelta
+from datetime import date, datetime, time, timedelta
 from typing import Any, Literal
 
 from exchangelib import Attendee, CalendarItem
@@ -36,6 +36,20 @@ from .base import BaseEWSBackend
 
 
 class CalendarOperationsMixin(BaseEWSBackend):
+    def _event_moment(self, value: Any) -> Any:
+        """Anchor an all-day boundary to mailbox-local midnight.
+
+        EWS reports all-day appointments with ``EWSDate``, not ``EWSDateTime``.
+        Passed through, pydantic turns it into a *naive* midnight datetime, so a
+        day's agenda mixes aware and naive timestamps: sorting it raises, and
+        ``_compute_free_slots`` raises comparing it against the requested window.
+        """
+        if isinstance(value, datetime):
+            return value
+        if isinstance(value, date):
+            return datetime.combine(value, time.min, tzinfo=self.account.default_timezone)
+        return value
+
     def _to_calendar_event(self, item: Any) -> CalendarEvent:
         attendees = [
             self._to_attendee(attendee)
@@ -51,8 +65,8 @@ class CalendarOperationsMixin(BaseEWSBackend):
         return CalendarEvent(
             id=item.id,
             subject=item.subject or "",
-            start=item.start,
-            end=item.end,
+            start=self._event_moment(item.start),
+            end=self._event_moment(item.end),
             location=getattr(item, "location", None),
             organizer=organizer,
             attendees=attendees,
