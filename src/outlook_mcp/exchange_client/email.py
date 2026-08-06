@@ -302,6 +302,9 @@ class EmailOperationsMixin(BaseEWSBackend):
             if request.folder:
                 searchable = self._resolve_folder(request.folder)
             else:
+                # See list_calendars() for why walk() is fine here: with no folder given we
+                # must discover every mail folder, which has no id to feed _get_folder_by_id,
+                # and walk() is a single cached Deep-traversal call, not one call per folder.
                 searchable = FolderCollection(
                     account=self.account,
                     folders=[
