@@ -33,6 +33,7 @@ from ..models import (
     GetContactRequest,
     GetEmailRequest,
     GetEventRequest,
+    GetThreadRequest,
     ListCategoriesRequest,
     ListEmailsRequest,
     ListEventsRequest,
@@ -47,6 +48,7 @@ from ..models import (
     SendDraftRequest,
     SendEmailRequest,
     SendResult,
+    Thread,
     UpdateContactRequest,
     UpdateEventRequest,
 )
@@ -74,6 +76,9 @@ class UnconfiguredExchangeBackend:
         self._raise()
 
     def send_email(self, request: SendEmailRequest) -> SendResult:
+        self._raise()
+
+    def get_thread(self, request: GetThreadRequest) -> Thread:
         self._raise()
 
     def search_emails(self, request: SearchEmailsRequest) -> list[EmailSummary]:

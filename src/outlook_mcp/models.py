@@ -81,6 +81,9 @@ class EmailSummary(ExchangeModel):
     preview: str = ""
     importance: Literal["low", "normal", "high"] = "normal"
     categories: list[str] = Field(default_factory=list)
+    #: On the summary rather than EmailFull, so a listing can lead straight to
+    #: get_thread without fetching every message first.
+    conversation_id: str | None = None
 
 
 class EmailFull(EmailSummary):
@@ -89,8 +92,18 @@ class EmailFull(EmailSummary):
     body_text: str = ""
     body_html: str | None = None
     attachments: list[Attachment] = Field(default_factory=list)
-    conversation_id: str | None = None
     headers: dict[str, str] = Field(default_factory=dict)
+    truncated: bool = False
+
+
+class Thread(ExchangeModel):
+    #: Absent when the thread had to be rebuilt from its subject line.
+    conversation_id: str | None = None
+    subject: str
+    message_count: int
+    #: Oldest first.
+    messages: list[EmailFull] = Field(default_factory=list)
+    #: More messages exist than ``limit``; the oldest were dropped.
     truncated: bool = False
 
 
@@ -167,6 +180,21 @@ class ListEmailsRequest(ExchangeModel):
 
 class GetEmailRequest(ExchangeModel):
     id: str
+
+
+class GetThreadRequest(ExchangeModel):
+    id: str | None = None
+    conversation_id: str | None = None
+    #: Sent is included by default: replies written from this mailbox live there,
+    #: and a thread missing our own half of it is not useful.
+    folders: list[str] = Field(default_factory=lambda: ["inbox", "sent"], min_length=1)
+    limit: int = Field(default=20, ge=1, le=100)
+
+    @model_validator(mode="after")
+    def validate_selector(self) -> "GetThreadRequest":
+        if bool(self.id) == bool(self.conversation_id):
+            raise ValueError("exactly one of id or conversation_id must be provided")
+        return self
 
 
 class SendEmailRequest(ExchangeModel):

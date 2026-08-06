@@ -36,6 +36,7 @@ from outlook_mcp.models import (
     GetContactRequest,
     GetEmailRequest,
     GetEventRequest,
+    GetThreadRequest,
     ListCategoriesRequest,
     ListEmailsRequest,
     ListEventsRequest,
@@ -50,6 +51,7 @@ from outlook_mcp.models import (
     SendDraftRequest,
     SendEmailRequest,
     SendResult,
+    Thread,
     UpdateContactRequest,
     UpdateEventRequest,
 )
@@ -101,6 +103,27 @@ class FakeExchangeBackend:
             body_text="Body",
             conversation_id="conv-1",
             headers={"X-Test": "1"},
+        )
+
+    def get_thread(self, request: GetThreadRequest) -> Thread:
+        messages = [
+            EmailFull(
+                id=f"email-{index}",
+                subject="Hello" if index == 1 else f"Re: Hello ({index})",
+                **{"from": {"email": "sender@example.com", "name": "Sender"}},
+                to=[EmailAddress(email="user@example.com", name="User")],
+                date=datetime(2026, 4, 7, 9 + index, 0, tzinfo=UTC),
+                is_read=True,
+                body_text=f"Body {index}",
+                conversation_id="conv-1",
+            )
+            for index in (1, 2)
+        ]
+        return Thread(
+            conversation_id=request.conversation_id or "conv-1",
+            subject="Hello",
+            message_count=len(messages),
+            messages=messages,
         )
 
     def search_emails(self, request: SearchEmailsRequest) -> list[EmailSummary]:

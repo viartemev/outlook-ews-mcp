@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import errno
+import logging
 import os
 import re
 import stat
@@ -14,6 +15,7 @@ from exchangelib import FileAttachment, Folder, HTMLBody, ItemAttachment, Messag
 from exchangelib.extended_properties import ExtendedProperty, Flag
 from exchangelib.fields import InvalidField
 from exchangelib.folders import FolderCollection
+from exchangelib.properties import ConversationId
 
 from ..errors import APIError, NotFoundError
 from ..models import (
@@ -32,6 +34,7 @@ from ..models import (
     ForwardEmailRequest,
     GetAttachmentRequest,
     GetEmailRequest,
+    GetThreadRequest,
     ListCategoriesRequest,
     ListEmailsRequest,
     ListFoldersRequest,
@@ -41,8 +44,11 @@ from ..models import (
     SendDraftRequest,
     SendEmailRequest,
     SendResult,
+    Thread,
 )
 from .base import BaseEWSBackend
+
+logger = logging.getLogger(__name__)
 
 
 class FlagStartDate(ExtendedProperty):
@@ -90,6 +96,7 @@ _EMAIL_SUMMARY_FIELDS = (
     "text_body",
     "importance",
     "categories",
+    "conversation_id",
 )
 
 #: Reply/forward markers Outlook writes, in the locales this server sees. The
@@ -124,6 +131,19 @@ def _dedupe_categories(values: list[str]) -> list[str]:
     return result
 
 
+#: Reply/forward markers Outlook prepends, in the locales this server sees.
+#: Matches repeats ("Re: Re: ") and the counted form Exchange sometimes writes.
+_SUBJECT_PREFIX_RE = re.compile(
+    r"^\s*(?:(?:re|fw|fwd|ответ|отв|пересл)\s*(?:\[\d+\])?\s*:\s*)+",
+    re.IGNORECASE,
+)
+
+
+def normalize_subject(value: str | None) -> str:
+    """Strip reply/forward prefixes so one conversation reads as one subject."""
+    return _SUBJECT_PREFIX_RE.sub("", value or "").strip()
+
+
 class EmailOperationsMixin(BaseEWSBackend):
     def _to_email_summary(self, item: Any) -> EmailSummary:
         return EmailSummary(
@@ -144,6 +164,7 @@ class EmailOperationsMixin(BaseEWSBackend):
             preview=self._preview(item),
             importance=self._normalize_importance(getattr(item, "importance", None)),
             categories=list(getattr(item, "categories", None) or []),
+            conversation_id=getattr(getattr(item, "conversation_id", None), "id", None),
         )
 
     def _attachment_metadata(self, attachment: Any) -> Attachment:
@@ -174,7 +195,6 @@ class EmailOperationsMixin(BaseEWSBackend):
             attachments=[
                 self._attachment_metadata(a) for a in getattr(item, "attachments", None) or []
             ],
-            conversation_id=getattr(getattr(item, "conversation_id", None), "id", None),
             headers=self._headers_to_dict(getattr(item, "headers", None)),
             truncated=truncated,
         )
@@ -353,6 +373,75 @@ class EmailOperationsMixin(BaseEWSBackend):
     #: Standard EWS folder class for mail folders; excludes calendar/contacts/tasks
     #: folders when a search walks the whole mailbox.
     _MAIL_FOLDER_CLASS = "IPF.Note"
+
+    def get_thread(self, request: GetThreadRequest) -> Thread:
+        conversation_id = request.conversation_id
+        subject: str | None = None
+        anchor: Any = None
+        if request.id:
+            anchor = self._fetch_item(request.id, expected_type=Message)
+            conversation_id = getattr(getattr(anchor, "conversation_id", None), "id", None)
+            subject = anchor.subject or ""
+
+        collected: dict[str, Any] = {}
+        if anchor is not None and getattr(anchor, "id", None):
+            # The anchor may sit in a folder outside `folders`; an empty thread for
+            # a message we are holding would be a wrong answer, not a partial one.
+            collected[anchor.id] = anchor
+        for name in request.folders:
+            folder = self._resolve_folder(name)
+            for item in self._thread_items(folder, conversation_id, subject, request.limit):
+                item_id = getattr(item, "id", None)
+                # The same message surfaces twice when folders overlap.
+                if item_id and item_id not in collected:
+                    collected[item_id] = item
+
+        found = sorted(collected.values(), key=self._received_at)
+        truncated = len(found) > request.limit
+        messages = [self._to_email_full(item) for item in found[-request.limit :]]
+        return Thread(
+            conversation_id=conversation_id,
+            subject=normalize_subject(subject or (messages[0].subject if messages else "")),
+            message_count=len(messages),
+            messages=messages,
+            truncated=truncated,
+        )
+
+    def _thread_items(
+        self, folder: Folder, conversation_id: str | None, subject: str | None, limit: int
+    ) -> list[Any]:
+        if conversation_id:
+            try:
+                qs = folder.filter(conversation_id=ConversationId(id=conversation_id))
+                return list(qs.order_by("-datetime_received")[:limit])
+            except Exception as exc:  # noqa: BLE001
+                if subject is None:
+                    # Nothing to fall back to. Reporting an empty conversation for a
+                    # query we could not run would be a wrong answer, not a partial one.
+                    raise self._map_exception(exc) from exc
+                # Older servers reject a restriction on item:ConversationId. The
+                # subject fallback is lossy, so it only runs once that is known.
+                logger.info("conversation_id restriction rejected; falling back to subject match")
+
+        normalized = normalize_subject(subject)
+        if not normalized:
+            return []
+        try:
+            qs = folder.filter(subject__icontains=normalized).order_by("-datetime_received")
+            items = list(qs[:limit])
+        except Exception as exc:  # noqa: BLE001
+            raise self._map_exception(exc) from exc
+        # icontains also matches subjects that merely embed this one.
+        target = normalized.casefold()
+        return [item for item in items if normalize_subject(item.subject).casefold() == target]
+
+    def _received_at(self, item: Any) -> datetime:
+        return (
+            getattr(item, "datetime_received", None)
+            or getattr(item, "datetime_sent", None)
+            or getattr(item, "datetime_created", None)
+            or datetime.now(UTC)
+        )
 
     def search_emails(self, request: SearchEmailsRequest) -> list[EmailSummary]:
         searchable: Folder | FolderCollection

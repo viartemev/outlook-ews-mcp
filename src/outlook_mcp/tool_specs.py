@@ -29,6 +29,7 @@ from .tools.email import (
     forward_email,
     get_attachment,
     get_email,
+    get_thread,
     list_categories,
     list_emails,
     list_folders,
@@ -73,6 +74,16 @@ TOOL_SPECS: list[ToolSpec] = [
         get_email,
         request_model=models.GetEmailRequest,
         response_model=models.EmailFull,
+        read_only=True,
+    ),
+    ToolSpec(
+        "get_thread",
+        "Get every message of a conversation in chronological order, bodies "
+        "included. Pass the id of any message in the thread, or a conversation_id "
+        "from a listing.",
+        get_thread,
+        request_model=models.GetThreadRequest,
+        response_model=models.Thread,
         read_only=True,
     ),
     ToolSpec(

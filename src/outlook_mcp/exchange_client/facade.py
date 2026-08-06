@@ -30,6 +30,7 @@ from ..models import (
     GetContactRequest,
     GetEmailRequest,
     GetEventRequest,
+    GetThreadRequest,
     ListCategoriesRequest,
     ListEmailsRequest,
     ListEventsRequest,
@@ -44,6 +45,7 @@ from ..models import (
     SendDraftRequest,
     SendEmailRequest,
     SendResult,
+    Thread,
     UpdateContactRequest,
     UpdateEventRequest,
 )
@@ -67,6 +69,9 @@ class ExchangeClient:
 
     def get_email(self, request: GetEmailRequest) -> EmailFull:
         return self.backend.get_email(request)
+
+    def get_thread(self, request: GetThreadRequest) -> Thread:
+        return self.backend.get_thread(request)
 
     def search_emails(self, request: SearchEmailsRequest) -> list[EmailSummary]:
         return self.backend.search_emails(request)
