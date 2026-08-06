@@ -602,7 +602,9 @@ def test_delete_contact_soft_deletes_by_default(settings) -> None:
         move_to_trash=lambda: calls.append("move_to_trash"),
         delete=lambda: calls.append("delete"),
     )
-    backend._account = SimpleNamespace(fetch=lambda **kwargs: iter([contact]), contacts=contacts_folder)
+    backend._account = SimpleNamespace(
+        fetch=lambda **kwargs: iter([contact]), contacts=contacts_folder
+    )
 
     result = backend.delete_contact(DeleteContactRequest(id="contact-1"))
 
@@ -622,7 +624,9 @@ def test_delete_contact_hard_delete_bypasses_trash(settings) -> None:
         move_to_trash=lambda: calls.append("move_to_trash"),
         delete=lambda: calls.append("delete"),
     )
-    backend._account = SimpleNamespace(fetch=lambda **kwargs: iter([contact]), contacts=contacts_folder)
+    backend._account = SimpleNamespace(
+        fetch=lambda **kwargs: iter([contact]), contacts=contacts_folder
+    )
 
     result = backend.delete_contact(DeleteContactRequest(id="contact-1", hard_delete=True))
 
