@@ -4,6 +4,16 @@ from datetime import UTC, datetime
 from types import SimpleNamespace
 
 import pytest
+from exchangelib.errors import (
+    ErrorAccessDenied,
+    ErrorInvalidRestriction,
+    ErrorTimeoutExpired,
+    ErrorUnsupportedPathForQuery,
+    ErrorUnsupportedQueryFilter,
+    RateLimitError,
+    UnauthorizedError,
+)
+from exchangelib.fields import InvalidFieldForVersion
 
 from outlook_mcp.errors import APIError
 from outlook_mcp.exchange_client import EWSExchangeBackend
@@ -170,7 +180,7 @@ def test_thread_items_falls_back_to_subject_when_the_restriction_is_rejected(set
         def filter(self, *args, **kwargs):
             if "conversation_id" in kwargs:
                 attempted.append("conversation_id")
-                raise ValueError("The specified restriction is not supported")
+                raise ErrorUnsupportedPathForQuery("item:ConversationId")
             attempted.append("subject")
             return FakeQuerySet([_message("email-1", "Hello", 10)])
 
@@ -189,7 +199,7 @@ def test_thread_lookup_by_conversation_id_alone_does_not_silently_return_nothing
 
     class RejectingFolder:
         def filter(self, *args, **kwargs):
-            raise ValueError("The specified restriction is not supported")
+            raise ErrorUnsupportedPathForQuery("item:ConversationId")
 
     with pytest.raises(APIError):
         backend._thread_items(RejectingFolder(), "conv-1", None, 20)
@@ -208,4 +218,65 @@ def test_thread_items_drops_subjects_that_merely_embed_the_normalised_one(settin
 
     items = backend._thread_items(Folder(), None, "Hello", 20)
 
+    assert [item.id for item in items] == ["email-1"]
+
+
+@pytest.mark.parametrize(
+    ("failure", "expected_code"),
+    [
+        (ErrorTimeoutExpired("the operation timed out"), "timeout"),
+        (RateLimitError("throttled", wait=60), "exchange_unavailable"),
+        (UnauthorizedError("bad credentials"), "auth_failed"),
+        (ErrorAccessDenied("no rights to this folder"), "permission_denied"),
+    ],
+)
+def test_a_transient_failure_is_reported_instead_of_falling_back(
+    settings, failure, expected_code
+) -> None:
+    """The subject fallback exists for servers that cannot express the
+    ConversationId restriction at all. A timeout, a throttle or an auth failure
+    says nothing about that, and a fallback that happens to succeed would hand
+    back an incomplete thread with no sign the real query never ran."""
+    backend = EWSExchangeBackend(settings)
+    attempted: list[str] = []
+
+    class Folder:
+        def filter(self, *args, **kwargs):
+            if "conversation_id" in kwargs:
+                attempted.append("conversation_id")
+                raise failure
+            attempted.append("subject")
+            return FakeQuerySet([_message("email-1", "Hello", 10)])
+
+    with pytest.raises(APIError) as excinfo:
+        backend._thread_items(Folder(), "conv-1", "Re: Hello", 20)
+
+    assert excinfo.value.code == expected_code
+    assert attempted == ["conversation_id"], "must not reach the subject fallback"
+
+
+@pytest.mark.parametrize(
+    "failure",
+    [
+        ErrorInvalidRestriction("restriction is invalid"),
+        ErrorUnsupportedPathForQuery("item:ConversationId"),
+        ErrorUnsupportedQueryFilter("filter not supported"),
+        InvalidFieldForVersion("conversation_id is not supported on this server version"),
+    ],
+)
+def test_only_an_unsupported_restriction_triggers_the_subject_fallback(settings, failure) -> None:
+    backend = EWSExchangeBackend(settings)
+    attempted: list[str] = []
+
+    class Folder:
+        def filter(self, *args, **kwargs):
+            if "conversation_id" in kwargs:
+                attempted.append("conversation_id")
+                raise failure
+            attempted.append("subject")
+            return FakeQuerySet([_message("email-1", "Hello", 10)])
+
+    items = backend._thread_items(Folder(), "conv-1", "Re: Hello", 20)
+
+    assert attempted == ["conversation_id", "subject"]
     assert [item.id for item in items] == ["email-1"]

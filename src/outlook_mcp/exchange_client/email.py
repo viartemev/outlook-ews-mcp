@@ -12,8 +12,13 @@ from pathlib import Path
 from typing import Any
 
 from exchangelib import FileAttachment, Folder, HTMLBody, ItemAttachment, Message, Q
+from exchangelib.errors import (
+    ErrorInvalidRestriction,
+    ErrorUnsupportedPathForQuery,
+    ErrorUnsupportedQueryFilter,
+)
 from exchangelib.extended_properties import ExtendedProperty, Flag
-from exchangelib.fields import InvalidField
+from exchangelib.fields import InvalidField, InvalidFieldForVersion
 from exchangelib.folders import FolderCollection
 from exchangelib.properties import ConversationId
 
@@ -80,6 +85,18 @@ for _field_name, _field_cls in (
 #: PidTagFlagStatus values: None = not flagged, 1 = completed, 2 = flagged.
 _FLAG_STATUS = {"flagged": 2, "complete": 1, "none": None}
 
+#: Failures that mean this server cannot express a restriction on
+#: item:ConversationId at all -- the only case where falling back to a lossy
+#: subject match is better than failing. Anything else (throttling, auth, a
+#: transient timeout) must surface as itself: a fallback that quietly succeeds
+#: would hand back an incomplete thread with no sign the real query never ran.
+_UNSUPPORTED_RESTRICTION = (
+    ErrorInvalidRestriction,
+    ErrorUnsupportedPathForQuery,
+    ErrorUnsupportedQueryFilter,
+    InvalidFieldForVersion,
+)
+
 #: Fields EmailSummary actually reads -- restricting the fetch to these avoids
 #: exchangelib issuing an extra GetItem per message and loading full body/
 #: attachments/headers just to render a one-line summary.
@@ -131,8 +148,8 @@ def _dedupe_categories(values: list[str]) -> list[str]:
     return result
 
 
-#: Reply/forward markers Outlook prepends, in the locales this server sees.
-#: Matches repeats ("Re: Re: ") and the counted form Exchange sometimes writes.
+#: Same markers as above, but matching a whole run of them, so "Re: FW: X"
+#: normalises to "X" for thread grouping.
 _SUBJECT_PREFIX_RE = re.compile(
     r"^\s*(?:(?:re|fw|fwd|ответ|отв|пересл)\s*(?:\[\d+\])?\s*:\s*)+",
     re.IGNORECASE,
@@ -414,14 +431,22 @@ class EmailOperationsMixin(BaseEWSBackend):
             try:
                 qs = folder.filter(conversation_id=ConversationId(id=conversation_id))
                 return list(qs.order_by("-datetime_received")[:limit])
-            except Exception as exc:  # noqa: BLE001
+            except _UNSUPPORTED_RESTRICTION as exc:
                 if subject is None:
                     # Nothing to fall back to. Reporting an empty conversation for a
                     # query we could not run would be a wrong answer, not a partial one.
                     raise self._map_exception(exc) from exc
-                # Older servers reject a restriction on item:ConversationId. The
-                # subject fallback is lossy, so it only runs once that is known.
-                logger.info("conversation_id restriction rejected; falling back to subject match")
+                logger.info(
+                    "server does not support restricting on item:ConversationId (%s); "
+                    "falling back to a subject match",
+                    type(exc).__name__,
+                )
+            except Exception as exc:  # noqa: BLE001
+                # Anything else -- throttling, auth, a transient timeout -- says
+                # nothing about whether the restriction is supported. Surface it
+                # like the rest of the module does instead of quietly returning a
+                # lossy thread that hides the real failure.
+                raise self._map_exception(exc) from exc
 
         normalized = normalize_subject(subject)
         if not normalized:
