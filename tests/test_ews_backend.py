@@ -12,7 +12,9 @@ from exchangelib.errors import (
     ErrorIrresolvableConflict,
     ErrorItemNotFound,
     ErrorItemSavePropertyError,
+    ErrorServerBusy,
     ErrorTimeoutExpired,
+    RateLimitError,
     UnauthorizedError,
 )
 from exchangelib.ewsdatetime import EWSTimeZone
@@ -138,6 +140,35 @@ def test_map_exception_classifies_by_exchangelib_type_not_message_text(settings)
 
     permission = backend._map_exception(ErrorAccessDenied("localized server message"))
     assert permission.code == "permission_denied"
+
+
+def test_map_exception_marks_transient_busy_errors_as_retryable(settings) -> None:
+    """These must be safe for ExchangeClient._retry_read to retry automatically on
+    read-only calls -- the account's retry_policy is FailFast, so exchangelib no
+    longer retries them internally (see exchange_client/base.py)."""
+    backend = EWSExchangeBackend(settings)
+
+    busy = backend._map_exception(ErrorServerBusy("server is busy"))
+    assert busy.retryable is True
+
+    timeout = backend._map_exception(ErrorTimeoutExpired("the operation timed out"))
+    assert timeout.retryable is True
+
+    rate_limited = backend._map_exception(RateLimitError("max timeout reached", wait=5))
+    assert rate_limited.retryable is True
+
+
+def test_map_exception_leaves_non_transient_errors_not_retryable(settings) -> None:
+    backend = EWSExchangeBackend(settings)
+
+    conflict = backend._map_exception(ErrorIrresolvableConflict("conflict, retry"))
+    assert conflict.retryable is False
+
+    not_found = backend._map_exception(ErrorItemNotFound("no such item"), item_id="item-1")
+    assert not_found.retryable is False
+
+    permission = backend._map_exception(ErrorAccessDenied("access denied"))
+    assert permission.retryable is False
 
 
 def test_map_exception_does_not_log_raw_exchange_message(settings, caplog) -> None:

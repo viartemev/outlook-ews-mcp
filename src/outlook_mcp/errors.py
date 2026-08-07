@@ -13,12 +13,18 @@ class APIError(Exception):
         *,
         details: list[dict[str, Any]] | None = None,
         extra: dict[str, Any] | None = None,
+        retryable: bool = False,
     ) -> None:
         super().__init__(message)
         self.code = code
         self.message = message
         self.details = details or []
         self.extra = extra or {}
+        #: Set by exchange_client/base.py for errors that mean "Exchange reported
+        #: itself busy" -- safe for ExchangeClient to retry on read-only calls,
+        #: bounded by a deadline. Not surfaced in to_dict(); it's an internal signal
+        #: for the retry loop, not part of the MCP error payload.
+        self.retryable = retryable
 
     def to_dict(self) -> dict[str, Any]:
         payload: dict[str, Any] = {"error": self.code, "message": self.message}

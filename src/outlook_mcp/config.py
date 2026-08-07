@@ -31,6 +31,10 @@ class Settings(BaseSettings):
     )
     exchange_version: str | None = Field(default=None, alias="EXCHANGE_VERSION")
     exchange_timeout: int = Field(default=30, alias="EXCHANGE_TIMEOUT", ge=1, le=300)
+    #: Total wall-clock budget for ExchangeClient's own retry of read-only calls
+    #: when Exchange reports itself busy (0 disables retries). Not passed to
+    #: exchangelib's retry_policy, which is always FailFast -- see
+    #: exchange_client/base.py and ExchangeClient._retry_read.
     exchange_max_retry_wait: int = Field(
         default=90, alias="EXCHANGE_MAX_RETRY_WAIT_SECONDS", ge=0, le=3600
     )
@@ -58,9 +62,14 @@ class Settings(BaseSettings):
     mcp_transport: Literal["stdio", "sse"] = Field(default="stdio", alias="MCP_TRANSPORT")
     mcp_sse_host: str = Field(default="127.0.0.1", alias="MCP_SSE_HOST")
     mcp_sse_port: int = Field(default=8080, alias="MCP_SSE_PORT", ge=1, le=65535)
-    #: How many tool calls execute at once; the rest queue and are never refused.
-    #: There is deliberately no per-call timeout -- see ToolGateway for why.
+    #: How many tool calls execute at once; more calls than this queue up to wait
+    #: their turn. There is deliberately no per-call timeout -- see ToolGateway for
+    #: why.
     mcp_max_concurrency: int = Field(default=1, alias="MCP_MAX_CONCURRENCY", ge=1, le=8)
+    #: Hard cap on tool calls admitted at once (running + waiting for a worker).
+    #: Once this many are already admitted, further calls are rejected immediately
+    #: with a structured server_busy error instead of queuing indefinitely.
+    mcp_max_queue_size: int = Field(default=20, alias="MCP_MAX_QUEUE_SIZE", ge=1, le=1000)
 
     log_level: Literal["DEBUG", "INFO", "WARNING", "ERROR"] = Field(
         default="INFO",
