@@ -37,6 +37,7 @@ from .tools.email import (
     get_attachment,
     get_email,
     get_email_mime,
+    get_oof_settings,
     get_thread,
     list_categories,
     list_emails,
@@ -49,6 +50,7 @@ from .tools.email import (
     search_emails,
     send_draft,
     send_email,
+    set_oof_settings,
     update_draft,
     update_rule,
 )
@@ -245,6 +247,23 @@ TOOL_SPECS: list[ToolSpec] = [
         "Delete an Inbox rule",
         delete_rule,
         request_model=models.DeleteRuleRequest,
+        response_model=models.ActionResult,
+        destructive=True,
+    ),
+    ToolSpec(
+        "get_oof_settings",
+        "Get the automatic-reply (Out-of-Office) settings",
+        get_oof_settings,
+        response_model=models.OofSettingsModel,
+        read_only=True,
+    ),
+    ToolSpec(
+        "set_oof_settings",
+        "Set the automatic-reply (Out-of-Office) settings. internal_reply and "
+        "external_reply are required unless state='disabled'; start and end are "
+        "required when state='scheduled'",
+        set_oof_settings,
+        request_model=models.SetOofSettingsRequest,
         response_model=models.ActionResult,
         destructive=True,
     ),

@@ -32,6 +32,7 @@ from ..models import (
     SearchEmailsRequest,
     SendDraftRequest,
     SendEmailRequest,
+    SetOofSettingsRequest,
     ForwardEmailRequest,
     UpdateDraftRequest,
     UpdateRuleRequest,
@@ -82,6 +83,8 @@ list_rules = tool_handler("list_rules")
 create_rule = tool_handler("create_rule", CreateRuleRequest)
 update_rule = tool_handler("update_rule", UpdateRuleRequest)
 delete_rule = tool_handler("delete_rule", DeleteRuleRequest)
+get_oof_settings = tool_handler("get_oof_settings")
+set_oof_settings = tool_handler("set_oof_settings", SetOofSettingsRequest)
 list_categories = tool_handler("list_categories", ListCategoriesRequest)
 list_folders = tool_handler("list_folders", ListFoldersRequest)
 create_folder = tool_handler("create_folder", CreateFolderRequest)

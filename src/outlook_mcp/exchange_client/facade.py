@@ -52,6 +52,7 @@ from ..models import (
     MailboxInfo,
     MailRule,
     MarkEmailRequest,
+    OofSettingsModel,
     PingResult,
     RenameFolderRequest,
     ReplyEmailRequest,
@@ -61,6 +62,7 @@ from ..models import (
     SendDraftRequest,
     SendEmailRequest,
     SendResult,
+    SetOofSettingsRequest,
     Thread,
     UpdateContactRequest,
     UpdateDraftRequest,
@@ -209,6 +211,12 @@ class ExchangeClient:
 
     def delete_rule(self, request: DeleteRuleRequest) -> ActionResult:
         return self.backend.delete_rule(request)
+
+    def get_oof_settings(self) -> OofSettingsModel:
+        return self.backend.get_oof_settings()
+
+    def set_oof_settings(self, request: SetOofSettingsRequest) -> ActionResult:
+        return self.backend.set_oof_settings(request)
 
     def list_events(self, request: ListEventsRequest) -> list[CalendarEvent]:
         return self._retry_read(lambda: self.backend.list_events(request))

@@ -53,6 +53,7 @@ from outlook_mcp.models import (
     MailboxInfo,
     MailRule,
     MarkEmailRequest,
+    OofSettingsModel,
     PingResult,
     RenameFolderRequest,
     ReplyEmailRequest,
@@ -62,6 +63,7 @@ from outlook_mcp.models import (
     SendDraftRequest,
     SendEmailRequest,
     SendResult,
+    SetOofSettingsRequest,
     Thread,
     UpdateContactRequest,
     UpdateDraftRequest,
@@ -248,6 +250,12 @@ class FakeExchangeBackend:
 
     def delete_rule(self, request: DeleteRuleRequest) -> ActionResult:
         return ActionResult(id=request.id, status="deleted")
+
+    def get_oof_settings(self) -> OofSettingsModel:
+        return OofSettingsModel(state="disabled", external_audience="all")
+
+    def set_oof_settings(self, request: SetOofSettingsRequest) -> ActionResult:
+        return ActionResult(id="oof", status="updated")
 
     def list_categories(self, request: ListCategoriesRequest) -> list[CategoryUsage]:
         return [

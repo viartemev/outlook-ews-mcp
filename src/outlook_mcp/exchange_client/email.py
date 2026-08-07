@@ -13,6 +13,7 @@ from pathlib import Path
 from typing import Any
 
 from exchangelib import FileAttachment, Folder, HTMLBody, ItemAttachment, Message, Q
+from exchangelib.settings import OofSettings
 from exchangelib.errors import (
     ErrorInvalidRestriction,
     ErrorUnsupportedPathForQuery,
@@ -64,12 +65,14 @@ from ..models import (
     ListFoldersRequest,
     MailRule,
     MarkEmailRequest,
+    OofSettingsModel,
     RenameFolderRequest,
     ReplyEmailRequest,
     SearchEmailsRequest,
     SendDraftRequest,
     SendEmailRequest,
     SendResult,
+    SetOofSettingsRequest,
     Thread,
     UpdateDraftRequest,
     UpdateRuleRequest,
@@ -1004,6 +1007,35 @@ class EmailOperationsMixin(BaseEWSBackend):
             return ActionResult(id=request.id, status="deleted")
         except Exception as exc:  # noqa: BLE001
             raise self._map_exception(exc, item_id=request.id) from exc
+
+    def get_oof_settings(self) -> OofSettingsModel:
+        try:
+            settings = self.account.oof_settings
+        except Exception as exc:  # noqa: BLE001
+            raise self._map_exception(exc) from exc
+        return OofSettingsModel(
+            state=settings.state.lower(),
+            external_audience=(settings.external_audience or "all").lower(),  # type: ignore[arg-type]
+            start=settings.start,
+            end=settings.end,
+            internal_reply=settings.internal_reply or None,
+            external_reply=settings.external_reply or None,
+        )
+
+    def set_oof_settings(self, request: SetOofSettingsRequest) -> ActionResult:
+        ews_settings = OofSettings(
+            state=request.state.capitalize(),
+            external_audience=request.external_audience.capitalize(),
+            start=self._to_ews_datetime(request.start) if request.start else None,
+            end=self._to_ews_datetime(request.end) if request.end else None,
+            internal_reply=request.internal_reply or "",
+            external_reply=request.external_reply or "",
+        )
+        try:
+            self.account.oof_settings = ews_settings
+        except Exception as exc:  # noqa: BLE001
+            raise self._map_exception(exc) from exc
+        return ActionResult(id="oof", status="updated")
 
     def _save_attachment(self, attachment: Any, fd: int, max_size_bytes: int) -> int:
         with os.fdopen(fd, "wb") as dest:

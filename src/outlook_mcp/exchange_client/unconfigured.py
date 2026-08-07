@@ -50,6 +50,7 @@ from ..models import (
     MailboxInfo,
     MailRule,
     MarkEmailRequest,
+    OofSettingsModel,
     PingResult,
     RenameFolderRequest,
     ReplyEmailRequest,
@@ -59,6 +60,7 @@ from ..models import (
     SendDraftRequest,
     SendEmailRequest,
     SendResult,
+    SetOofSettingsRequest,
     Thread,
     UpdateContactRequest,
     UpdateDraftRequest,
@@ -170,6 +172,12 @@ class UnconfiguredExchangeBackend:
         self._raise()
 
     def delete_rule(self, request: DeleteRuleRequest) -> ActionResult:
+        self._raise()
+
+    def get_oof_settings(self) -> OofSettingsModel:
+        self._raise()
+
+    def set_oof_settings(self, request: SetOofSettingsRequest) -> ActionResult:
         self._raise()
 
     def list_events(self, request: ListEventsRequest) -> list[CalendarEvent]:

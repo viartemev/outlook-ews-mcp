@@ -492,6 +492,43 @@ class DeleteRuleRequest(ExchangeModel):
     id: str = Field(min_length=1)
 
 
+OofState = Literal["disabled", "enabled", "scheduled"]
+OofExternalAudience = Literal["none", "known", "all"]
+
+
+class OofSettingsModel(ExchangeModel):
+    state: OofState
+    external_audience: OofExternalAudience = "all"
+    start: datetime | None = None
+    end: datetime | None = None
+    internal_reply: str | None = None
+    external_reply: str | None = None
+
+
+class SetOofSettingsRequest(ExchangeModel):
+    state: OofState
+    external_audience: OofExternalAudience = "all"
+    start: datetime | None = None
+    end: datetime | None = None
+    internal_reply: str | None = None
+    external_reply: str | None = None
+
+    @model_validator(mode="after")
+    def validate_state(self) -> "SetOofSettingsRequest":
+        # Mirrors the validation exchangelib's OofSettings.clean() applies
+        # server-side, surfaced here instead of as an opaque Exchange error.
+        if self.state == "scheduled":
+            if self.start is None or self.end is None:
+                raise ValueError("start and end are required when state='scheduled'")
+            if self.end <= self.start:
+                raise ValueError("end must be greater than start")
+        if self.state != "disabled" and (not self.internal_reply or not self.external_reply):
+            raise ValueError(
+                "internal_reply and external_reply are required unless state='disabled'"
+            )
+        return self
+
+
 class ListEventsRequest(ExchangeModel):
     start: datetime
     end: datetime
