@@ -91,7 +91,8 @@ What the current code does:
 - does **not** contain telemetry, analytics, or third-party data export logic
 - keeps secrets in environment variables / `.env`
 - ignores local secret files via `.gitignore` (`.env`, `.env.*`, while keeping `.env.example`)
-- structured MCP error responses and server logs do not include raw Exchange exception text, message bodies, attachment contents, or passwords; successful tools return the mailbox data they were asked for
+- structured MCP error responses do not include raw Exchange exception text, message bodies, attachment contents, or passwords; successful tools return the mailbox data they were asked for
+- server logs do not include message bodies or attachment contents either: `LOG_LEVEL` only controls verbosity of the app's own `outlook_mcp.*` loggers, and `exchangelib`'s SOAP XML loggers (which would otherwise dump full request/response XML, including at `ERROR` level on unexpected transport errors) are always force-silenced regardless of `LOG_LEVEL`
 - excludes `.env`, tests, caches, and VCS metadata from Docker build context via `.dockerignore`
 
 What you should still be careful with:
