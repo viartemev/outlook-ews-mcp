@@ -724,6 +724,20 @@ class CalendarInfo(ExchangeModel):
     owner_email: ServerAddress | None = None
 
 
+class RoomListInfo(ExchangeModel):
+    name: str
+    email: ServerAddress
+
+
+class RoomInfo(ExchangeModel):
+    name: str
+    email: ServerAddress
+
+
+class ListRoomsRequest(ExchangeModel):
+    room_list: EmailStr
+
+
 class AvailabilityResult(ExchangeModel):
     free_slots: list[FreeSlot] = Field(default_factory=list)
     busy_slots: list[dict[str, Any]] = Field(default_factory=list)

@@ -78,6 +78,8 @@ Secure MCP server for on-prem Microsoft Exchange (EWS) with tools for email, cal
 - `find_free_slots`
 - `get_my_availability`
 - `list_calendars`
+- `list_room_lists`
+- `list_rooms`
 
 ### Contacts
 - `search_contacts`

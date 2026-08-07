@@ -10,6 +10,8 @@ from .tools.calendar import (
     get_my_availability,
     list_calendars,
     list_events,
+    list_room_lists,
+    list_rooms,
     respond_to_invite,
     update_event,
 )
@@ -410,6 +412,21 @@ TOOL_SPECS: list[ToolSpec] = [
         "List calendars",
         list_calendars,
         response_model=list[models.CalendarInfo],
+        read_only=True,
+    ),
+    ToolSpec(
+        "list_room_lists",
+        "List Room Finder room lists (groups of meeting rooms)",
+        list_room_lists,
+        response_model=list[models.RoomListInfo],
+        read_only=True,
+    ),
+    ToolSpec(
+        "list_rooms",
+        "List the meeting rooms in a Room Finder room list",
+        list_rooms,
+        request_model=models.ListRoomsRequest,
+        response_model=list[models.RoomInfo],
         read_only=True,
     ),
     ToolSpec(

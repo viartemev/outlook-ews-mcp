@@ -47,6 +47,7 @@ from ..models import (
     ListEmailsRequest,
     ListEventsRequest,
     ListFoldersRequest,
+    ListRoomsRequest,
     MailboxInfo,
     MailRule,
     MarkEmailRequest,
@@ -55,6 +56,8 @@ from ..models import (
     RenameFolderRequest,
     ReplyEmailRequest,
     RespondToInviteRequest,
+    RoomInfo,
+    RoomListInfo,
     SearchContactsRequest,
     SearchEmailsRequest,
     SendDraftRequest,
@@ -205,6 +208,12 @@ class UnconfiguredExchangeBackend:
         self._raise()
 
     def list_calendars(self) -> list[CalendarInfo]:
+        self._raise()
+
+    def list_room_lists(self) -> list[RoomListInfo]:
+        self._raise()
+
+    def list_rooms(self, request: ListRoomsRequest) -> list[RoomInfo]:
         self._raise()
 
     def search_contacts(self, request: SearchContactsRequest) -> list[ContactSummary]:

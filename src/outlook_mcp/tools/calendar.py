@@ -6,6 +6,7 @@ from ..models import (
     FindFreeSlotsRequest,
     GetEventRequest,
     ListEventsRequest,
+    ListRoomsRequest,
     RespondToInviteRequest,
     UpdateEventRequest,
 )
@@ -20,3 +21,5 @@ respond_to_invite = tool_handler("respond_to_invite", RespondToInviteRequest)
 find_free_slots = tool_handler("find_free_slots", FindFreeSlotsRequest)
 get_my_availability = tool_handler("get_my_availability", ListEventsRequest)
 list_calendars = tool_handler("list_calendars")
+list_room_lists = tool_handler("list_room_lists")
+list_rooms = tool_handler("list_rooms", ListRoomsRequest)

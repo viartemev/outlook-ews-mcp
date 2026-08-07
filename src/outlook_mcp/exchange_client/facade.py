@@ -49,6 +49,7 @@ from ..models import (
     ListEmailsRequest,
     ListEventsRequest,
     ListFoldersRequest,
+    ListRoomsRequest,
     MailboxInfo,
     MailRule,
     MarkEmailRequest,
@@ -57,6 +58,8 @@ from ..models import (
     RenameFolderRequest,
     ReplyEmailRequest,
     RespondToInviteRequest,
+    RoomInfo,
+    RoomListInfo,
     SearchContactsRequest,
     SearchEmailsRequest,
     SendDraftRequest,
@@ -244,6 +247,12 @@ class ExchangeClient:
 
     def list_calendars(self) -> list[CalendarInfo]:
         return self._retry_read(self.backend.list_calendars)
+
+    def list_room_lists(self) -> list[RoomListInfo]:
+        return self.backend.list_room_lists()
+
+    def list_rooms(self, request: ListRoomsRequest) -> list[RoomInfo]:
+        return self.backend.list_rooms(request)
 
     def search_contacts(self, request: SearchContactsRequest) -> list[ContactSummary]:
         return self._retry_read(lambda: self.backend.search_contacts(request))

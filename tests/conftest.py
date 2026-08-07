@@ -50,6 +50,7 @@ from outlook_mcp.models import (
     ListEmailsRequest,
     ListEventsRequest,
     ListFoldersRequest,
+    ListRoomsRequest,
     MailboxInfo,
     MailRule,
     MarkEmailRequest,
@@ -58,6 +59,8 @@ from outlook_mcp.models import (
     RenameFolderRequest,
     ReplyEmailRequest,
     RespondToInviteRequest,
+    RoomInfo,
+    RoomListInfo,
     SearchContactsRequest,
     SearchEmailsRequest,
     SendDraftRequest,
@@ -379,6 +382,12 @@ class FakeExchangeBackend:
                 id="cal-1", name="Calendar", is_default=True, owner_email="user@example.com"
             )
         ]
+
+    def list_room_lists(self) -> list[RoomListInfo]:
+        return [RoomListInfo(name="Building A", email="buildinga@example.com")]
+
+    def list_rooms(self, request: ListRoomsRequest) -> list[RoomInfo]:
+        return [RoomInfo(name="Room 101", email="room101@example.com")]
 
     def search_contacts(self, request: SearchContactsRequest) -> list[ContactSummary]:
         return [

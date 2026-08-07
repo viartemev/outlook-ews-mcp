@@ -27,8 +27,11 @@ from ..models import (
     FreeSlot,
     GetEventRequest,
     ListEventsRequest,
+    ListRoomsRequest,
     RecurrencePattern,
     RespondToInviteRequest,
+    RoomInfo,
+    RoomListInfo,
     UpdateEventRequest,
     WorkHours,
 )
@@ -495,3 +498,20 @@ class CalendarOperationsMixin(BaseEWSBackend):
             )
             for folder in folders
         ]
+
+    def list_room_lists(self) -> list[RoomListInfo]:
+        try:
+            room_lists = list(self.account.protocol.get_roomlists())
+        except Exception as exc:  # noqa: BLE001
+            raise self._map_exception(exc) from exc
+        return [
+            RoomListInfo(name=room_list.name, email=room_list.email_address)
+            for room_list in room_lists
+        ]
+
+    def list_rooms(self, request: ListRoomsRequest) -> list[RoomInfo]:
+        try:
+            rooms = list(self.account.protocol.get_rooms(str(request.room_list)))
+        except Exception as exc:  # noqa: BLE001
+            raise self._map_exception(exc) from exc
+        return [RoomInfo(name=room.name, email=room.email_address) for room in rooms]
