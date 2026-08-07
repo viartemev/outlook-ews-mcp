@@ -72,8 +72,21 @@ get_attachment = tool_handler(
 
 
 def _validate_within_root(paths: list[Path], root: Path | None, field: str) -> None:
-    if root is None:
+    if not paths:
         return
+    if root is None:
+        raise APIError(
+            "validation_error",
+            f"{field} requires EXCHANGE_ATTACHMENT_ROOT to be configured",
+            details=[
+                {
+                    "field": field,
+                    "reason": "EXCHANGE_ATTACHMENT_ROOT is not set: local file access is "
+                    f"refused by default: {path}",
+                }
+                for path in paths
+            ],
+        )
     resolved_root = root.resolve()
     outside = [
         str(path) for path in paths if not Path(path).resolve().is_relative_to(resolved_root)

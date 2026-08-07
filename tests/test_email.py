@@ -21,6 +21,7 @@ def test_get_email(client) -> None:
 
 
 def test_send_email_checks_attachment_exists(client, tmp_path: Path) -> None:
+    client.settings.attachment_root = tmp_path
     existing = tmp_path / "ok.txt"
     existing.write_text("hello", encoding="utf-8")
 
@@ -36,7 +37,9 @@ def test_send_email_checks_attachment_exists(client, tmp_path: Path) -> None:
     assert result["status"] == "sent"
 
 
-def test_send_email_rejects_missing_attachment(client) -> None:
+def test_send_email_rejects_missing_attachment(client, tmp_path: Path) -> None:
+    client.settings.attachment_root = tmp_path
+
     with pytest.raises(APIError) as excinfo:
         send_email(
             client,
@@ -44,14 +47,42 @@ def test_send_email_rejects_missing_attachment(client) -> None:
                 "to": ["user@example.com"],
                 "subject": "Test",
                 "body": "Hello",
-                "attachments": ["/no/such/file.txt"],
+                "attachments": [str(tmp_path / "no-such-file.txt")],
             },
         )
 
     assert excinfo.value.code == "validation_error"
 
 
+def test_send_email_rejects_attachments_when_root_not_configured(client, tmp_path: Path) -> None:
+    existing = tmp_path / "ok.txt"
+    existing.write_text("hello", encoding="utf-8")
+
+    with pytest.raises(APIError) as excinfo:
+        send_email(
+            client,
+            {
+                "to": ["user@example.com"],
+                "subject": "Test",
+                "body": "Hello",
+                "attachments": [str(existing)],
+            },
+        )
+
+    assert excinfo.value.code == "validation_error"
+    assert "EXCHANGE_ATTACHMENT_ROOT" in excinfo.value.details[0]["reason"]
+
+
+def test_send_email_allows_no_attachments_when_root_not_configured(client) -> None:
+    result = send_email(
+        client,
+        {"to": ["user@example.com"], "subject": "Test", "body": "Hello"},
+    )
+    assert result["status"] == "sent"
+
+
 def test_send_email_rejects_non_regular_file_attachment(client, tmp_path: Path) -> None:
+    client.settings.attachment_root = tmp_path
     directory_as_attachment = tmp_path / "dir"
     directory_as_attachment.mkdir()
 
@@ -71,6 +102,7 @@ def test_send_email_rejects_non_regular_file_attachment(client, tmp_path: Path) 
 
 
 def test_send_email_rejects_attachment_over_limit(client, tmp_path: Path) -> None:
+    client.settings.attachment_root = tmp_path
     client.settings.attachment_max_size_mb = 1
     oversized = tmp_path / "big.bin"
     oversized.write_bytes(b"x" * (1024 * 1024 + 1))
@@ -91,6 +123,7 @@ def test_send_email_rejects_attachment_over_limit(client, tmp_path: Path) -> Non
 
 
 def test_send_email_rejects_too_many_attachments(client, tmp_path: Path) -> None:
+    client.settings.attachment_root = tmp_path
     client.settings.attachment_max_count = 2
     paths = []
     for i in range(3):
@@ -114,6 +147,7 @@ def test_send_email_rejects_too_many_attachments(client, tmp_path: Path) -> None
 
 
 def test_send_email_rejects_total_attachment_size_over_limit(client, tmp_path: Path) -> None:
+    client.settings.attachment_root = tmp_path
     client.settings.attachment_max_total_size_mb = 1
     paths = []
     for i in range(2):
@@ -211,4 +245,24 @@ def test_get_attachment_allows_save_path_inside_root(client, tmp_path: Path) -> 
             "save_path": str(inside),
         },
     )
+    assert result["filename"] == "test.txt"
+
+
+def test_get_attachment_rejects_save_path_when_root_not_configured(client, tmp_path: Path) -> None:
+    with pytest.raises(APIError) as excinfo:
+        get_attachment(
+            client,
+            {
+                "email_id": "email-1",
+                "attachment_id": "attachment-1",
+                "save_path": str(tmp_path / "downloads"),
+            },
+        )
+
+    assert excinfo.value.code == "validation_error"
+    assert "EXCHANGE_ATTACHMENT_ROOT" in excinfo.value.details[0]["reason"]
+
+
+def test_get_attachment_allows_no_save_path_when_root_not_configured(client) -> None:
+    result = get_attachment(client, {"email_id": "email-1", "attachment_id": "attachment-1"})
     assert result["filename"] == "test.txt"

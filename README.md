@@ -97,8 +97,7 @@ What the current code does:
 What you should still be careful with:
 - `EXCHANGE_VERIFY_SSL=false` disables TLS certificate verification and should be used only for trusted internal/self-signed environments
 - `EXCHANGE_AUTH_TYPE=Basic` sends credentials in the clear, so the server refuses to start against an `http://` `EXCHANGE_SERVER`; only override with `EXCHANGE_ALLOW_INSECURE_BASIC_AUTH=true` for a local/test server you control
-- `get_attachment` writes files to disk, so choose a safe destination directory
-- `send_email`/`reply_email`/`forward_email`/`create_draft` read local files (via `attachments`) and attach their contents to outgoing mail — combined with untrusted email content, this is a plausible path for a prompt-injected exfiltration of any file readable by the process; set `EXCHANGE_ATTACHMENT_ROOT` to restrict both which files can be attached and where `get_attachment` may write downloads
+- `get_attachment` writes files to disk, and `send_email`/`reply_email`/`forward_email`/`create_draft` read local files (via `attachments`) and attach their contents to outgoing mail — combined with untrusted email content, this is a plausible path for a prompt-injected exfiltration of any file readable by the process; local file access is **refused by default** and only works once `EXCHANGE_ATTACHMENT_ROOT` is set to an absolute directory, which then confines both `attachments` paths and `get_attachment`'s `save_path` to that directory tree (an unset `save_path` still falls back to the system temp directory)
 - `outlook-ews-mcp-smoke` is privacy-safe by default and prints only masked mailbox info plus counts; set `OUTLOOK_MCP_SMOKE_INCLUDE_DATA=true` only if you explicitly want real inbox/event data in stdout
 - if you enable file logging with `LOG_FILE`, protect that file with OS permissions
 - if you publish Docker images from CI, protect GitLab/GitHub project access and registry permissions
@@ -153,7 +152,7 @@ Notes:
 - `EXCHANGE_TIMEZONE_FALLBACK` is only used when Exchange reports a timezone as an unresolvable GUID id; normal operations (naive datetimes, all-day event math) use the mailbox's own default timezone instead
 - `EXCHANGE_ATTACHMENT_MAX_SIZE_MB` is enforced both on local files attached to outgoing email and on attachments downloaded via `get_attachment`
 - `EXCHANGE_ATTACHMENT_MAX_COUNT` and `EXCHANGE_ATTACHMENT_MAX_TOTAL_SIZE_MB` cap the number and combined size of attachments on a single `send_email`/`reply_email`/`forward_email`/`create_draft` call
-- `EXCHANGE_ATTACHMENT_ROOT` is unset (unrestricted) by default; set it to an absolute directory to confine both `attachments` paths (send/reply/forward/create_draft) and `get_attachment`'s `save_path` to that directory tree
+- `EXCHANGE_ATTACHMENT_ROOT` is unset by default, which **refuses** rather than allows local file access: any non-empty `attachments` list (send/reply/forward/create_draft) or explicit `get_attachment` `save_path` is rejected until it's set to an absolute directory, which then confines those paths to that directory tree. `get_attachment` with no `save_path` still works unset, falling back to the system temp directory
 - `EXCHANGE_MAX_RETRY_WAIT_SECONDS` is a total backoff time budget (exchangelib retries transient errors with exponential backoff until this many seconds have elapsed), not a retry count; set to `0` to disable retries and fail fast on the first error
 - `EXCHANGE_EMAIL_BODY_MAX_CHARS` caps `get_email`'s `body_text`/`body_html`; a message beyond the cap is truncated and `truncated: true` is set on the response instead of returning an unbounded MCP payload
 - send operations return `id: null` when EWS does not provide a durable ID for the sent copy (notably replies, forwards, and sent drafts)
