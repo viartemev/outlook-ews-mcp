@@ -1,5 +1,9 @@
 from __future__ import annotations
 
+import threading
+import time
+from unittest.mock import patch
+
 import pytest
 from exchangelib.ewsdatetime import EWSTimeZone
 
@@ -101,6 +105,41 @@ def test_unset_exchange_version_leaves_autodetection_untouched() -> None:
     )
 
     assert backend.account.protocol.config.version is None
+
+
+def test_concurrent_account_access_builds_the_account_once() -> None:
+    """ToolGateway runs tool bodies in a thread pool, so once MCP_MAX_CONCURRENCY > 1 the
+    first burst of concurrent calls can all reach `.account` before any of them has finished
+    building it. Without a lock, each would see self._account as None and race to build its
+    own Account/Configuration/protocol; the lock in the `account` property must collapse that
+    down to a single build shared by every caller."""
+    backend = EWSExchangeBackend(_settings())
+    real_build_account = EWSExchangeBackend._build_account
+    call_count = 0
+    call_count_lock = threading.Lock()
+
+    def slow_build_account(self):
+        nonlocal call_count
+        with call_count_lock:
+            call_count += 1
+        # Widens the race window so concurrent callers overlap inside _build_account
+        # rather than happening to interleave around it.
+        time.sleep(0.05)
+        return real_build_account(self)
+
+    results: list[object] = []
+    with patch.object(EWSExchangeBackend, "_build_account", slow_build_account):
+        threads = [
+            threading.Thread(target=lambda: results.append(backend.account)) for _ in range(16)
+        ]
+        for thread in threads:
+            thread.start()
+        for thread in threads:
+            thread.join()
+
+    assert call_count == 1
+    assert len(results) == 16
+    assert len({id(result) for result in results}) == 1
 
 
 def test_unknown_exchange_version_raises_validation_error() -> None:
