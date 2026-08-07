@@ -22,10 +22,12 @@ from ..models import (
     CreateEventResult,
     CreateContactRequest,
     CreateFolderRequest,
+    CreateRuleRequest,
     DeleteContactRequest,
     DeleteEmailRequest,
     DeleteEventRequest,
     DeleteFolderRequest,
+    DeleteRuleRequest,
     DraftEmailRequest,
     EmailFull,
     EmailMimeResult,
@@ -46,6 +48,7 @@ from ..models import (
     ListEventsRequest,
     ListFoldersRequest,
     MailboxInfo,
+    MailRule,
     MarkEmailRequest,
     PingResult,
     RenameFolderRequest,
@@ -60,6 +63,7 @@ from ..models import (
     UpdateContactRequest,
     UpdateDraftRequest,
     UpdateEventRequest,
+    UpdateRuleRequest,
 )
 
 
@@ -154,6 +158,18 @@ class UnconfiguredExchangeBackend:
         self._raise()
 
     def get_email_mime(self, request: GetEmailMimeRequest) -> EmailMimeResult:
+        self._raise()
+
+    def list_rules(self) -> list[MailRule]:
+        self._raise()
+
+    def create_rule(self, request: CreateRuleRequest) -> ActionResult:
+        self._raise()
+
+    def update_rule(self, request: UpdateRuleRequest) -> ActionResult:
+        self._raise()
+
+    def delete_rule(self, request: DeleteRuleRequest) -> ActionResult:
         self._raise()
 
     def list_events(self, request: ListEventsRequest) -> list[CalendarEvent]:

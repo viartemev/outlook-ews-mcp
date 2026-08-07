@@ -24,10 +24,12 @@ from outlook_mcp.models import (
     CategoryUsage,
     CreateEventRequest,
     CreateEventResult,
+    CreateRuleRequest,
     DeleteContactRequest,
     DeleteEmailRequest,
     DeleteEventRequest,
     DeleteFolderRequest,
+    DeleteRuleRequest,
     DraftEmailRequest,
     EmailAddress,
     EmailFull,
@@ -49,6 +51,7 @@ from outlook_mcp.models import (
     ListEventsRequest,
     ListFoldersRequest,
     MailboxInfo,
+    MailRule,
     MarkEmailRequest,
     PingResult,
     RenameFolderRequest,
@@ -63,6 +66,7 @@ from outlook_mcp.models import (
     UpdateContactRequest,
     UpdateDraftRequest,
     UpdateEventRequest,
+    UpdateRuleRequest,
 )
 
 
@@ -224,6 +228,26 @@ class FakeExchangeBackend:
             )
             for item_id in request.ids
         ]
+
+    def list_rules(self) -> list[MailRule]:
+        return [
+            MailRule(
+                id="rule-1",
+                display_name="Move newsletters",
+                priority=1,
+                from_addresses=["news@example.com"],
+                move_to_folder="folder-newsletters",
+            )
+        ]
+
+    def create_rule(self, request: CreateRuleRequest) -> ActionResult:
+        return ActionResult(id="rule-new", status="created")
+
+    def update_rule(self, request: UpdateRuleRequest) -> ActionResult:
+        return ActionResult(id=request.id, status="updated")
+
+    def delete_rule(self, request: DeleteRuleRequest) -> ActionResult:
+        return ActionResult(id=request.id, status="deleted")
 
     def list_categories(self, request: ListCategoriesRequest) -> list[CategoryUsage]:
         return [

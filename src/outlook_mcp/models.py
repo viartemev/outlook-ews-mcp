@@ -405,6 +405,93 @@ class EmailMimeResult(ExchangeModel):
     mime_base64: str
 
 
+def _validate_rule_has_action(rule: Any) -> None:
+    if not any(
+        [
+            rule.move_to_folder is not None,
+            rule.mark_as_read is not None,
+            rule.assign_categories,
+            rule.delete,
+        ]
+    ):
+        raise ValueError(
+            "at least one action (move_to_folder, mark_as_read, assign_categories, "
+            "delete) must be set"
+        )
+
+
+class MailRule(ExchangeModel):
+    """An Inbox rule as the server holds it.
+
+    Only a focused subset of EWS's condition/action vocabulary is exposed --
+    the fields most tool callers actually need (sender/subject/attachment
+    conditions; move/mark/categorize/delete actions) -- rather than the full
+    Conditions/Actions surface exchangelib exposes.
+    """
+
+    id: str
+    display_name: str
+    priority: int
+    is_enabled: bool = True
+    from_addresses: list[str] = Field(default_factory=list)
+    contains_subject_strings: list[str] = Field(default_factory=list)
+    has_attachments: bool | None = None
+    move_to_folder: str | None = None
+    mark_as_read: bool | None = None
+    assign_categories: list[str] = Field(default_factory=list)
+    delete: bool = False
+    stop_processing_rules: bool = True
+
+
+class CreateRuleRequest(ExchangeModel):
+    display_name: str = Field(min_length=1)
+    priority: int = Field(default=1, ge=1)
+    is_enabled: bool = True
+    #: Conditions -- a rule with none of these set matches every message.
+    from_addresses: list[EmailStr] = Field(default_factory=list)
+    contains_subject_strings: list[str] = Field(default_factory=list)
+    has_attachments: bool | None = None
+    #: Actions -- at least one must be set (see validate_has_action below).
+    move_to_folder: str | None = None
+    mark_as_read: bool | None = None
+    assign_categories: list[str] = Field(default_factory=list)
+    delete: bool = False
+    stop_processing_rules: bool = True
+
+    @model_validator(mode="after")
+    def validate_has_action(self) -> "CreateRuleRequest":
+        _validate_rule_has_action(self)
+        return self
+
+
+class UpdateRuleRequest(ExchangeModel):
+    """A full replace, not a partial patch: EWS's SetInboxRule replaces the whole
+    rule server-side, so every field here -- not just the ones being changed --
+    must reflect the rule's desired end state."""
+
+    id: str = Field(min_length=1)
+    display_name: str = Field(min_length=1)
+    priority: int = Field(default=1, ge=1)
+    is_enabled: bool = True
+    from_addresses: list[EmailStr] = Field(default_factory=list)
+    contains_subject_strings: list[str] = Field(default_factory=list)
+    has_attachments: bool | None = None
+    move_to_folder: str | None = None
+    mark_as_read: bool | None = None
+    assign_categories: list[str] = Field(default_factory=list)
+    delete: bool = False
+    stop_processing_rules: bool = True
+
+    @model_validator(mode="after")
+    def validate_has_action(self) -> "UpdateRuleRequest":
+        _validate_rule_has_action(self)
+        return self
+
+
+class DeleteRuleRequest(ExchangeModel):
+    id: str = Field(min_length=1)
+
+
 class ListEventsRequest(ExchangeModel):
     start: datetime
     end: datetime

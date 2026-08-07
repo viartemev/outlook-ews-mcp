@@ -22,7 +22,15 @@ from exchangelib.extended_properties import ExtendedProperty, Flag
 from exchangelib.fields import InvalidField, InvalidFieldForVersion
 from exchangelib.folders import FolderCollection
 from exchangelib.items import HARD_DELETE, MOVE_TO_DELETED_ITEMS
-from exchangelib.properties import ConversationId
+from exchangelib.properties import (
+    Actions,
+    Address,
+    Conditions,
+    ConversationId,
+    FolderId,
+    MoveToFolder,
+    Rule,
+)
 
 from ..errors import APIError, NotFoundError
 from ..models import (
@@ -36,8 +44,10 @@ from ..models import (
     CategorizeEmailRequest,
     CategoryUsage,
     CreateFolderRequest,
+    CreateRuleRequest,
     DeleteEmailRequest,
     DeleteFolderRequest,
+    DeleteRuleRequest,
     DraftEmailRequest,
     EmailFull,
     EmailMimeResult,
@@ -52,6 +62,7 @@ from ..models import (
     ListCategoriesRequest,
     ListEmailsRequest,
     ListFoldersRequest,
+    MailRule,
     MarkEmailRequest,
     RenameFolderRequest,
     ReplyEmailRequest,
@@ -61,6 +72,7 @@ from ..models import (
     SendResult,
     Thread,
     UpdateDraftRequest,
+    UpdateRuleRequest,
 )
 from .base import BaseEWSBackend
 
@@ -888,6 +900,110 @@ class EmailOperationsMixin(BaseEWSBackend):
             size=len(raw),
             mime_base64=base64.b64encode(raw).decode("ascii"),
         )
+
+    def _rule_folder_id(self, folder_action: Any) -> str | None:
+        # A rule's move-to-folder action only round-trips as a raw EWS folder id --
+        # resolving it back to a friendly path would need an extra GetFolder call
+        # per rule, so list_rules reports the id, not the path the caller passed in.
+        if folder_action is None:
+            return None
+        folder_id = getattr(folder_action, "folder_id", None)
+        if folder_id is not None:
+            return getattr(folder_id, "id", None)
+        distinguished = getattr(folder_action, "distinguished_folder_id", None)
+        return getattr(distinguished, "id", None) if distinguished is not None else None
+
+    def _to_mail_rule(self, rule: Any) -> MailRule:
+        conditions = rule.conditions
+        actions = rule.actions
+        return MailRule(
+            id=rule.id,
+            display_name=rule.display_name,
+            priority=rule.priority,
+            is_enabled=bool(rule.is_enabled),
+            from_addresses=[
+                self._email_address(address).email
+                for address in (getattr(conditions, "from_addresses", None) or [])
+            ],
+            contains_subject_strings=list(
+                getattr(conditions, "contains_subject_strings", None) or []
+            ),
+            has_attachments=getattr(conditions, "has_attachments", None),
+            move_to_folder=self._rule_folder_id(getattr(actions, "move_to_folder", None)),
+            mark_as_read=getattr(actions, "mark_as_read", None),
+            assign_categories=list(getattr(actions, "assign_categories", None) or []),
+            delete=bool(getattr(actions, "delete", False)),
+            stop_processing_rules=bool(getattr(actions, "stop_processing_rules", False)),
+        )
+
+    def list_rules(self) -> list[MailRule]:
+        try:
+            rules = list(self.account.rules)
+        except Exception as exc:  # noqa: BLE001
+            raise self._map_exception(exc) from exc
+        return [self._to_mail_rule(rule) for rule in rules]
+
+    def _build_rule_conditions(self, request: Any) -> Conditions | None:
+        kwargs: dict[str, Any] = {}
+        if request.from_addresses:
+            kwargs["from_addresses"] = [
+                Address(email_address=address) for address in request.from_addresses
+            ]
+        if request.contains_subject_strings:
+            kwargs["contains_subject_strings"] = list(request.contains_subject_strings)
+        if request.has_attachments is not None:
+            kwargs["has_attachments"] = request.has_attachments
+        return Conditions(**kwargs) if kwargs else None
+
+    def _build_rule_actions(self, request: Any) -> Actions:
+        kwargs: dict[str, Any] = {"stop_processing_rules": request.stop_processing_rules}
+        if request.move_to_folder is not None:
+            folder = self._resolve_folder(request.move_to_folder)
+            kwargs["move_to_folder"] = MoveToFolder(folder_id=FolderId(id=folder.id))
+        if request.mark_as_read is not None:
+            kwargs["mark_as_read"] = request.mark_as_read
+        if request.assign_categories:
+            kwargs["assign_categories"] = list(request.assign_categories)
+        if request.delete:
+            kwargs["delete"] = True
+        return Actions(**kwargs)
+
+    def create_rule(self, request: CreateRuleRequest) -> ActionResult:
+        rule = Rule(
+            display_name=request.display_name,
+            priority=request.priority,
+            is_enabled=request.is_enabled,
+            conditions=self._build_rule_conditions(request),
+            actions=self._build_rule_actions(request),
+        )
+        try:
+            self.account.create_rule(rule)
+            return ActionResult(id=rule.id or "", status="created")
+        except Exception as exc:  # noqa: BLE001
+            raise self._map_exception(exc) from exc
+
+    def update_rule(self, request: UpdateRuleRequest) -> ActionResult:
+        rule = Rule(
+            id=request.id,
+            display_name=request.display_name,
+            priority=request.priority,
+            is_enabled=request.is_enabled,
+            conditions=self._build_rule_conditions(request),
+            actions=self._build_rule_actions(request),
+        )
+        try:
+            self.account.set_rule(rule)
+            return ActionResult(id=request.id, status="updated")
+        except Exception as exc:  # noqa: BLE001
+            raise self._map_exception(exc, item_id=request.id) from exc
+
+    def delete_rule(self, request: DeleteRuleRequest) -> ActionResult:
+        rule = Rule(id=request.id)
+        try:
+            self.account.delete_rule(rule)
+            return ActionResult(id=request.id, status="deleted")
+        except Exception as exc:  # noqa: BLE001
+            raise self._map_exception(exc, item_id=request.id) from exc
 
     def _save_attachment(self, attachment: Any, fd: int, max_size_bytes: int) -> int:
         with os.fdopen(fd, "wb") as dest:

@@ -29,8 +29,10 @@ from .tools.email import (
     copy_email,
     create_draft,
     create_folder,
+    create_rule,
     delete_email,
     delete_folder,
+    delete_rule,
     forward_email,
     get_attachment,
     get_email,
@@ -39,6 +41,7 @@ from .tools.email import (
     list_categories,
     list_emails,
     list_folders,
+    list_rules,
     mark_email,
     move_email,
     rename_folder,
@@ -47,6 +50,7 @@ from .tools.email import (
     send_draft,
     send_email,
     update_draft,
+    update_rule,
 )
 from .tools.system import get_mailbox_info, ping_exchange
 
@@ -210,6 +214,38 @@ TOOL_SPECS: list[ToolSpec] = [
         bulk_categorize_emails,
         request_model=models.BulkCategorizeEmailsRequest,
         response_model=list[models.ActionResult],
+        destructive=True,
+    ),
+    ToolSpec(
+        "list_rules",
+        "List Inbox rules",
+        list_rules,
+        response_model=list[models.MailRule],
+        read_only=True,
+    ),
+    ToolSpec(
+        "create_rule",
+        "Create an Inbox rule. At least one action (move_to_folder, mark_as_read, "
+        "assign_categories, delete) must be set",
+        create_rule,
+        request_model=models.CreateRuleRequest,
+        response_model=models.ActionResult,
+    ),
+    ToolSpec(
+        "update_rule",
+        "Replace an existing Inbox rule. This is a full replace, not a partial "
+        "patch -- every field must reflect the rule's desired end state",
+        update_rule,
+        request_model=models.UpdateRuleRequest,
+        response_model=models.ActionResult,
+        destructive=True,
+    ),
+    ToolSpec(
+        "delete_rule",
+        "Delete an Inbox rule",
+        delete_rule,
+        request_model=models.DeleteRuleRequest,
+        response_model=models.ActionResult,
         destructive=True,
     ),
     ToolSpec(

@@ -13,8 +13,10 @@ from ..models import (
     BulkMoveEmailsRequest,
     CategorizeEmailRequest,
     CreateFolderRequest,
+    CreateRuleRequest,
     DeleteEmailRequest,
     DeleteFolderRequest,
+    DeleteRuleRequest,
     DraftEmailRequest,
     FolderActionRequest,
     GetAttachmentRequest,
@@ -32,6 +34,7 @@ from ..models import (
     SendEmailRequest,
     ForwardEmailRequest,
     UpdateDraftRequest,
+    UpdateRuleRequest,
 )
 from .common import tool_handler
 
@@ -75,6 +78,10 @@ bulk_move_emails = tool_handler("bulk_move_emails", BulkMoveEmailsRequest)
 bulk_delete_emails = tool_handler("bulk_delete_emails", BulkDeleteEmailsRequest)
 bulk_mark_emails = tool_handler("bulk_mark_emails", BulkMarkEmailsRequest)
 bulk_categorize_emails = tool_handler("bulk_categorize_emails", BulkCategorizeEmailsRequest)
+list_rules = tool_handler("list_rules")
+create_rule = tool_handler("create_rule", CreateRuleRequest)
+update_rule = tool_handler("update_rule", UpdateRuleRequest)
+delete_rule = tool_handler("delete_rule", DeleteRuleRequest)
 list_categories = tool_handler("list_categories", ListCategoriesRequest)
 list_folders = tool_handler("list_folders", ListFoldersRequest)
 create_folder = tool_handler("create_folder", CreateFolderRequest)

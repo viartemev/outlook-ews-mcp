@@ -20,10 +20,12 @@ from ..models import (
     CreateEventResult,
     CreateContactRequest,
     CreateFolderRequest,
+    CreateRuleRequest,
     DeleteContactRequest,
     DeleteEmailRequest,
     DeleteEventRequest,
     DeleteFolderRequest,
+    DeleteRuleRequest,
     DraftEmailRequest,
     EmailFull,
     EmailMimeResult,
@@ -44,6 +46,7 @@ from ..models import (
     ListEventsRequest,
     ListFoldersRequest,
     MailboxInfo,
+    MailRule,
     MarkEmailRequest,
     PingResult,
     RenameFolderRequest,
@@ -58,6 +61,7 @@ from ..models import (
     UpdateContactRequest,
     UpdateDraftRequest,
     UpdateEventRequest,
+    UpdateRuleRequest,
 )
 
 
@@ -92,6 +96,10 @@ class ExchangeBackend(Protocol):
     def send_draft(self, request: SendDraftRequest) -> SendResult: ...
     def get_attachment(self, request: GetAttachmentRequest) -> AttachmentResult: ...
     def get_email_mime(self, request: GetEmailMimeRequest) -> EmailMimeResult: ...
+    def list_rules(self) -> list[MailRule]: ...
+    def create_rule(self, request: CreateRuleRequest) -> ActionResult: ...
+    def update_rule(self, request: UpdateRuleRequest) -> ActionResult: ...
+    def delete_rule(self, request: DeleteRuleRequest) -> ActionResult: ...
     def list_events(self, request: ListEventsRequest) -> list[CalendarEvent]: ...
     def get_event(self, request: GetEventRequest) -> CalendarEvent: ...
     def create_event(self, request: CreateEventRequest) -> CreateEventResult: ...

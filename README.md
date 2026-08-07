@@ -61,6 +61,10 @@ Secure MCP server for on-prem Microsoft Exchange (EWS) with tools for email, cal
 - `update_draft`
 - `send_draft`
 - `get_attachment`
+- `list_rules`
+- `create_rule`
+- `update_rule`
+- `delete_rule`
 
 ### Calendar
 - `list_events`
