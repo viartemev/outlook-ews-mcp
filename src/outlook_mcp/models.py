@@ -534,17 +534,31 @@ class ListEventsRequest(ExchangeModel):
     end: datetime
     calendar_id: str | None = None
     include_recurring: bool = True
+    #: View another mailbox's default calendar instead of the service account's own
+    #: (requires delegate/impersonation access to that mailbox on the server side).
+    #: Not combinable with calendar_id -- mailbox scoping only ever targets that
+    #: mailbox's default calendar.
+    mailbox: EmailStr | None = None
 
     @model_validator(mode="after")
     def validate_range(self) -> "ListEventsRequest":
         if self.end <= self.start:
             raise ValueError("end must be greater than start")
+        if self.mailbox is not None and self.calendar_id is not None:
+            raise ValueError("mailbox cannot be combined with calendar_id")
         return self
 
 
 class GetEventRequest(ExchangeModel):
     id: str
     calendar_id: str | None = None
+    mailbox: EmailStr | None = None
+
+    @model_validator(mode="after")
+    def validate_mailbox(self) -> "GetEventRequest":
+        if self.mailbox is not None and self.calendar_id is not None:
+            raise ValueError("mailbox cannot be combined with calendar_id")
+        return self
 
 
 class WorkHours(ExchangeModel):

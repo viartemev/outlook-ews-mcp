@@ -93,6 +93,7 @@ class BaseEWSBackend:
         #: build their own Account/Configuration/protocol, wasting an auth round trip
         #: per racer and leaking every loser's protocol object.
         self._account_lock = threading.Lock()
+        self._other_accounts: dict[str, Account] = {}
 
     @property
     def account(self) -> Account:
@@ -136,6 +137,33 @@ class BaseEWSBackend:
             raise self._map_exception(exc) from exc
         self._configure_protocol(account.protocol)
         return account
+
+    def _account_for(self, mailbox: str) -> Account:
+        """A secondary Account for viewing another mailbox's calendar.
+
+        Reuses the primary account's already-authenticated Configuration (and,
+        via exchangelib's own protocol caching, its underlying Protocol/session
+        pool) rather than re-authenticating per mailbox. Requires the service
+        account to already have delegate or impersonation rights on `mailbox`
+        -- this only changes which mailbox is addressed, not what access the
+        credentials actually grant.
+        """
+        if mailbox not in self._other_accounts:
+            primary = self.account
+            auth = build_auth_context(self.settings)
+            access_type = IMPERSONATION if auth.impersonate_as else DELEGATE
+            try:
+                other = Account(
+                    primary_smtp_address=mailbox,
+                    config=primary.protocol.config,
+                    autodiscover=False,
+                    access_type=access_type,
+                )
+            except Exception as exc:  # noqa: BLE001
+                raise self._map_exception(exc) from exc
+            self._configure_protocol(other.protocol)
+            self._other_accounts[mailbox] = other
+        return self._other_accounts[mailbox]
 
     def _resolve_configured_version(self) -> Version | None:
         """Turn EXCHANGE_VERSION (e.g. "EXCHANGE_2016") into a Configuration(version=...).
@@ -313,9 +341,13 @@ class BaseEWSBackend:
         item_id: str,
         folder: Folder | None = None,
         expected_type: type[Item] | tuple[type[Item], ...] | None = None,
+        account: Account | None = None,
     ) -> Any:
+        target_account = account if account is not None else self.account
         try:
-            item = next(self.account.fetch(ids=[ItemId(id=item_id, changekey=None)], folder=folder))
+            item = next(
+                target_account.fetch(ids=[ItemId(id=item_id, changekey=None)], folder=folder)
+            )
         except StopIteration as exc:
             raise NotFoundError(item_id) from exc
         except Exception as exc:  # noqa: BLE001

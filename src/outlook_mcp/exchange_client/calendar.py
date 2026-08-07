@@ -141,8 +141,13 @@ class CalendarOperationsMixin(BaseEWSBackend):
             free_slots.append(FreeSlot(start=cursor, end=end, all_available=True))
         return free_slots
 
-    def _calendar_folder(self, calendar_id: str | None) -> Any:
-        folder = self.account.calendar if not calendar_id else self._resolve_folder(calendar_id)
+    def _calendar_folder(self, calendar_id: str | None, mailbox: str | None = None) -> Any:
+        if mailbox:
+            # calendar_id + mailbox is rejected at the request-model level, so this
+            # only ever targets that mailbox's own default calendar.
+            folder = self._account_for(mailbox).calendar
+        else:
+            folder = self.account.calendar if not calendar_id else self._resolve_folder(calendar_id)
         folder_class = getattr(folder, "folder_class", None)
         if calendar_id and folder_class is not None and folder_class != self._CALENDAR_FOLDER_CLASS:
             raise APIError(
@@ -153,7 +158,10 @@ class CalendarOperationsMixin(BaseEWSBackend):
         return folder
 
     def list_events(self, request: ListEventsRequest) -> list[CalendarEvent]:
-        folder = self._calendar_folder(request.calendar_id)
+        folder = self._calendar_folder(request.calendar_id, request.mailbox)
+        # The query window is always computed in the service account's own timezone,
+        # even when `mailbox` targets another account -- resolving the target
+        # mailbox's own timezone would need an extra round trip this doesn't make.
         start = self._to_ews_datetime(request.start)
         end = self._to_ews_datetime(request.end)
         qs = folder.view(start=start, end=end)
@@ -168,8 +176,9 @@ class CalendarOperationsMixin(BaseEWSBackend):
     def get_event(self, request: GetEventRequest) -> CalendarEvent:
         item = self._fetch_item(
             request.id,
-            folder=self._calendar_folder(request.calendar_id),
+            folder=self._calendar_folder(request.calendar_id, request.mailbox),
             expected_type=CalendarItem,
+            account=self._account_for(request.mailbox) if request.mailbox else None,
         )
         return self._to_calendar_event(item)
 

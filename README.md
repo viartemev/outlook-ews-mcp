@@ -21,8 +21,9 @@ Secure MCP server for on-prem Microsoft Exchange (EWS) with tools for email, cal
 
 ## Highlights
 
-- email operations: list, search, read, send, reply, forward, move, copy, delete, mark
-- calendar operations: list, create, update, delete, respond to invites, find free slots
+- email operations: list, search, read, send, reply, forward, move, copy, delete, mark, bulk actions, raw MIME export
+- Inbox Rules and Out-of-Office (automatic replies) management
+- calendar operations: list, create, update, delete, respond to invites, find free slots, view a shared/delegate mailbox's calendar, Room Finder
 - contacts operations: search, read, create, update, delete
 - folder operations and attachment download
 - Exchange auth via `NTLM` and `Basic`
