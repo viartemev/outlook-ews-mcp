@@ -16,6 +16,8 @@ from outlook_mcp.models import (
     ContactFull,
     ContactSummary,
     CreateContactRequest,
+    CategorizeEmailRequest,
+    CategoryUsage,
     CreateEventRequest,
     CreateEventResult,
     DeleteContactRequest,
@@ -34,6 +36,8 @@ from outlook_mcp.models import (
     GetContactRequest,
     GetEmailRequest,
     GetEventRequest,
+    GetThreadRequest,
+    ListCategoriesRequest,
     ListEmailsRequest,
     ListEventsRequest,
     ListFoldersRequest,
@@ -47,6 +51,7 @@ from outlook_mcp.models import (
     SendDraftRequest,
     SendEmailRequest,
     SendResult,
+    Thread,
     UpdateContactRequest,
     UpdateEventRequest,
 )
@@ -100,6 +105,27 @@ class FakeExchangeBackend:
             headers={"X-Test": "1"},
         )
 
+    def get_thread(self, request: GetThreadRequest) -> Thread:
+        messages = [
+            EmailFull(
+                id=f"email-{index}",
+                subject="Hello" if index == 1 else f"Re: Hello ({index})",
+                **{"from": {"email": "sender@example.com", "name": "Sender"}},
+                to=[EmailAddress(email="user@example.com", name="User")],
+                date=datetime(2026, 4, 7, 9 + index, 0, tzinfo=UTC),
+                is_read=True,
+                body_text=f"Body {index}",
+                conversation_id="conv-1",
+            )
+            for index in (1, 2)
+        ]
+        return Thread(
+            conversation_id=request.conversation_id or "conv-1",
+            subject="Hello",
+            message_count=len(messages),
+            messages=messages,
+        )
+
     def search_emails(self, request: SearchEmailsRequest) -> list[EmailSummary]:
         return self.list_emails(ListEmailsRequest(subject=request.query, limit=request.limit))
 
@@ -131,6 +157,27 @@ class FakeExchangeBackend:
             field for field in ["read", "flag", "importance"] if getattr(request, field) is not None
         ]
         return ActionResult(id=request.id, status="updated", updated_fields=updated_fields)
+
+    def categorize_email(self, request: CategorizeEmailRequest) -> ActionResult:
+        existing = ["Existing"]
+        if request.mode == "set":
+            categories = list(request.categories)
+        elif request.mode == "add":
+            categories = existing + [name for name in request.categories if name not in existing]
+        else:
+            categories = [name for name in existing if name not in request.categories]
+        return ActionResult(
+            id=request.id,
+            status="updated",
+            updated_fields=["categories"],
+            categories=categories,
+        )
+
+    def list_categories(self, request: ListCategoriesRequest) -> list[CategoryUsage]:
+        return [
+            CategoryUsage(name="Important", count=7),
+            CategoryUsage(name="Later", count=2),
+        ]
 
     def list_folders(self, request: ListFoldersRequest) -> list[FolderInfo]:
         return [

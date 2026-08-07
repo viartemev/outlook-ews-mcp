@@ -67,6 +67,51 @@ def _fake_account(views, captured: dict | None = None) -> SimpleNamespace:
     )
 
 
+@pytest.mark.parametrize(
+    ("configured", "expected"),
+    [
+        ("mail.example.com", "https://mail.example.com/EWS/Exchange.asmx"),
+        ("https://mail.example.com", "https://mail.example.com/EWS/Exchange.asmx"),
+        ("https://mail.example.com/", "https://mail.example.com/EWS/Exchange.asmx"),
+        (
+            "https://mail.example.com/EWS/Exchange.asmx",
+            "https://mail.example.com/EWS/Exchange.asmx",
+        ),
+        (
+            "https://mail.example.com/ews/exchange.asmx",
+            "https://mail.example.com/ews/exchange.asmx",
+        ),
+        # A URL copied from a browser keeps its trailing slash. That used to miss
+        # the suffix check and get a second "/EWS/Exchange.asmx" appended, leaving
+        # a silently unreachable endpoint.
+        (
+            "https://mail.example.com/EWS/Exchange.asmx/",
+            "https://mail.example.com/EWS/Exchange.asmx",
+        ),
+        (
+            "  https://mail.example.com/EWS/Exchange.asmx  ",
+            "https://mail.example.com/EWS/Exchange.asmx",
+        ),
+        ("http://mail.example.com", "http://mail.example.com/EWS/Exchange.asmx"),
+    ],
+)
+def test_normalize_service_endpoint(settings, configured, expected) -> None:
+    backend = EWSExchangeBackend(settings)
+
+    assert backend._normalize_service_endpoint(configured) == expected
+
+
+def test_normalize_service_endpoint_never_repeats_the_ews_path(settings) -> None:
+    backend = EWSExchangeBackend(settings)
+
+    for configured in (
+        "mail.example.com",
+        "https://mail.example.com/EWS/Exchange.asmx",
+        "https://mail.example.com/EWS/Exchange.asmx/",
+    ):
+        assert backend._normalize_service_endpoint(configured).count("Exchange.asmx") == 1
+
+
 def test_map_exception_classifies_by_exchangelib_type_not_message_text(settings) -> None:
     """Each of these must be matched by its actual exchangelib exception class, not
     by substring-matching the (English, server-supplied) exception message."""
@@ -878,6 +923,81 @@ def test_reply_email_saves_draft_attaches_files_then_sends(settings, tmp_path) -
         ("send",),
     ]
     assert result == SendResult(id=None, status="sent")
+
+
+@pytest.mark.parametrize(
+    ("original", "expected"),
+    [
+        ("Hello", "Re: Hello"),
+        # Replying inside a thread must not stack markers: a few rounds of
+        # "Re: Re: Re: " and the subject is unreadable.
+        ("Re: Hello", "Re: Hello"),
+        ("RE: Hello", "RE: Hello"),
+        ("Re[2]: Hello", "Re[2]: Hello"),
+        ("Ответ: Привет", "Ответ: Привет"),
+        # A forward marker is not a reply marker -- Outlook sends "RE: FW: ...".
+        ("FW: Hello", "Re: FW: Hello"),
+        ("", "Re:"),
+    ],
+)
+def test_reply_email_does_not_stack_reply_prefixes(settings, original, expected) -> None:
+    backend = EWSExchangeBackend(settings)
+    captured: list[str] = []
+
+    class FakeResponse:
+        def send(self):
+            pass
+
+    class FakeItem:
+        subject = original
+
+        def create_reply(self, subject, body):
+            captured.append(subject)
+            return FakeResponse()
+
+    def fetch(ids, folder=None):
+        yield FakeItem()
+
+    backend._account = SimpleNamespace(fetch=fetch)
+
+    backend.reply_email(ReplyEmailRequest(id="msg-1", body="Reply body"))
+
+    assert captured == [expected]
+
+
+@pytest.mark.parametrize(
+    ("original", "expected"),
+    [
+        ("Hello", "Fwd: Hello"),
+        ("Fwd: Hello", "Fwd: Hello"),
+        ("FW: Hello", "FW: Hello"),
+        ("Пересл: Привет", "Пересл: Привет"),
+        ("Re: Hello", "Fwd: Re: Hello"),
+    ],
+)
+def test_forward_email_does_not_stack_forward_prefixes(settings, original, expected) -> None:
+    backend = EWSExchangeBackend(settings)
+    captured: list[str] = []
+
+    class FakeResponse:
+        def send(self):
+            pass
+
+    class FakeItem:
+        subject = original
+
+        def create_forward(self, subject, body, to_recipients):
+            captured.append(subject)
+            return FakeResponse()
+
+    def fetch(ids, folder=None):
+        yield FakeItem()
+
+    backend._account = SimpleNamespace(fetch=fetch)
+
+    backend.forward_email(ForwardEmailRequest(id="msg-1", to=["user@example.com"]))
+
+    assert captured == [expected]
 
 
 def test_forward_email_saves_draft_attaches_files_then_sends(settings, tmp_path) -> None:

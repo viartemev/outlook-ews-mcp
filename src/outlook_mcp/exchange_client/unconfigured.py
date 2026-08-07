@@ -12,6 +12,8 @@ from ..models import (
     CalendarEvent,
     ContactFull,
     ContactSummary,
+    CategorizeEmailRequest,
+    CategoryUsage,
     CreateEventRequest,
     CreateEventResult,
     CreateContactRequest,
@@ -31,6 +33,8 @@ from ..models import (
     GetContactRequest,
     GetEmailRequest,
     GetEventRequest,
+    GetThreadRequest,
+    ListCategoriesRequest,
     ListEmailsRequest,
     ListEventsRequest,
     ListFoldersRequest,
@@ -44,6 +48,7 @@ from ..models import (
     SendDraftRequest,
     SendEmailRequest,
     SendResult,
+    Thread,
     UpdateContactRequest,
     UpdateEventRequest,
 )
@@ -73,6 +78,9 @@ class UnconfiguredExchangeBackend:
     def send_email(self, request: SendEmailRequest) -> SendResult:
         self._raise()
 
+    def get_thread(self, request: GetThreadRequest) -> Thread:
+        self._raise()
+
     def search_emails(self, request: SearchEmailsRequest) -> list[EmailSummary]:
         self._raise()
 
@@ -92,6 +100,12 @@ class UnconfiguredExchangeBackend:
         self._raise()
 
     def mark_email(self, request: MarkEmailRequest) -> ActionResult:
+        self._raise()
+
+    def categorize_email(self, request: CategorizeEmailRequest) -> ActionResult:
+        self._raise()
+
+    def list_categories(self, request: ListCategoriesRequest) -> list[CategoryUsage]:
         self._raise()
 
     def list_folders(self, request: ListFoldersRequest) -> list[FolderInfo]:

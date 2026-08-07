@@ -7,12 +7,15 @@ from ..config import Settings
 from ..errors import APIError
 from ..exchange_client import ExchangeClient
 from ..models import (
+    CategorizeEmailRequest,
     CreateFolderRequest,
     DeleteEmailRequest,
     DraftEmailRequest,
     FolderActionRequest,
     GetAttachmentRequest,
     GetEmailRequest,
+    GetThreadRequest,
+    ListCategoriesRequest,
     ListEmailsRequest,
     ListFoldersRequest,
     MarkEmailRequest,
@@ -40,6 +43,7 @@ def _validate_attachment_destination(client: ExchangeClient, request: Any) -> No
 
 list_emails = tool_handler("list_emails", ListEmailsRequest)
 get_email = tool_handler("get_email", GetEmailRequest)
+get_thread = tool_handler("get_thread", GetThreadRequest)
 search_emails = tool_handler("search_emails", SearchEmailsRequest)
 send_email = tool_handler("send_email", SendEmailRequest, before=_validate_outgoing_attachments)
 reply_email = tool_handler("reply_email", ReplyEmailRequest, before=_validate_outgoing_attachments)
@@ -50,6 +54,8 @@ move_email = tool_handler("move_email", FolderActionRequest)
 copy_email = tool_handler("copy_email", FolderActionRequest)
 delete_email = tool_handler("delete_email", DeleteEmailRequest)
 mark_email = tool_handler("mark_email", MarkEmailRequest)
+categorize_email = tool_handler("categorize_email", CategorizeEmailRequest)
+list_categories = tool_handler("list_categories", ListCategoriesRequest)
 list_folders = tool_handler("list_folders", ListFoldersRequest)
 create_folder = tool_handler("create_folder", CreateFolderRequest)
 create_draft = tool_handler(

@@ -21,6 +21,7 @@ from .tools.contacts import (
     update_contact,
 )
 from .tools.email import (
+    categorize_email,
     copy_email,
     create_draft,
     create_folder,
@@ -28,6 +29,8 @@ from .tools.email import (
     forward_email,
     get_attachment,
     get_email,
+    get_thread,
+    list_categories,
     list_emails,
     list_folders,
     mark_email,
@@ -71,6 +74,16 @@ TOOL_SPECS: list[ToolSpec] = [
         get_email,
         request_model=models.GetEmailRequest,
         response_model=models.EmailFull,
+        read_only=True,
+    ),
+    ToolSpec(
+        "get_thread",
+        "Get every message of a conversation in chronological order, bodies "
+        "included. Pass the id of any message in the thread, or a conversation_id "
+        "from a listing.",
+        get_thread,
+        request_model=models.GetThreadRequest,
+        response_model=models.Thread,
         read_only=True,
     ),
     ToolSpec(
@@ -130,11 +143,29 @@ TOOL_SPECS: list[ToolSpec] = [
     ),
     ToolSpec(
         "mark_email",
-        "Update email flags",
+        "Update read state, importance, or the follow-up flag "
+        "(optionally with start and due dates)",
         mark_email,
         request_model=models.MarkEmailRequest,
         response_model=models.ActionResult,
         destructive=True,
+    ),
+    ToolSpec(
+        "categorize_email",
+        "Set, add, or remove Outlook categories (the coloured labels) on an email",
+        categorize_email,
+        request_model=models.CategorizeEmailRequest,
+        response_model=models.ActionResult,
+        destructive=True,
+    ),
+    ToolSpec(
+        "list_categories",
+        "List the categories in use, with counts. Collected from the most recent "
+        "messages of the given folders, not from the mailbox master category list.",
+        list_categories,
+        request_model=models.ListCategoriesRequest,
+        response_model=list[models.CategoryUsage],
+        read_only=True,
     ),
     ToolSpec(
         "list_folders",

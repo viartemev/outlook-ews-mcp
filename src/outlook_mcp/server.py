@@ -10,7 +10,7 @@ from pydantic import TypeAdapter
 from .config import Settings, get_settings
 from .errors import APIError, normalize_exception
 from .exchange_client import ExchangeClient, build_default_backend
-from .mcp_tools import register_mcp_tools
+from .mcp_tools import ToolGateway, register_mcp_tools
 from .models import dump_model
 from .tool_specs import TOOL_SPECS
 
@@ -91,7 +91,7 @@ def build_mcp_server(settings: Settings | None = None, client: ExchangeClient | 
     settings = settings or get_settings()
     registry = build_registry(settings=settings, client=client)
     server = FastMCP("outlook-ews-mcp", host=settings.mcp_sse_host, port=settings.mcp_sse_port)
-    register_mcp_tools(server, registry, TOOL_SPECS)
+    register_mcp_tools(server, registry, TOOL_SPECS, ToolGateway(settings))
     return server
 
 

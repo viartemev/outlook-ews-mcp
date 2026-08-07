@@ -143,11 +143,14 @@ class BaseEWSBackend:
         return Version(build=build)
 
     def _normalize_service_endpoint(self, value: str) -> str:
-        endpoint = value.strip()
+        # Strip the trailing slash before the suffix check: a URL copied from a
+        # browser ends in "Exchange.asmx/", which used to miss the check and get
+        # a second "/EWS/Exchange.asmx" appended.
+        endpoint = value.strip().rstrip("/")
         if "://" not in endpoint:
             endpoint = f"https://{endpoint}"
         if not endpoint.lower().endswith("/ews/exchange.asmx"):
-            endpoint = endpoint.rstrip("/") + "/EWS/Exchange.asmx"
+            endpoint = f"{endpoint}/EWS/Exchange.asmx"
         return endpoint
 
     def _configure_protocol(self, protocol: BaseProtocol) -> None:

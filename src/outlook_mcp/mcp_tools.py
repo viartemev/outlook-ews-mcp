@@ -2,15 +2,80 @@ from __future__ import annotations
 
 import inspect
 import json
+import logging
+import time
 from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Annotated, Any
 
+import anyio
+import anyio.to_thread
 from mcp.types import CallToolResult, TextContent
 from pydantic.fields import FieldInfo
 
+from .config import Settings
+
 from .exchange_client import ExchangeClient
 from .models import ExchangeModel
+
+logger = logging.getLogger(__name__)
+
+
+class ToolGateway:
+    """Queues tool calls and keeps the blocking ones off the event loop.
+
+    Two problems, one place to solve them.
+
+    *Blocking.* FastMCP calls a synchronous tool function directly on the event
+    loop thread, while our tool bodies do blocking HTTPS through exchangelib. A
+    synchronous binding therefore freezes the whole server for the length of
+    every Exchange round trip: no messages read, no finished responses written,
+    no pings answered. Running the call in a worker thread keeps the transport
+    alive.
+
+    *Pile-up.* The MCP server dispatches every request concurrently, so a client
+    that fires ten tool calls starts ten of them at once. One shared semaphore
+    turns that into a queue, and anyio hands waiters their turn in arrival order.
+    Callers are never refused: there is no queue limit and no busy error.
+
+    *Workers are never abandoned, and there is no per-call timeout.* Those are
+    the same decision. Cancelling the wait on a worker does not stop it -- the
+    thread keeps running and keeps the EWS session it checked out. exchangelib's
+    session pool has a hard maximum and hands out sessions in a loop with no
+    give-up path, so abandoned workers eventually hold every session and every
+    later call blocks forever: a live process that answers nothing. The wait is
+    therefore non-cancellable, and anyio.fail_after cannot fire across a
+    non-cancellable wait -- rather than keep a timeout that silently never
+    triggers, there is none. A call is bounded by EXCHANGE_TIMEOUT plus
+    EXCHANGE_MAX_RETRY_WAIT_SECONDS, enforced at the socket where a read can
+    genuinely be cut off. Overruns are logged.
+    """
+
+    def __init__(self, settings: Settings) -> None:
+        self.max_workers = settings.mcp_max_concurrency
+        self.expected_call_seconds = settings.exchange_timeout + settings.exchange_max_retry_wait
+        # Safe to build outside a running event loop; anyio binds lazily.
+        self._queue = anyio.Semaphore(self.max_workers)
+        self._threads = anyio.CapacityLimiter(self.max_workers)
+
+    async def run(self, name: str, call: Callable[[], tuple[Any, bool]]) -> tuple[Any, bool]:
+        async with self._queue:
+            started = time.monotonic()
+            try:
+                return await anyio.to_thread.run_sync(
+                    call, abandon_on_cancel=False, limiter=self._threads
+                )
+            finally:
+                elapsed = time.monotonic() - started
+                if elapsed > self.expected_call_seconds:
+                    logger.warning(
+                        "tool=%s ran %.1fs, past the %.0fs Exchange budget; lower "
+                        "EXCHANGE_TIMEOUT/EXCHANGE_MAX_RETRY_WAIT_SECONDS if calls "
+                        "should give up sooner",
+                        name,
+                        elapsed,
+                        self.expected_call_seconds,
+                    )
 
 
 def _field_default(field: FieldInfo) -> Any:
@@ -50,11 +115,21 @@ class ToolSpec:
 def bind_mcp_tool(
     registry_call: Callable[[str, dict[str, Any]], tuple[Any, bool]],
     spec: ToolSpec,
+    gateway: ToolGateway | None = None,
 ) -> Callable[..., Any]:
-    """Build a FastMCP tool function with a schema derived from ``spec``."""
+    """Build a FastMCP tool function with a schema derived from ``spec``.
 
-    def execute(**arguments: Any) -> CallToolResult:
-        payload, is_error = registry_call(spec.name, arguments)
+    The returned function is a coroutine so FastMCP awaits it instead of running
+    the blocking body on the event loop thread.
+    """
+
+    async def execute(**arguments: Any) -> CallToolResult:
+        if gateway is None:
+            payload, is_error = registry_call(spec.name, arguments)
+        else:
+            payload, is_error = await gateway.run(
+                spec.name, lambda: registry_call(spec.name, arguments)
+            )
         structured = payload if isinstance(payload, dict) else {"result": payload}
         return CallToolResult(
             content=[TextContent(type="text", text=json.dumps(payload, ensure_ascii=False))],
@@ -96,12 +171,21 @@ def bind_mcp_tool(
     return execute
 
 
-def register_mcp_tools(server: Any, registry: Any, tool_specs: list[ToolSpec]) -> None:
-    """Register Outlook MCP tools on a FastMCP server instance."""
+def register_mcp_tools(
+    server: Any,
+    registry: Any,
+    tool_specs: list[ToolSpec],
+    gateway: ToolGateway | None = None,
+) -> None:
+    """Register Outlook MCP tools on a FastMCP server instance.
+
+    One gateway for the whole server, not one per tool: a per-tool queue would
+    let N tools run N calls at once.
+    """
     from mcp.types import ToolAnnotations
 
     for spec in tool_specs:
-        tool_fn = bind_mcp_tool(registry.call, spec)
+        tool_fn = bind_mcp_tool(registry.call, spec, gateway)
         annotations = ToolAnnotations(
             readOnlyHint=spec.read_only,
             destructiveHint=spec.destructive,

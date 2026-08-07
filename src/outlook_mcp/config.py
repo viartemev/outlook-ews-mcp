@@ -58,6 +58,9 @@ class Settings(BaseSettings):
     mcp_transport: Literal["stdio", "sse"] = Field(default="stdio", alias="MCP_TRANSPORT")
     mcp_sse_host: str = Field(default="127.0.0.1", alias="MCP_SSE_HOST")
     mcp_sse_port: int = Field(default=8080, alias="MCP_SSE_PORT", ge=1, le=65535)
+    #: How many tool calls execute at once; the rest queue and are never refused.
+    #: There is deliberately no per-call timeout -- see ToolGateway for why.
+    mcp_max_concurrency: int = Field(default=1, alias="MCP_MAX_CONCURRENCY", ge=1, le=8)
 
     log_level: Literal["DEBUG", "INFO", "WARNING", "ERROR"] = Field(
         default="INFO",

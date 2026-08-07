@@ -81,6 +81,9 @@ class EmailSummary(ExchangeModel):
     preview: str = ""
     importance: Literal["low", "normal", "high"] = "normal"
     categories: list[str] = Field(default_factory=list)
+    #: On the summary rather than EmailFull, so a listing can lead straight to
+    #: get_thread without fetching every message first.
+    conversation_id: str | None = None
 
 
 class EmailFull(EmailSummary):
@@ -89,8 +92,18 @@ class EmailFull(EmailSummary):
     body_text: str = ""
     body_html: str | None = None
     attachments: list[Attachment] = Field(default_factory=list)
-    conversation_id: str | None = None
     headers: dict[str, str] = Field(default_factory=dict)
+    truncated: bool = False
+
+
+class Thread(ExchangeModel):
+    #: Absent when the thread had to be rebuilt from its subject line.
+    conversation_id: str | None = None
+    subject: str
+    message_count: int
+    #: Oldest first.
+    messages: list[EmailFull] = Field(default_factory=list)
+    #: More messages exist than ``limit``; the oldest were dropped.
     truncated: bool = False
 
 
@@ -169,6 +182,21 @@ class GetEmailRequest(ExchangeModel):
     id: str
 
 
+class GetThreadRequest(ExchangeModel):
+    id: str | None = None
+    conversation_id: str | None = None
+    #: Sent is included by default: replies written from this mailbox live there,
+    #: and a thread missing our own half of it is not useful.
+    folders: list[str] = Field(default_factory=lambda: ["inbox", "sent"], min_length=1)
+    limit: int = Field(default=20, ge=1, le=100)
+
+    @model_validator(mode="after")
+    def validate_selector(self) -> "GetThreadRequest":
+        if bool(self.id) == bool(self.conversation_id):
+            raise ValueError("exactly one of id or conversation_id must be provided")
+        return self
+
+
 class SendEmailRequest(ExchangeModel):
     to: list[EmailStr] = Field(min_length=1)
     subject: str = Field(min_length=1)
@@ -210,6 +238,47 @@ class MarkEmailRequest(ExchangeModel):
     read: bool | None = None
     flag: Literal["flagged", "complete", "none"] | None = None
     importance: Literal["low", "normal", "high"] | None = None
+    flag_start_date: datetime | None = None
+    flag_due_date: datetime | None = None
+
+    @model_validator(mode="after")
+    def validate_flag_dates(self) -> "MarkEmailRequest":
+        if (
+            self.flag_start_date is not None
+            and self.flag_due_date is not None
+            and self.flag_due_date < self.flag_start_date
+        ):
+            raise ValueError("flag_due_date must not be earlier than flag_start_date")
+        if self.flag == "none" and (
+            self.flag_start_date is not None or self.flag_due_date is not None
+        ):
+            raise ValueError("flag dates cannot be combined with flag='none'")
+        return self
+
+
+class CategorizeEmailRequest(ExchangeModel):
+    id: str
+    categories: list[str] = Field(default_factory=list)
+    #: ``set`` with an empty list clears every category on the message.
+    mode: Literal["set", "add", "remove"] = "set"
+
+    @model_validator(mode="after")
+    def validate_categories(self) -> "CategorizeEmailRequest":
+        if self.mode in {"add", "remove"} and not self.categories:
+            raise ValueError(f"categories must not be empty when mode is '{self.mode}'")
+        if any(not name.strip() for name in self.categories):
+            raise ValueError("category names must not be blank")
+        return self
+
+
+class ListCategoriesRequest(ExchangeModel):
+    folders: list[str] = Field(default_factory=lambda: ["inbox"], min_length=1)
+    limit: int = Field(default=200, ge=1, le=1000)
+
+
+class CategoryUsage(ExchangeModel):
+    name: str
+    count: int
 
 
 class ListFoldersRequest(ExchangeModel):
@@ -424,6 +493,8 @@ class ActionResult(ExchangeModel):
     new_folder: str | None = None
     new_id: str | None = None
     path: str | None = None
+    #: Categories the message carries after the change.
+    categories: list[str] | None = None
 
 
 class AttachmentResult(ExchangeModel):

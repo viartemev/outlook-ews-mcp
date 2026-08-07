@@ -8,6 +8,7 @@ import pytest
 from outlook_mcp.errors import APIError
 from outlook_mcp.exchange_client import EWSExchangeBackend
 from outlook_mcp.models import (
+    CategorizeEmailRequest,
     MarkEmailRequest,
     UpdateContactRequest,
     UpdateEventRequest,
@@ -79,6 +80,150 @@ def test_mark_email_flag_none_clears_status(settings) -> None:
 
     assert item.flag_status is None
     assert item.save_calls[-1]["update_fields"] == ["flag_status"]
+
+
+def test_mark_email_saves_flag_dates_as_extended_properties(settings) -> None:
+    from exchangelib.ewsdatetime import EWSTimeZone
+
+    backend = EWSExchangeBackend(settings)
+    item = FakeSavableItem(id="email-1")
+    backend._account = _account_with_item(item, default_timezone=EWSTimeZone("UTC"))
+
+    request = MarkEmailRequest.model_validate(
+        {
+            "id": "email-1",
+            "flag": "flagged",
+            "flag_start_date": "2026-08-01T09:00:00+00:00",
+            "flag_due_date": "2026-08-10T18:00:00+00:00",
+        }
+    )
+    result = backend.mark_email(request)
+
+    assert item.flag_status == 2
+    assert item.flag_due_date == datetime(2026, 8, 10, 18, 0, tzinfo=UTC)
+    assert item.save_calls[-1]["update_fields"] == [
+        "flag_status",
+        "flag_start_date",
+        "flag_due_date",
+    ]
+    assert result.updated_fields == ["flag", "flag_start_date", "flag_due_date"]
+
+
+def test_mark_email_flags_implicitly_when_given_only_a_due_date(settings) -> None:
+    """Outlook renders nothing for a due date on an unflagged message, so dates
+    on their own have to imply flag='flagged'."""
+    from exchangelib.ewsdatetime import EWSTimeZone
+
+    backend = EWSExchangeBackend(settings)
+    item = FakeSavableItem(id="email-1")
+    backend._account = _account_with_item(item, default_timezone=EWSTimeZone("UTC"))
+
+    request = MarkEmailRequest.model_validate(
+        {"id": "email-1", "flag_due_date": "2026-08-10T18:00:00+00:00"}
+    )
+    backend.mark_email(request)
+
+    assert item.flag_status == 2
+
+
+def test_mark_email_rejects_a_due_date_before_its_start_date() -> None:
+    with pytest.raises(ValueError, match="flag_due_date must not be earlier"):
+        MarkEmailRequest.model_validate(
+            {
+                "id": "email-1",
+                "flag_start_date": "2026-08-10T18:00:00+00:00",
+                "flag_due_date": "2026-08-09T18:00:00+00:00",
+            }
+        )
+
+
+def test_mark_email_rejects_flag_dates_combined_with_flag_none() -> None:
+    with pytest.raises(ValueError, match="cannot be combined with flag='none'"):
+        MarkEmailRequest.model_validate(
+            {"id": "email-1", "flag": "none", "flag_due_date": "2026-08-10T18:00:00+00:00"}
+        )
+
+
+def test_categorize_email_set_replaces_every_category(settings) -> None:
+    backend = EWSExchangeBackend(settings)
+    item = FakeSavableItem(id="email-1", categories=["Old"])
+    backend._account = _account_with_item(item)
+
+    result = backend.categorize_email(
+        CategorizeEmailRequest.model_validate(
+            {"id": "email-1", "categories": ["Red", "Blue"], "mode": "set"}
+        )
+    )
+
+    assert item.categories == ["Red", "Blue"]
+    assert item.save_calls[-1]["update_fields"] == ["categories"]
+    assert result.categories == ["Red", "Blue"]
+
+
+def test_categorize_email_set_empty_clears_the_property(settings) -> None:
+    """Exchange clears the property on None; an empty list leaves it in place."""
+    backend = EWSExchangeBackend(settings)
+    item = FakeSavableItem(id="email-1", categories=["Old"])
+    backend._account = _account_with_item(item)
+
+    result = backend.categorize_email(
+        CategorizeEmailRequest.model_validate({"id": "email-1", "categories": []})
+    )
+
+    assert item.categories is None
+    assert result.categories == []
+
+
+def test_categorize_email_add_is_case_insensitive_but_keeps_the_stored_spelling(
+    settings,
+) -> None:
+    backend = EWSExchangeBackend(settings)
+    item = FakeSavableItem(id="email-1", categories=["Important"])
+    backend._account = _account_with_item(item)
+
+    result = backend.categorize_email(
+        CategorizeEmailRequest.model_validate(
+            {"id": "email-1", "categories": ["important", "Later"], "mode": "add"}
+        )
+    )
+
+    assert item.categories == ["Important", "Later"]
+    assert result.categories == ["Important", "Later"]
+
+
+def test_categorize_email_remove_is_case_insensitive(settings) -> None:
+    backend = EWSExchangeBackend(settings)
+    item = FakeSavableItem(id="email-1", categories=["Important", "Later"])
+    backend._account = _account_with_item(item)
+
+    backend.categorize_email(
+        CategorizeEmailRequest.model_validate(
+            {"id": "email-1", "categories": ["IMPORTANT"], "mode": "remove"}
+        )
+    )
+
+    assert item.categories == ["Later"]
+
+
+def test_categorize_email_does_not_save_an_unchanged_list(settings) -> None:
+    backend = EWSExchangeBackend(settings)
+    item = FakeSavableItem(id="email-1", categories=["Important"])
+    backend._account = _account_with_item(item)
+
+    result = backend.categorize_email(
+        CategorizeEmailRequest.model_validate(
+            {"id": "email-1", "categories": ["Nope"], "mode": "remove"}
+        )
+    )
+
+    assert item.save_calls == []
+    assert result.updated_fields == []
+    assert result.categories == ["Important"]
+
+
+def test_categorize_email_rejects_an_empty_add(settings) -> None:
+    with pytest.raises(ValueError, match="must not be empty when mode is 'add'"):
+        CategorizeEmailRequest.model_validate({"id": "email-1", "categories": [], "mode": "add"})
 
 
 def test_update_event_saves_real_ews_field_names(settings) -> None:
