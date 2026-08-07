@@ -311,6 +311,22 @@ class DraftEmailRequest(ExchangeModel):
     attachments: list[Path] = Field(default_factory=list)
 
 
+class UpdateDraftRequest(ExchangeModel):
+    """A partial update: omitted fields are left unchanged. ``attachments``, when
+    present, replaces the draft's entire attachment set (there is no add/remove
+    mode -- see ``model_fields_set`` usage in ``exchange_client/email.py``'s
+    ``update_draft``)."""
+
+    id: str
+    to: list[EmailStr] | None = None
+    subject: str | None = Field(default=None, min_length=1)
+    body: str | None = None
+    body_type: Literal["text", "html"] = "text"
+    cc: list[EmailStr] | None = None
+    bcc: list[EmailStr] | None = None
+    attachments: list[Path] | None = None
+
+
 class SendDraftRequest(ExchangeModel):
     id: str
 

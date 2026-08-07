@@ -26,6 +26,7 @@ from ..models import (
     SendDraftRequest,
     SendEmailRequest,
     ForwardEmailRequest,
+    UpdateDraftRequest,
 )
 from .common import tool_handler
 
@@ -36,6 +37,13 @@ from .common import tool_handler
 # these hooks are declared against in RequestHook, so it's typed as Any here.
 def _validate_outgoing_attachments(client: ExchangeClient, request: Any) -> None:
     _validate_attachments(request.attachments, client.settings)
+
+
+def _validate_outgoing_attachments_if_set(client: ExchangeClient, request: Any) -> None:
+    # UpdateDraftRequest.attachments is None when the caller didn't touch attachments
+    # at all, vs. a (possibly empty) list when they want to replace the whole set.
+    if request.attachments is not None:
+        _validate_attachments(request.attachments, client.settings)
 
 
 def _validate_attachment_destination(client: ExchangeClient, request: Any) -> None:
@@ -64,6 +72,9 @@ rename_folder = tool_handler("rename_folder", RenameFolderRequest)
 delete_folder = tool_handler("delete_folder", DeleteFolderRequest)
 create_draft = tool_handler(
     "create_draft", DraftEmailRequest, before=_validate_outgoing_attachments
+)
+update_draft = tool_handler(
+    "update_draft", UpdateDraftRequest, before=_validate_outgoing_attachments_if_set
 )
 send_draft = tool_handler("send_draft", SendDraftRequest)
 get_attachment = tool_handler(

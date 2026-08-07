@@ -53,6 +53,7 @@ from ..models import (
     SendEmailRequest,
     SendResult,
     Thread,
+    UpdateDraftRequest,
 )
 from .base import BaseEWSBackend
 
@@ -736,6 +737,43 @@ class EmailOperationsMixin(BaseEWSBackend):
             return ActionResult(id=message.id or "", status="draft")
         except Exception as exc:  # noqa: BLE001
             raise self._map_exception(exc) from exc
+
+    def update_draft(self, request: UpdateDraftRequest) -> ActionResult:
+        item = self._fetch_item(request.id, folder=self.account.drafts, expected_type=Message)
+        updated_fields: list[str] = []
+        save_fields: list[str] = []
+        # A field name in `fields_set` means the caller explicitly included it in the
+        # request (even as an empty list) -- an omitted field is left untouched. Mirrors
+        # the fields_set handling in update_contact/update_event.
+        fields_set = request.model_fields_set
+        field_map = {
+            "to": "to_recipients",
+            "subject": "subject",
+            "body": "body",
+            "cc": "cc_recipients",
+            "bcc": "bcc_recipients",
+        }
+        for request_field, item_field in field_map.items():
+            if request_field not in fields_set:
+                continue
+            value = getattr(request, request_field)
+            if request_field == "body" and value is not None:
+                value = HTMLBody(value) if request.body_type == "html" else value
+            elif request_field in ("to", "cc", "bcc"):
+                value = [self._mailbox(address) for address in value or []]
+            setattr(item, item_field, value)
+            updated_fields.append(request_field)
+            save_fields.append(item_field)
+        try:
+            if "attachments" in fields_set:
+                item.detach(list(item.attachments))
+                self._attach_files(item, request.attachments or [])
+                updated_fields.append("attachments")
+            if save_fields:
+                item.save(update_fields=save_fields)
+            return ActionResult(id=request.id, status="updated", updated_fields=updated_fields)
+        except Exception as exc:  # noqa: BLE001
+            raise self._map_exception(exc, item_id=request.id) from exc
 
     def send_draft(self, request: SendDraftRequest) -> SendResult:
         item = self._fetch_item(request.id, folder=self.account.drafts, expected_type=Message)

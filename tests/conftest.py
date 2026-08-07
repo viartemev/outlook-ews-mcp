@@ -55,6 +55,7 @@ from outlook_mcp.models import (
     SendResult,
     Thread,
     UpdateContactRequest,
+    UpdateDraftRequest,
     UpdateEventRequest,
 )
 
@@ -206,6 +207,14 @@ class FakeExchangeBackend:
 
     def create_draft(self, request: DraftEmailRequest) -> ActionResult:
         return ActionResult(id="draft-1", status="draft")
+
+    def update_draft(self, request: UpdateDraftRequest) -> ActionResult:
+        fields_set = request.model_fields_set
+        updated_fields = [
+            field for field in ["to", "subject", "body", "cc", "bcc", "attachments"]
+            if field in fields_set
+        ]
+        return ActionResult(id=request.id, status="updated", updated_fields=updated_fields)
 
     def send_draft(self, request: SendDraftRequest) -> SendResult:
         return SendResult(id=request.id, status="sent")

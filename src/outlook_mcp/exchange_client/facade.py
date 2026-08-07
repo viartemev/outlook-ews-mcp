@@ -54,6 +54,7 @@ from ..models import (
     SendResult,
     Thread,
     UpdateContactRequest,
+    UpdateDraftRequest,
     UpdateEventRequest,
 )
 from .protocol import ExchangeBackend
@@ -158,6 +159,9 @@ class ExchangeClient:
 
     def create_draft(self, request: DraftEmailRequest) -> ActionResult:
         return self.backend.create_draft(request)
+
+    def update_draft(self, request: UpdateDraftRequest) -> ActionResult:
+        return self.backend.update_draft(request)
 
     def send_draft(self, request: SendDraftRequest) -> SendResult:
         return self.backend.send_draft(request)

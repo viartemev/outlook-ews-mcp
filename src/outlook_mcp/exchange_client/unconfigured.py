@@ -52,6 +52,7 @@ from ..models import (
     SendResult,
     Thread,
     UpdateContactRequest,
+    UpdateDraftRequest,
     UpdateEventRequest,
 )
 
@@ -123,6 +124,9 @@ class UnconfiguredExchangeBackend:
         self._raise()
 
     def create_draft(self, request: DraftEmailRequest) -> ActionResult:
+        self._raise()
+
+    def update_draft(self, request: UpdateDraftRequest) -> ActionResult:
         self._raise()
 
     def send_draft(self, request: SendDraftRequest) -> SendResult:

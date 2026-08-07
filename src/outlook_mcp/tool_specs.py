@@ -41,6 +41,7 @@ from .tools.email import (
     search_emails,
     send_draft,
     send_email,
+    update_draft,
 )
 from .tools.system import get_mailbox_info, ping_exchange
 
@@ -209,6 +210,15 @@ TOOL_SPECS: list[ToolSpec] = [
         create_draft,
         request_model=models.DraftEmailRequest,
         response_model=models.ActionResult,
+    ),
+    ToolSpec(
+        "update_draft",
+        "Update an existing email draft. Omitted fields are left unchanged; "
+        "'attachments', if given, replaces the draft's entire attachment set",
+        update_draft,
+        request_model=models.UpdateDraftRequest,
+        response_model=models.ActionResult,
+        destructive=True,
     ),
     ToolSpec(
         "send_draft",
