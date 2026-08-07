@@ -40,6 +40,7 @@ Secure MCP server for on-prem Microsoft Exchange (EWS) with tools for email, cal
 ### Email
 - `list_emails`
 - `get_email`
+- `get_email_mime`
 - `search_emails`
 - `send_email`
 - `reply_email`

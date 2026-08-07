@@ -14,6 +14,7 @@ from ..models import (
     DraftEmailRequest,
     FolderActionRequest,
     GetAttachmentRequest,
+    GetEmailMimeRequest,
     GetEmailRequest,
     GetThreadRequest,
     ListCategoriesRequest,
@@ -53,6 +54,7 @@ def _validate_attachment_destination(client: ExchangeClient, request: Any) -> No
 
 list_emails = tool_handler("list_emails", ListEmailsRequest)
 get_email = tool_handler("get_email", GetEmailRequest)
+get_email_mime = tool_handler("get_email_mime", GetEmailMimeRequest)
 get_thread = tool_handler("get_thread", GetThreadRequest)
 search_emails = tool_handler("search_emails", SearchEmailsRequest)
 send_email = tool_handler("send_email", SendEmailRequest, before=_validate_outgoing_attachments)

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import base64
 import errno
 import logging
 import os
@@ -35,11 +36,13 @@ from ..models import (
     DeleteFolderRequest,
     DraftEmailRequest,
     EmailFull,
+    EmailMimeResult,
     EmailSummary,
     FolderActionRequest,
     FolderInfo,
     ForwardEmailRequest,
     GetAttachmentRequest,
+    GetEmailMimeRequest,
     GetEmailRequest,
     GetThreadRequest,
     ListCategoriesRequest,
@@ -824,6 +827,26 @@ class EmailOperationsMixin(BaseEWSBackend):
                     content_type=getattr(attachment, "content_type", None),
                 )
         raise NotFoundError(request.attachment_id)
+
+    def get_email_mime(self, request: GetEmailMimeRequest) -> EmailMimeResult:
+        item = self._fetch_item(request.id, expected_type=Message)
+        try:
+            raw = item.mime_content
+        except Exception as exc:  # noqa: BLE001
+            raise self._map_exception(exc, item_id=request.id) from exc
+        if raw is None:
+            raise APIError(
+                "exchange_error", "exchange did not return MIME content for this message"
+            )
+        if isinstance(raw, str):
+            raw = raw.encode("utf-8")
+        filename = self._sanitize_attachment_filename(f"{item.subject or 'message'}.eml")
+        return EmailMimeResult(
+            id=request.id,
+            filename=filename,
+            size=len(raw),
+            mime_base64=base64.b64encode(raw).decode("ascii"),
+        )
 
     def _save_attachment(self, attachment: Any, fd: int, max_size_bytes: int) -> int:
         with os.fdopen(fd, "wb") as dest:

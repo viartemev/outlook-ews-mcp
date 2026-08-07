@@ -30,6 +30,7 @@ from .tools.email import (
     forward_email,
     get_attachment,
     get_email,
+    get_email_mime,
     get_thread,
     list_categories,
     list_emails,
@@ -77,6 +78,14 @@ TOOL_SPECS: list[ToolSpec] = [
         get_email,
         request_model=models.GetEmailRequest,
         response_model=models.EmailFull,
+        read_only=True,
+    ),
+    ToolSpec(
+        "get_email_mime",
+        "Export a message's raw RFC 822 MIME content, base64-encoded",
+        get_email_mime,
+        request_model=models.GetEmailMimeRequest,
+        response_model=models.EmailMimeResult,
         read_only=True,
     ),
     ToolSpec(

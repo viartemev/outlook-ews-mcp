@@ -27,6 +27,7 @@ from outlook_mcp.models import (
     DraftEmailRequest,
     EmailAddress,
     EmailFull,
+    EmailMimeResult,
     EmailSummary,
     FolderActionRequest,
     FolderInfo,
@@ -35,6 +36,7 @@ from outlook_mcp.models import (
     FreeSlot,
     GetAttachmentRequest,
     GetContactRequest,
+    GetEmailMimeRequest,
     GetEmailRequest,
     GetEventRequest,
     GetThreadRequest,
@@ -106,6 +108,14 @@ class FakeExchangeBackend:
             body_text="Body",
             conversation_id="conv-1",
             headers={"X-Test": "1"},
+        )
+
+    def get_email_mime(self, request: GetEmailMimeRequest) -> EmailMimeResult:
+        return EmailMimeResult(
+            id=request.id,
+            filename="message.eml",
+            size=5,
+            mime_base64="aGVsbG8=",
         )
 
     def get_thread(self, request: GetThreadRequest) -> Thread:

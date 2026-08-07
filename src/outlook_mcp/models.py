@@ -343,6 +343,21 @@ class GetAttachmentRequest(ExchangeModel):
     save_path: Path | None = None
 
 
+class GetEmailMimeRequest(ExchangeModel):
+    id: str
+
+
+class EmailMimeResult(ExchangeModel):
+    id: str
+    filename: str
+    content_type: str = "message/rfc822"
+    size: int
+    #: Raw RFC 822 message, base64-encoded (the source can contain arbitrary
+    #: bytes -- inline attachment payloads, non-UTF-8 header encodings -- so
+    #: it isn't safe to hand back as plain text).
+    mime_base64: str
+
+
 class ListEventsRequest(ExchangeModel):
     start: datetime
     end: datetime

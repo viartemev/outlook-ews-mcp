@@ -24,6 +24,7 @@ from ..models import (
     DeleteFolderRequest,
     DraftEmailRequest,
     EmailFull,
+    EmailMimeResult,
     EmailSummary,
     FolderActionRequest,
     FolderInfo,
@@ -32,6 +33,7 @@ from ..models import (
     FreeSlot,
     GetAttachmentRequest,
     GetContactRequest,
+    GetEmailMimeRequest,
     GetEmailRequest,
     GetEventRequest,
     GetThreadRequest,
@@ -133,6 +135,9 @@ class UnconfiguredExchangeBackend:
         self._raise()
 
     def get_attachment(self, request: GetAttachmentRequest) -> AttachmentResult:
+        self._raise()
+
+    def get_email_mime(self, request: GetEmailMimeRequest) -> EmailMimeResult:
         self._raise()
 
     def list_events(self, request: ListEventsRequest) -> list[CalendarEvent]:

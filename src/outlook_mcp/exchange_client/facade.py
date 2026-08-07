@@ -26,6 +26,7 @@ from ..models import (
     DeleteFolderRequest,
     DraftEmailRequest,
     EmailFull,
+    EmailMimeResult,
     EmailSummary,
     FolderActionRequest,
     FolderInfo,
@@ -34,6 +35,7 @@ from ..models import (
     FreeSlot,
     GetAttachmentRequest,
     GetContactRequest,
+    GetEmailMimeRequest,
     GetEmailRequest,
     GetEventRequest,
     GetThreadRequest,
@@ -172,6 +174,9 @@ class ExchangeClient:
         # orphaned file behind (_create_new_file never overwrites, it picks a new
         # suffixed name each attempt).
         return self.backend.get_attachment(request)
+
+    def get_email_mime(self, request: GetEmailMimeRequest) -> EmailMimeResult:
+        return self.backend.get_email_mime(request)
 
     def list_events(self, request: ListEventsRequest) -> list[CalendarEvent]:
         return self._retry_read(lambda: self.backend.list_events(request))

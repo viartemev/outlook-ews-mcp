@@ -22,6 +22,7 @@ from ..models import (
     DeleteFolderRequest,
     DraftEmailRequest,
     EmailFull,
+    EmailMimeResult,
     EmailSummary,
     FolderActionRequest,
     FolderInfo,
@@ -30,6 +31,7 @@ from ..models import (
     FreeSlot,
     GetAttachmentRequest,
     GetContactRequest,
+    GetEmailMimeRequest,
     GetEmailRequest,
     GetEventRequest,
     GetThreadRequest,
@@ -79,6 +81,7 @@ class ExchangeBackend(Protocol):
     def update_draft(self, request: UpdateDraftRequest) -> ActionResult: ...
     def send_draft(self, request: SendDraftRequest) -> SendResult: ...
     def get_attachment(self, request: GetAttachmentRequest) -> AttachmentResult: ...
+    def get_email_mime(self, request: GetEmailMimeRequest) -> EmailMimeResult: ...
     def list_events(self, request: ListEventsRequest) -> list[CalendarEvent]: ...
     def get_event(self, request: GetEventRequest) -> CalendarEvent: ...
     def create_event(self, request: CreateEventRequest) -> CreateEventResult: ...
