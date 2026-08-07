@@ -29,6 +29,10 @@ from ..models import (
     ActionResult,
     Attachment,
     AttachmentResult,
+    BulkCategorizeEmailsRequest,
+    BulkDeleteEmailsRequest,
+    BulkMarkEmailsRequest,
+    BulkMoveEmailsRequest,
     CategorizeEmailRequest,
     CategoryUsage,
     CreateFolderRequest,
@@ -656,6 +660,43 @@ class EmailOperationsMixin(BaseEWSBackend):
             status="updated",
             updated_fields=["categories"],
             categories=updated,
+        )
+
+    def bulk_move_emails(self, request: BulkMoveEmailsRequest) -> list[ActionResult]:
+        return self._bulk(
+            request.ids,
+            lambda item_id: self.move_email(FolderActionRequest(id=item_id, folder=request.folder)),
+        )
+
+    def bulk_delete_emails(self, request: BulkDeleteEmailsRequest) -> list[ActionResult]:
+        return self._bulk(
+            request.ids,
+            lambda item_id: self.delete_email(
+                DeleteEmailRequest(id=item_id, hard_delete=request.hard_delete)
+            ),
+        )
+
+    def bulk_mark_emails(self, request: BulkMarkEmailsRequest) -> list[ActionResult]:
+        return self._bulk(
+            request.ids,
+            lambda item_id: self.mark_email(
+                MarkEmailRequest(
+                    id=item_id,
+                    read=request.read,
+                    flag=request.flag,
+                    importance=request.importance,
+                    flag_start_date=request.flag_start_date,
+                    flag_due_date=request.flag_due_date,
+                )
+            ),
+        )
+
+    def bulk_categorize_emails(self, request: BulkCategorizeEmailsRequest) -> list[ActionResult]:
+        return self._bulk(
+            request.ids,
+            lambda item_id: self.categorize_email(
+                CategorizeEmailRequest(id=item_id, categories=request.categories, mode=request.mode)
+            ),
         )
 
     def list_categories(self, request: ListCategoriesRequest) -> list[CategoryUsage]:

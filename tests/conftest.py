@@ -11,6 +11,10 @@ from outlook_mcp.models import (
     ActionResult,
     AttachmentResult,
     AvailabilityResult,
+    BulkCategorizeEmailsRequest,
+    BulkDeleteEmailsRequest,
+    BulkMarkEmailsRequest,
+    BulkMoveEmailsRequest,
     CalendarInfo,
     CalendarEvent,
     ContactFull,
@@ -186,6 +190,41 @@ class FakeExchangeBackend:
             categories=categories,
         )
 
+    def bulk_move_emails(self, request: BulkMoveEmailsRequest) -> list[ActionResult]:
+        return [
+            self.move_email(FolderActionRequest(id=item_id, folder=request.folder))
+            for item_id in request.ids
+        ]
+
+    def bulk_delete_emails(self, request: BulkDeleteEmailsRequest) -> list[ActionResult]:
+        return [
+            self.delete_email(DeleteEmailRequest(id=item_id, hard_delete=request.hard_delete))
+            for item_id in request.ids
+        ]
+
+    def bulk_mark_emails(self, request: BulkMarkEmailsRequest) -> list[ActionResult]:
+        return [
+            self.mark_email(
+                MarkEmailRequest(
+                    id=item_id,
+                    read=request.read,
+                    flag=request.flag,
+                    importance=request.importance,
+                    flag_start_date=request.flag_start_date,
+                    flag_due_date=request.flag_due_date,
+                )
+            )
+            for item_id in request.ids
+        ]
+
+    def bulk_categorize_emails(self, request: BulkCategorizeEmailsRequest) -> list[ActionResult]:
+        return [
+            self.categorize_email(
+                CategorizeEmailRequest(id=item_id, categories=request.categories, mode=request.mode)
+            )
+            for item_id in request.ids
+        ]
+
     def list_categories(self, request: ListCategoriesRequest) -> list[CategoryUsage]:
         return [
             CategoryUsage(name="Important", count=7),
@@ -221,7 +260,8 @@ class FakeExchangeBackend:
     def update_draft(self, request: UpdateDraftRequest) -> ActionResult:
         fields_set = request.model_fields_set
         updated_fields = [
-            field for field in ["to", "subject", "body", "cc", "bcc", "attachments"]
+            field
+            for field in ["to", "subject", "body", "cc", "bcc", "attachments"]
             if field in fields_set
         ]
         return ActionResult(id=request.id, status="updated", updated_fields=updated_fields)

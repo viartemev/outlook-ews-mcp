@@ -21,6 +21,10 @@ from .tools.contacts import (
     update_contact,
 )
 from .tools.email import (
+    bulk_categorize_emails,
+    bulk_delete_emails,
+    bulk_mark_emails,
+    bulk_move_emails,
     categorize_email,
     copy_email,
     create_draft,
@@ -168,6 +172,44 @@ TOOL_SPECS: list[ToolSpec] = [
         categorize_email,
         request_model=models.CategorizeEmailRequest,
         response_model=models.ActionResult,
+        destructive=True,
+    ),
+    ToolSpec(
+        "bulk_move_emails",
+        "Move multiple emails to another folder in one call. A failure on one id is "
+        "reported in that id's own result instead of aborting the rest",
+        bulk_move_emails,
+        request_model=models.BulkMoveEmailsRequest,
+        response_model=list[models.ActionResult],
+        destructive=True,
+    ),
+    ToolSpec(
+        "bulk_delete_emails",
+        "Delete multiple emails in one call. A failure on one id is reported in "
+        "that id's own result instead of aborting the rest",
+        bulk_delete_emails,
+        request_model=models.BulkDeleteEmailsRequest,
+        response_model=list[models.ActionResult],
+        destructive=True,
+    ),
+    ToolSpec(
+        "bulk_mark_emails",
+        "Update read state, importance, or the follow-up flag on multiple emails in "
+        "one call. A failure on one id is reported in that id's own result instead "
+        "of aborting the rest",
+        bulk_mark_emails,
+        request_model=models.BulkMarkEmailsRequest,
+        response_model=list[models.ActionResult],
+        destructive=True,
+    ),
+    ToolSpec(
+        "bulk_categorize_emails",
+        "Set, add, or remove Outlook categories on multiple emails in one call. A "
+        "failure on one id is reported in that id's own result instead of aborting "
+        "the rest",
+        bulk_categorize_emails,
+        request_model=models.BulkCategorizeEmailsRequest,
+        response_model=list[models.ActionResult],
         destructive=True,
     ),
     ToolSpec(

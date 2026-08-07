@@ -10,6 +10,10 @@ from ..models import (
     ActionResult,
     AttachmentResult,
     AvailabilityResult,
+    BulkCategorizeEmailsRequest,
+    BulkDeleteEmailsRequest,
+    BulkMarkEmailsRequest,
+    BulkMoveEmailsRequest,
     CalendarInfo,
     CalendarEvent,
     ContactFull,
@@ -143,6 +147,18 @@ class ExchangeClient:
 
     def categorize_email(self, request: CategorizeEmailRequest) -> ActionResult:
         return self.backend.categorize_email(request)
+
+    def bulk_move_emails(self, request: BulkMoveEmailsRequest) -> list[ActionResult]:
+        return self.backend.bulk_move_emails(request)
+
+    def bulk_delete_emails(self, request: BulkDeleteEmailsRequest) -> list[ActionResult]:
+        return self.backend.bulk_delete_emails(request)
+
+    def bulk_mark_emails(self, request: BulkMarkEmailsRequest) -> list[ActionResult]:
+        return self.backend.bulk_mark_emails(request)
+
+    def bulk_categorize_emails(self, request: BulkCategorizeEmailsRequest) -> list[ActionResult]:
+        return self.backend.bulk_categorize_emails(request)
 
     def list_categories(self, request: ListCategoriesRequest) -> list[CategoryUsage]:
         return self._retry_read(lambda: self.backend.list_categories(request))

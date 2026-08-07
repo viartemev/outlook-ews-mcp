@@ -8,6 +8,10 @@ from ..models import (
     ActionResult,
     AttachmentResult,
     AvailabilityResult,
+    BulkCategorizeEmailsRequest,
+    BulkDeleteEmailsRequest,
+    BulkMarkEmailsRequest,
+    BulkMoveEmailsRequest,
     CalendarInfo,
     CalendarEvent,
     ContactFull,
@@ -108,6 +112,18 @@ class UnconfiguredExchangeBackend:
         self._raise()
 
     def categorize_email(self, request: CategorizeEmailRequest) -> ActionResult:
+        self._raise()
+
+    def bulk_move_emails(self, request: BulkMoveEmailsRequest) -> list[ActionResult]:
+        self._raise()
+
+    def bulk_delete_emails(self, request: BulkDeleteEmailsRequest) -> list[ActionResult]:
+        self._raise()
+
+    def bulk_mark_emails(self, request: BulkMarkEmailsRequest) -> list[ActionResult]:
+        self._raise()
+
+    def bulk_categorize_emails(self, request: BulkCategorizeEmailsRequest) -> list[ActionResult]:
         self._raise()
 
     def list_categories(self, request: ListCategoriesRequest) -> list[CategoryUsage]:

@@ -132,9 +132,7 @@ def test_update_draft_html_body_wraps_in_html_body() -> None:
     draft = _fake_draft(events)
     backend = _backend_with_draft(draft)
 
-    backend.update_draft(
-        UpdateDraftRequest(id="draft-1", body="<p>Hi</p>", body_type="html")
-    )
+    backend.update_draft(UpdateDraftRequest(id="draft-1", body="<p>Hi</p>", body_type="html"))
 
     assert str(draft.body) == "<p>Hi</p>"
     from exchangelib import HTMLBody

@@ -7,6 +7,10 @@ from ..config import Settings
 from ..errors import APIError
 from ..exchange_client import ExchangeClient
 from ..models import (
+    BulkCategorizeEmailsRequest,
+    BulkDeleteEmailsRequest,
+    BulkMarkEmailsRequest,
+    BulkMoveEmailsRequest,
     CategorizeEmailRequest,
     CreateFolderRequest,
     DeleteEmailRequest,
@@ -67,6 +71,10 @@ copy_email = tool_handler("copy_email", FolderActionRequest)
 delete_email = tool_handler("delete_email", DeleteEmailRequest)
 mark_email = tool_handler("mark_email", MarkEmailRequest)
 categorize_email = tool_handler("categorize_email", CategorizeEmailRequest)
+bulk_move_emails = tool_handler("bulk_move_emails", BulkMoveEmailsRequest)
+bulk_delete_emails = tool_handler("bulk_delete_emails", BulkDeleteEmailsRequest)
+bulk_mark_emails = tool_handler("bulk_mark_emails", BulkMarkEmailsRequest)
+bulk_categorize_emails = tool_handler("bulk_categorize_emails", BulkCategorizeEmailsRequest)
 list_categories = tool_handler("list_categories", ListCategoriesRequest)
 list_folders = tool_handler("list_folders", ListFoldersRequest)
 create_folder = tool_handler("create_folder", CreateFolderRequest)

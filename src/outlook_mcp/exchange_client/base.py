@@ -3,7 +3,7 @@ from __future__ import annotations
 import logging
 import re
 import threading
-from collections.abc import Iterable
+from collections.abc import Callable, Iterable
 from contextvars import ContextVar
 from datetime import UTC, datetime
 from typing import Any, Literal
@@ -58,7 +58,7 @@ from ..errors import (
     PermissionDeniedError,
     TimeoutAPIError,
 )
-from ..models import EmailAddress, MailboxInfo, PingResult
+from ..models import ActionResult, EmailAddress, MailboxInfo, PingResult
 
 logger = logging.getLogger(__name__)
 _TIMEZONE_FALLBACK_PATCHED = False
@@ -482,6 +482,24 @@ class BaseEWSBackend:
             return ExchangeUnavailableError("exchange is unavailable")
         logger.warning("Unmapped Exchange exception: %s", type(exc).__name__)
         return ExchangeUnavailableError("exchange is unavailable")
+
+    def _bulk(
+        self, ids: Iterable[str], action: Callable[[str], ActionResult]
+    ) -> list[ActionResult]:
+        """Run a single-item action over every id, capturing per-item failures.
+
+        Exchange has no transactional multi-item guarantee for these operations, so a
+        failure on one id (not found, permission denied, ...) is reported back as that
+        id's own ActionResult instead of aborting ids that would otherwise have
+        succeeded.
+        """
+        results: list[ActionResult] = []
+        for item_id in ids:
+            try:
+                results.append(action(item_id))
+            except APIError as exc:
+                results.append(ActionResult(id=item_id, status="error", warning=exc.message))
+        return results
 
     def ping(self) -> PingResult:
         started = datetime.now(UTC)

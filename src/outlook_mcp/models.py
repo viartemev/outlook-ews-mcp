@@ -271,6 +271,53 @@ class CategorizeEmailRequest(ExchangeModel):
         return self
 
 
+class BulkMoveEmailsRequest(ExchangeModel):
+    ids: list[str] = Field(min_length=1, max_length=50)
+    folder: str = Field(min_length=1)
+
+
+class BulkDeleteEmailsRequest(ExchangeModel):
+    ids: list[str] = Field(min_length=1, max_length=50)
+    hard_delete: bool = False
+
+
+class BulkMarkEmailsRequest(ExchangeModel):
+    ids: list[str] = Field(min_length=1, max_length=50)
+    read: bool | None = None
+    flag: Literal["flagged", "complete", "none"] | None = None
+    importance: Literal["low", "normal", "high"] | None = None
+    flag_start_date: datetime | None = None
+    flag_due_date: datetime | None = None
+
+    @model_validator(mode="after")
+    def validate_flag_dates(self) -> "BulkMarkEmailsRequest":
+        if (
+            self.flag_start_date is not None
+            and self.flag_due_date is not None
+            and self.flag_due_date < self.flag_start_date
+        ):
+            raise ValueError("flag_due_date must not be earlier than flag_start_date")
+        if self.flag == "none" and (
+            self.flag_start_date is not None or self.flag_due_date is not None
+        ):
+            raise ValueError("flag dates cannot be combined with flag='none'")
+        return self
+
+
+class BulkCategorizeEmailsRequest(ExchangeModel):
+    ids: list[str] = Field(min_length=1, max_length=50)
+    categories: list[str] = Field(default_factory=list)
+    mode: Literal["set", "add", "remove"] = "set"
+
+    @model_validator(mode="after")
+    def validate_categories(self) -> "BulkCategorizeEmailsRequest":
+        if self.mode in {"add", "remove"} and not self.categories:
+            raise ValueError(f"categories must not be empty when mode is '{self.mode}'")
+        if any(not name.strip() for name in self.categories):
+            raise ValueError("category names must not be blank")
+        return self
+
+
 class ListCategoriesRequest(ExchangeModel):
     folders: list[str] = Field(default_factory=lambda: ["inbox"], min_length=1)
     limit: int = Field(default=200, ge=1, le=1000)
