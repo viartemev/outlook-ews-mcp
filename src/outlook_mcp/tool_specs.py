@@ -347,7 +347,9 @@ TOOL_SPECS: list[ToolSpec] = [
     ),
     ToolSpec(
         "list_events",
-        "List calendar events in a time range",
+        "List calendar events in a time range. Set mailbox to view a colleague's "
+        "default calendar instead of your own (requires delegate/impersonation "
+        "access already granted on the server; not combinable with calendar_id)",
         list_events,
         request_model=models.ListEventsRequest,
         response_model=list[models.CalendarEvent],
@@ -355,7 +357,8 @@ TOOL_SPECS: list[ToolSpec] = [
     ),
     ToolSpec(
         "get_event",
-        "Get a calendar event by ID",
+        "Get a calendar event by ID. Set mailbox to read from a colleague's "
+        "default calendar instead of your own",
         get_event,
         request_model=models.GetEventRequest,
         response_model=models.CalendarEvent,
@@ -421,7 +424,7 @@ TOOL_SPECS: list[ToolSpec] = [
     ),
     ToolSpec(
         "get_my_availability",
-        "Get free and busy slots",
+        "Get free and busy slots. Set mailbox to check a colleague's calendar instead of your own",
         get_my_availability,
         request_model=models.ListEventsRequest,
         response_model=models.AvailabilityResult,

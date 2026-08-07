@@ -42,6 +42,7 @@ Secure MCP server for on-prem Microsoft Exchange (EWS) with tools for email, cal
 - `list_emails`
 - `get_email`
 - `get_email_mime`
+- `get_thread`
 - `search_emails`
 - `send_email`
 - `reply_email`
@@ -50,6 +51,8 @@ Secure MCP server for on-prem Microsoft Exchange (EWS) with tools for email, cal
 - `copy_email`
 - `delete_email`
 - `mark_email`
+- `categorize_email`
+- `list_categories`
 - `bulk_move_emails`
 - `bulk_delete_emails`
 - `bulk_mark_emails`
