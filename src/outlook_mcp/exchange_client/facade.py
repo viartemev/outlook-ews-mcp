@@ -1,6 +1,11 @@
 from __future__ import annotations
 
+import time
+from collections.abc import Callable
+from typing import TypeVar
+
 from ..config import Settings
+from ..errors import APIError
 from ..models import (
     ActionResult,
     AttachmentResult,
@@ -54,29 +59,63 @@ from ..models import (
 from .protocol import ExchangeBackend
 from .unconfigured import UnconfiguredExchangeBackend
 
+T = TypeVar("T")
+
 
 class ExchangeClient:
+    #: Starting backoff between retried reads, in seconds; doubles each attempt,
+    #: capped by whatever remains of the EXCHANGE_MAX_RETRY_WAIT_SECONDS deadline.
+    _RETRY_BASE_SECONDS = 2.0
+
     def __init__(self, settings: Settings, backend: ExchangeBackend | None = None) -> None:
         self.settings = settings
         self.backend = backend or UnconfiguredExchangeBackend(settings)
 
+    def _retry_read(self, call: Callable[[], T]) -> T:
+        """Retry a read-only backend call while Exchange reports itself busy.
+
+        The account's retry_policy is FailFast (exchange_client/base.py), so every EWS
+        service call raises on its first transient error instead of exchangelib
+        retrying it internally with no cumulative time limit. This loop is what
+        decides whether to try again, bounded by a wall-clock deadline built from
+        EXCHANGE_MAX_RETRY_WAIT_SECONDS -- not by exchangelib's own max_wait, which
+        only capped a single backoff step, not total retry time.
+
+        Only read-only calls go through this. Writes never do: retrying a
+        send/create/delete after an ambiguous failure risks repeating a side effect
+        that already happened on the server before the error came back.
+        """
+        deadline = time.monotonic() + self.settings.exchange_max_retry_wait
+        wait = self._RETRY_BASE_SECONDS
+        while True:
+            try:
+                return call()
+            except APIError as exc:
+                if not exc.retryable:
+                    raise
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    raise
+                time.sleep(min(wait, remaining))
+                wait *= 2
+
     def ping(self) -> PingResult:
-        return self.backend.ping()
+        return self._retry_read(self.backend.ping)
 
     def get_mailbox_info(self) -> MailboxInfo:
-        return self.backend.get_mailbox_info()
+        return self._retry_read(self.backend.get_mailbox_info)
 
     def list_emails(self, request: ListEmailsRequest) -> list[EmailSummary]:
-        return self.backend.list_emails(request)
+        return self._retry_read(lambda: self.backend.list_emails(request))
 
     def get_email(self, request: GetEmailRequest) -> EmailFull:
-        return self.backend.get_email(request)
+        return self._retry_read(lambda: self.backend.get_email(request))
 
     def get_thread(self, request: GetThreadRequest) -> Thread:
-        return self.backend.get_thread(request)
+        return self._retry_read(lambda: self.backend.get_thread(request))
 
     def search_emails(self, request: SearchEmailsRequest) -> list[EmailSummary]:
-        return self.backend.search_emails(request)
+        return self._retry_read(lambda: self.backend.search_emails(request))
 
     def send_email(self, request: SendEmailRequest) -> SendResult:
         return self.backend.send_email(request)
@@ -103,10 +142,10 @@ class ExchangeClient:
         return self.backend.categorize_email(request)
 
     def list_categories(self, request: ListCategoriesRequest) -> list[CategoryUsage]:
-        return self.backend.list_categories(request)
+        return self._retry_read(lambda: self.backend.list_categories(request))
 
     def list_folders(self, request: ListFoldersRequest) -> list[FolderInfo]:
-        return self.backend.list_folders(request)
+        return self._retry_read(lambda: self.backend.list_folders(request))
 
     def create_folder(self, request: CreateFolderRequest) -> ActionResult:
         return self.backend.create_folder(request)
@@ -124,13 +163,17 @@ class ExchangeClient:
         return self.backend.send_draft(request)
 
     def get_attachment(self, request: GetAttachmentRequest) -> AttachmentResult:
+        # Not retried despite being read-only: it writes the downloaded content to
+        # local disk, so a retried call after a partial download risks leaving an
+        # orphaned file behind (_create_new_file never overwrites, it picks a new
+        # suffixed name each attempt).
         return self.backend.get_attachment(request)
 
     def list_events(self, request: ListEventsRequest) -> list[CalendarEvent]:
-        return self.backend.list_events(request)
+        return self._retry_read(lambda: self.backend.list_events(request))
 
     def get_event(self, request: GetEventRequest) -> CalendarEvent:
-        return self.backend.get_event(request)
+        return self._retry_read(lambda: self.backend.get_event(request))
 
     def create_event(self, request: CreateEventRequest) -> CreateEventResult:
         return self.backend.create_event(request)
@@ -145,19 +188,19 @@ class ExchangeClient:
         return self.backend.respond_to_invite(request)
 
     def find_free_slots(self, request: FindFreeSlotsRequest) -> list[FreeSlot]:
-        return self.backend.find_free_slots(request)
+        return self._retry_read(lambda: self.backend.find_free_slots(request))
 
     def get_my_availability(self, request: ListEventsRequest) -> AvailabilityResult:
-        return self.backend.get_my_availability(request)
+        return self._retry_read(lambda: self.backend.get_my_availability(request))
 
     def list_calendars(self) -> list[CalendarInfo]:
-        return self.backend.list_calendars()
+        return self._retry_read(self.backend.list_calendars)
 
     def search_contacts(self, request: SearchContactsRequest) -> list[ContactSummary]:
-        return self.backend.search_contacts(request)
+        return self._retry_read(lambda: self.backend.search_contacts(request))
 
     def get_contact(self, request: GetContactRequest) -> ContactFull:
-        return self.backend.get_contact(request)
+        return self._retry_read(lambda: self.backend.get_contact(request))
 
     def create_contact(self, request: CreateContactRequest) -> ActionResult:
         return self.backend.create_contact(request)

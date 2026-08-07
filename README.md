@@ -141,12 +141,14 @@ MCP_TRANSPORT=stdio
 MCP_SSE_HOST=127.0.0.1
 MCP_SSE_PORT=8080
 MCP_MAX_CONCURRENCY=1
+MCP_MAX_QUEUE_SIZE=20
 LOG_LEVEL=INFO
 LOG_FILE=
 ```
 
 Notes:
-- `MCP_MAX_CONCURRENCY` is how many tool calls execute at once; the rest queue and are never refused. See [Request queue](#request-queue).
+- `MCP_MAX_CONCURRENCY` is how many tool calls execute at once; more calls than this queue to wait their turn, up to `MCP_MAX_QUEUE_SIZE`. See [Request queue](#request-queue).
+- `MCP_MAX_QUEUE_SIZE` caps how many tool calls can be admitted at once (running + waiting); once full, further calls are rejected immediately with a `server_busy` error
 - set `EXCHANGE_EMAIL_ADDRESS` when `EXCHANGE_USERNAME` is not an SMTP address
 - `EXCHANGE_ALLOW_INSECURE_BASIC_AUTH` only matters with `EXCHANGE_AUTH_TYPE=Basic` and an `http://` `EXCHANGE_SERVER`; startup fails otherwise unless it's set `true`
 - `EXCHANGE_IMPERSONATE_AS` enables mailbox impersonation when Exchange permissions are configured accordingly
@@ -154,7 +156,7 @@ Notes:
 - `EXCHANGE_ATTACHMENT_MAX_SIZE_MB` is enforced both on local files attached to outgoing email and on attachments downloaded via `get_attachment`
 - `EXCHANGE_ATTACHMENT_MAX_COUNT` and `EXCHANGE_ATTACHMENT_MAX_TOTAL_SIZE_MB` cap the number and combined size of attachments on a single `send_email`/`reply_email`/`forward_email`/`create_draft` call
 - `EXCHANGE_ATTACHMENT_ROOT` is unset by default, which **refuses** rather than allows local file access: any non-empty `attachments` list (send/reply/forward/create_draft) or explicit `get_attachment` `save_path` is rejected until it's set to an absolute directory, which then confines those paths to that directory tree. `get_attachment` with no `save_path` still works unset, falling back to the system temp directory
-- `EXCHANGE_MAX_RETRY_WAIT_SECONDS` is a total backoff time budget (exchangelib retries transient errors with exponential backoff until this many seconds have elapsed), not a retry count; set to `0` to disable retries and fail fast on the first error
+- `EXCHANGE_MAX_RETRY_WAIT_SECONDS` is a total wall-clock budget for retrying **read-only** calls when Exchange reports itself busy, not a retry count; set to `0` to disable retries and fail fast on the first error. Writes (`send_email`, `create_event`, `delete_contact`, ...) are never auto-retried, since an ambiguous failure could mean the operation already happened on the server before the error came back. See [Request queue](#request-queue).
 - `EXCHANGE_EMAIL_BODY_MAX_CHARS` caps `get_email`'s `body_text`/`body_html`; a message beyond the cap is truncated and `truncated: true` is set on the response instead of returning an unbounded MCP payload
 - send operations return `id: null` when EWS does not provide a durable ID for the sent copy (notably replies, forwards, and sent drafts)
 - attachment metadata includes `downloadable`; embedded Exchange item attachments have `downloadable: false` and cannot be saved by `get_attachment`
@@ -164,10 +166,12 @@ Notes:
 Clients issue several tool calls in parallel. Exchange work is blocking, so the
 server runs it in worker threads and admits calls through one shared FIFO queue.
 
-- **Nothing is refused.** There is no queue limit and no "server busy" error:
-  callers wait their turn and are served in the order they arrived.
 - **`MCP_MAX_CONCURRENCY`** (default `1`) sets how many run at once. One mailbox,
   one conversation with Exchange, predictable load -- raise it deliberately.
+  Callers beyond that wait their turn, served in the order they arrived.
+- **`MCP_MAX_QUEUE_SIZE`** (default `20`) caps how many calls can be admitted at
+  once, running or waiting. Once that many are already in, further calls get an
+  immediate `server_busy` error instead of joining an unbounded queue.
 - **The transport stays responsive while work is in flight.** Tools are awaited
   rather than run on the event loop thread, so finished responses go out
   immediately and pings are answered while a long call is still running.
@@ -177,8 +181,11 @@ server runs it in worker threads and admits calls through one shared FIFO queue.
   session pool has a hard maximum and hands out sessions in a loop with no
   give-up path, so leaked sessions eventually starve it and every later call
   blocks forever. A slow call is waited out instead, bounded by
-  `EXCHANGE_TIMEOUT` plus `EXCHANGE_MAX_RETRY_WAIT_SECONDS` at the socket, where
-  a read can genuinely be cut off. Overruns are logged.
+  `EXCHANGE_TIMEOUT` plus `EXCHANGE_MAX_RETRY_WAIT_SECONDS`: the account's retry
+  policy is fail-fast, so every EWS call raises on its first transient error
+  rather than exchangelib retrying it forever internally, and `ExchangeClient`
+  retries only read-only calls itself, bounded by that wall-clock budget. Writes
+  are never auto-retried. Overruns past the expected budget are logged.
 
 ## Claude Desktop example
 

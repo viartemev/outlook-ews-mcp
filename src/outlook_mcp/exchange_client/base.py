@@ -25,11 +25,15 @@ from exchangelib import (
 from exchangelib.ewsdatetime import EWSDateTime
 from exchangelib.errors import (
     ErrorAccessDenied,
+    ErrorExceededConnectionCount,
     ErrorFolderSavePropertyError,
+    ErrorInternalServerTransientError,
     ErrorIrresolvableConflict,
     ErrorItemNotFound,
     ErrorItemSavePropertyError,
+    ErrorServerBusy,
     ErrorTimeoutExpired,
+    ErrorTooManyObjectsOpened,
     RateLimitError,
     ResponseMessageError,
     TransportError,
@@ -39,7 +43,7 @@ from exchangelib.errors import (
 from exchangelib.folders import FolderCollection
 from exchangelib.items import Item
 from exchangelib.properties import ItemId
-from exchangelib.protocol import BaseProtocol, FailFast, FaultTolerance
+from exchangelib.protocol import BaseProtocol, FailFast
 from exchangelib.version import Build, Version
 
 from ..auth import build_auth_context
@@ -87,11 +91,14 @@ class BaseEWSBackend:
     def _build_account(self) -> Account:
         auth = build_auth_context(self.settings)
         self._configure_timezone_fallback()
-        retry_policy = (
-            FailFast()
-            if self.settings.exchange_max_retry_wait == 0
-            else FaultTolerance(max_wait=self.settings.exchange_max_retry_wait)
-        )
+        # Always FailFast: exchangelib's own FaultTolerance retries a request until a
+        # single backoff step exceeds max_wait, not until total elapsed time does, so
+        # a server that keeps answering "busy, retry in N seconds" (N under max_wait)
+        # never stops retrying -- max_wait bounds one step, not the operation. Bounded,
+        # cumulative retrying lives in ExchangeClient._retry_read instead, and only
+        # wraps read-only calls (see exchange_client/facade.py); _map_exception below
+        # marks which raw exceptions are safe for that loop to retry on.
+        retry_policy = FailFast()
         credentials = Credentials(username=auth.username, password=auth.password)
         auth_type = BASIC if auth.auth_type == "Basic" else NTLM
         service_endpoint = self._normalize_service_endpoint(self.settings.exchange_server)
@@ -399,14 +406,36 @@ class BaseEWSBackend:
         if isinstance(exc, ErrorAccessDenied):
             return PermissionDeniedError()
         if isinstance(exc, RateLimitError):
-            return ExchangeUnavailableError("exchange throttling or rate limit encountered")
+            rate_limit_error = ExchangeUnavailableError(
+                "exchange throttling or rate limit encountered"
+            )
+            rate_limit_error.retryable = True
+            return rate_limit_error
         if isinstance(exc, ErrorIrresolvableConflict):
             # The only one of this group that's an actual optimistic-concurrency
             # conflict (item was modified since it was last synced).
             logger.warning("Exchange conflict")
             return ConflictError()
         if isinstance(exc, ErrorTimeoutExpired):
-            return TimeoutAPIError(self.settings.exchange_timeout)
+            timeout_error = TimeoutAPIError(self.settings.exchange_timeout)
+            timeout_error.retryable = True
+            return timeout_error
+        if isinstance(
+            exc,
+            (
+                ErrorServerBusy,
+                ErrorInternalServerTransientError,
+                ErrorTooManyObjectsOpened,
+                ErrorExceededConnectionCount,
+            ),
+        ):
+            # FailFast means these surface on the first occurrence instead of being
+            # retried internally by exchangelib -- safe for ExchangeClient to retry
+            # itself on read-only calls, bounded by a deadline (see facade.py).
+            logger.warning("Exchange reported itself busy: %s", type(exc).__name__)
+            busy_error = ExchangeUnavailableError("exchange reported itself busy; try again")
+            busy_error.retryable = True
+            return busy_error
         if isinstance(exc, ErrorItemNotFound):
             if item_id:
                 return NotFoundError(item_id)

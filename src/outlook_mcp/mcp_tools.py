@@ -14,6 +14,7 @@ from mcp.types import CallToolResult, TextContent
 from pydantic.fields import FieldInfo
 
 from .config import Settings
+from .errors import APIError
 
 from .exchange_client import ExchangeClient
 from .models import ExchangeModel
@@ -24,7 +25,7 @@ logger = logging.getLogger(__name__)
 class ToolGateway:
     """Queues tool calls and keeps the blocking ones off the event loop.
 
-    Two problems, one place to solve them.
+    Three problems, one place to solve them.
 
     *Blocking.* FastMCP calls a synchronous tool function directly on the event
     loop thread, while our tool bodies do blocking HTTPS through exchangelib. A
@@ -36,7 +37,9 @@ class ToolGateway:
     *Pile-up.* The MCP server dispatches every request concurrently, so a client
     that fires ten tool calls starts ten of them at once. One shared semaphore
     turns that into a queue, and anyio hands waiters their turn in arrival order.
-    Callers are never refused: there is no queue limit and no busy error.
+    MCP_MAX_QUEUE_SIZE bounds how many calls can be admitted at once (running plus
+    waiting); once that many are already in, further calls are rejected
+    immediately with a structured server_busy error instead of queuing forever.
 
     *Workers are never abandoned, and there is no per-call timeout.* Those are
     the same decision. Cancelling the wait on a worker does not stop it -- the
@@ -46,36 +49,63 @@ class ToolGateway:
     later call blocks forever: a live process that answers nothing. The wait is
     therefore non-cancellable, and anyio.fail_after cannot fire across a
     non-cancellable wait -- rather than keep a timeout that silently never
-    triggers, there is none. A call is bounded by EXCHANGE_TIMEOUT plus
-    EXCHANGE_MAX_RETRY_WAIT_SECONDS, enforced at the socket where a read can
-    genuinely be cut off. Overruns are logged.
+    triggers, there is none.
+
+    A call is instead bounded by EXCHANGE_TIMEOUT plus EXCHANGE_MAX_RETRY_WAIT_
+    SECONDS. The account's retry_policy is FailFast (exchange_client/base.py), so
+    every EWS service call raises on its first transient error instead of
+    exchangelib retrying it internally with no cumulative time limit; ExchangeClient
+    then retries read-only calls itself, bounded by a monotonic deadline built from
+    EXCHANGE_MAX_RETRY_WAIT_SECONDS (see ExchangeClient._retry_read). Non-idempotent
+    calls -- send, create, delete, and the like -- are never retried: an ambiguous
+    failure could mean the operation already happened on the server. Overruns past
+    the expected budget are logged.
     """
 
     def __init__(self, settings: Settings) -> None:
         self.max_workers = settings.mcp_max_concurrency
+        self.max_queue_size = settings.mcp_max_queue_size
         self.expected_call_seconds = settings.exchange_timeout + settings.exchange_max_retry_wait
         # Safe to build outside a running event loop; anyio binds lazily.
         self._queue = anyio.Semaphore(self.max_workers)
         self._threads = anyio.CapacityLimiter(self.max_workers)
+        self._admitted = 0
 
     async def run(self, name: str, call: Callable[[], tuple[Any, bool]]) -> tuple[Any, bool]:
-        async with self._queue:
-            started = time.monotonic()
-            try:
-                return await anyio.to_thread.run_sync(
-                    call, abandon_on_cancel=False, limiter=self._threads
-                )
-            finally:
-                elapsed = time.monotonic() - started
-                if elapsed > self.expected_call_seconds:
-                    logger.warning(
-                        "tool=%s ran %.1fs, past the %.0fs Exchange budget; lower "
-                        "EXCHANGE_TIMEOUT/EXCHANGE_MAX_RETRY_WAIT_SECONDS if calls "
-                        "should give up sooner",
-                        name,
-                        elapsed,
-                        self.expected_call_seconds,
+        if self._admitted >= self.max_queue_size:
+            logger.warning(
+                "tool=%s rejected: %s calls already queued (MCP_MAX_QUEUE_SIZE=%s)",
+                name,
+                self._admitted,
+                self.max_queue_size,
+            )
+            error = APIError(
+                "server_busy",
+                "too many tool calls are already queued; try again shortly",
+                extra={"queued": self._admitted, "max_queue_size": self.max_queue_size},
+            )
+            return error.to_dict(), True
+        self._admitted += 1
+        try:
+            async with self._queue:
+                started = time.monotonic()
+                try:
+                    return await anyio.to_thread.run_sync(
+                        call, abandon_on_cancel=False, limiter=self._threads
                     )
+                finally:
+                    elapsed = time.monotonic() - started
+                    if elapsed > self.expected_call_seconds:
+                        logger.warning(
+                            "tool=%s ran %.1fs, past the %.0fs Exchange budget; lower "
+                            "EXCHANGE_TIMEOUT/EXCHANGE_MAX_RETRY_WAIT_SECONDS if calls "
+                            "should give up sooner",
+                            name,
+                            elapsed,
+                            self.expected_call_seconds,
+                        )
+        finally:
+            self._admitted -= 1
 
 
 def _field_default(field: FieldInfo) -> Any:

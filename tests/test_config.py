@@ -66,6 +66,18 @@ def test_oauth2_is_rejected_until_implemented():
         Settings(**_kwargs(EXCHANGE_AUTH_TYPE="OAuth2"))
 
 
+def test_mcp_max_queue_size_uses_mcp_prefixed_alias():
+    settings = Settings(**_kwargs(MCP_MAX_QUEUE_SIZE=5))
+
+    assert settings.mcp_max_queue_size == 5
+
+
+def test_mcp_max_queue_size_default():
+    settings = Settings(**_kwargs())
+
+    assert settings.mcp_max_queue_size == 20
+
+
 def test_attachment_limits_use_exchange_prefixed_aliases():
     settings = Settings(
         **_kwargs(

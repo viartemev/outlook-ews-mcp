@@ -185,6 +185,40 @@ def test_the_call_budget_comes_from_the_exchange_settings() -> None:
     assert gateway.expected_call_seconds == 60
 
 
+def test_calls_past_the_queue_cap_are_rejected_with_server_busy() -> None:
+    """MCP_MAX_QUEUE_SIZE bounds admitted calls (running + waiting); once full,
+    further calls must fail fast with a structured error instead of piling up
+    behind an unbounded queue."""
+    registry = SlowRegistry(delay=0.05)
+    gateway = ToolGateway(_settings(MCP_MAX_CONCURRENCY=1, MCP_MAX_QUEUE_SIZE=2))
+    tool_fn = _tool(registry, gateway)
+
+    async def run_all() -> list:
+        results = [None] * 5
+
+        async def run_and_store(index: int) -> None:
+            results[index] = await tool_fn(id=f"email-{index}")
+
+        async with anyio.create_task_group() as tg:
+            for index in range(5):
+                tg.start_soon(run_and_store, index)
+                await anyio.sleep(0)  # admit in submission order
+        return results
+
+    results = anyio.run(run_all)
+
+    rejected = [r for r in results if r.isError and r.structuredContent["error"] == "server_busy"]
+    accepted = [r for r in results if not r.isError]
+    assert len(rejected) == 3
+    assert len(accepted) == 2
+
+
+def test_the_queue_cap_setting_has_a_default() -> None:
+    gateway = ToolGateway(_settings())
+
+    assert gateway.max_queue_size == 20
+
+
 def test_every_registered_tool_is_awaitable(client, settings) -> None:
     """A tool registered as a plain function runs on the event loop thread and
     freezes the server for the length of the call."""
