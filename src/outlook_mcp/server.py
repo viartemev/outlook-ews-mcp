@@ -27,11 +27,23 @@ def configure_logging(settings: Settings) -> None:
         handlers = [logging.FileHandler(settings.log_file)]
     else:
         handlers = [logging.StreamHandler(sys.stderr)]
+    # LOG_LEVEL only applies to our own loggers. The root level stays at the
+    # logging-module default (WARNING) so third-party libraries -- notably
+    # exchangelib -- don't get promoted to DEBUG just because an operator
+    # wants verbose outlook_mcp logs.
     logging.basicConfig(
-        level=getattr(logging, settings.log_level),
         format="%(asctime)s %(levelname)s %(name)s %(message)s",
         handlers=handlers,
     )
+    logging.getLogger("outlook_mcp").setLevel(getattr(logging, settings.log_level))
+    # exchangelib.util logs full SOAP request/response XML -- message bodies,
+    # recipients, base64 attachment contents -- at DEBUG, and also embeds that
+    # same XML in a log.error() call whenever an unexpected transport exception
+    # is raised. That error call fires regardless of the configured level, so
+    # these loggers are always pinned to CRITICAL rather than left to inherit
+    # whatever level the operator picks for LOG_LEVEL.
+    logging.getLogger("exchangelib.util").setLevel(logging.CRITICAL)
+    logging.getLogger("exchangelib.util.xml").setLevel(logging.CRITICAL)
 
 
 class ToolRegistry:
