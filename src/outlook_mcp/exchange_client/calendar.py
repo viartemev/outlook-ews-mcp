@@ -18,6 +18,8 @@ from ..models import (
     ActionResult,
     Attendee as ApiAttendee,
     AvailabilityResult,
+    BulkDeleteEventsRequest,
+    BulkRespondToInvitesRequest,
     CalendarEvent,
     CalendarInfo,
     CreateEventRequest,
@@ -524,3 +526,29 @@ class CalendarOperationsMixin(BaseEWSBackend):
         except Exception as exc:  # noqa: BLE001
             raise self._map_exception(exc) from exc
         return [RoomInfo(name=room.name, email=room.email_address) for room in rooms]
+
+    def bulk_delete_events(self, request: BulkDeleteEventsRequest) -> list[ActionResult]:
+        return self._bulk(
+            request.ids,
+            lambda item_id: self.delete_event(
+                DeleteEventRequest(
+                    id=item_id,
+                    calendar_id=request.calendar_id,
+                    notify_attendees=request.notify_attendees,
+                    cancel_message=request.cancel_message,
+                )
+            ),
+        )
+
+    def bulk_respond_to_invites(self, request: BulkRespondToInvitesRequest) -> list[ActionResult]:
+        return self._bulk(
+            request.ids,
+            lambda item_id: self.respond_to_invite(
+                RespondToInviteRequest(
+                    id=item_id,
+                    calendar_id=request.calendar_id,
+                    response=request.response,
+                    message=request.message,
+                )
+            ),
+        )

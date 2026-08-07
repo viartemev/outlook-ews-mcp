@@ -81,6 +81,8 @@ Secure MCP server for on-prem Microsoft Exchange (EWS) with tools for email, cal
 - `list_calendars`
 - `list_room_lists`
 - `list_rooms`
+- `bulk_delete_events`
+- `bulk_respond_to_invites`
 
 ### Contacts
 - `search_contacts`

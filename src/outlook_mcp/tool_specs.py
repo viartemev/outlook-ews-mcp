@@ -3,6 +3,8 @@ from __future__ import annotations
 from . import models
 from .mcp_tools import ToolSpec
 from .tools.calendar import (
+    bulk_delete_events,
+    bulk_respond_to_invites,
     create_event,
     delete_event,
     find_free_slots,
@@ -398,6 +400,24 @@ TOOL_SPECS: list[ToolSpec] = [
         request_model=models.FindFreeSlotsRequest,
         response_model=list[models.FreeSlot],
         read_only=True,
+    ),
+    ToolSpec(
+        "bulk_delete_events",
+        "Delete multiple calendar events in one call. A failure on one id is "
+        "reported in that id's own result instead of aborting the rest",
+        bulk_delete_events,
+        request_model=models.BulkDeleteEventsRequest,
+        response_model=list[models.ActionResult],
+        destructive=True,
+    ),
+    ToolSpec(
+        "bulk_respond_to_invites",
+        "Respond to multiple calendar invites in one call. A failure on one id is "
+        "reported in that id's own result instead of aborting the rest",
+        bulk_respond_to_invites,
+        request_model=models.BulkRespondToInvitesRequest,
+        response_model=list[models.ActionResult],
+        destructive=True,
     ),
     ToolSpec(
         "get_my_availability",

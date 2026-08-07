@@ -13,8 +13,10 @@ from outlook_mcp.models import (
     AvailabilityResult,
     BulkCategorizeEmailsRequest,
     BulkDeleteEmailsRequest,
+    BulkDeleteEventsRequest,
     BulkMarkEmailsRequest,
     BulkMoveEmailsRequest,
+    BulkRespondToInvitesRequest,
     CalendarInfo,
     CalendarEvent,
     ContactFull,
@@ -358,6 +360,32 @@ class FakeExchangeBackend:
 
     def respond_to_invite(self, request: RespondToInviteRequest) -> ActionResult:
         return ActionResult(id=request.id, status=request.response)
+
+    def bulk_delete_events(self, request: BulkDeleteEventsRequest) -> list[ActionResult]:
+        return [
+            self.delete_event(
+                DeleteEventRequest(
+                    id=item_id,
+                    calendar_id=request.calendar_id,
+                    notify_attendees=request.notify_attendees,
+                    cancel_message=request.cancel_message,
+                )
+            )
+            for item_id in request.ids
+        ]
+
+    def bulk_respond_to_invites(self, request: BulkRespondToInvitesRequest) -> list[ActionResult]:
+        return [
+            self.respond_to_invite(
+                RespondToInviteRequest(
+                    id=item_id,
+                    calendar_id=request.calendar_id,
+                    response=request.response,
+                    message=request.message,
+                )
+            )
+            for item_id in request.ids
+        ]
 
     def find_free_slots(self, request: FindFreeSlotsRequest) -> list[FreeSlot]:
         return [

@@ -640,6 +640,20 @@ class RespondToInviteRequest(ExchangeModel):
     message: str | None = None
 
 
+class BulkDeleteEventsRequest(ExchangeModel):
+    ids: list[str] = Field(min_length=1, max_length=50)
+    calendar_id: str | None = None
+    notify_attendees: bool = True
+    cancel_message: str | None = None
+
+
+class BulkRespondToInvitesRequest(ExchangeModel):
+    ids: list[str] = Field(min_length=1, max_length=50)
+    calendar_id: str | None = None
+    response: Literal["accept", "tentative", "decline"]
+    message: str | None = None
+
+
 class FindFreeSlotsRequest(ExchangeModel):
     attendees: list[EmailStr] = Field(min_length=1)
     duration: int = Field(ge=1, le=1440)

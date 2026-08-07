@@ -10,8 +10,10 @@ from ..models import (
     AvailabilityResult,
     BulkCategorizeEmailsRequest,
     BulkDeleteEmailsRequest,
+    BulkDeleteEventsRequest,
     BulkMarkEmailsRequest,
     BulkMoveEmailsRequest,
+    BulkRespondToInvitesRequest,
     CalendarInfo,
     CalendarEvent,
     ContactFull,
@@ -202,6 +204,12 @@ class UnconfiguredExchangeBackend:
         self._raise()
 
     def find_free_slots(self, request: FindFreeSlotsRequest) -> list[FreeSlot]:
+        self._raise()
+
+    def bulk_delete_events(self, request: BulkDeleteEventsRequest) -> list[ActionResult]:
+        self._raise()
+
+    def bulk_respond_to_invites(self, request: BulkRespondToInvitesRequest) -> list[ActionResult]:
         self._raise()
 
     def get_my_availability(self, request: ListEventsRequest) -> AvailabilityResult:

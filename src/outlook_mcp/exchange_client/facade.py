@@ -12,8 +12,10 @@ from ..models import (
     AvailabilityResult,
     BulkCategorizeEmailsRequest,
     BulkDeleteEmailsRequest,
+    BulkDeleteEventsRequest,
     BulkMarkEmailsRequest,
     BulkMoveEmailsRequest,
+    BulkRespondToInvitesRequest,
     CalendarInfo,
     CalendarEvent,
     ContactFull,
@@ -241,6 +243,12 @@ class ExchangeClient:
 
     def find_free_slots(self, request: FindFreeSlotsRequest) -> list[FreeSlot]:
         return self._retry_read(lambda: self.backend.find_free_slots(request))
+
+    def bulk_delete_events(self, request: BulkDeleteEventsRequest) -> list[ActionResult]:
+        return self.backend.bulk_delete_events(request)
+
+    def bulk_respond_to_invites(self, request: BulkRespondToInvitesRequest) -> list[ActionResult]:
+        return self.backend.bulk_respond_to_invites(request)
 
     def get_my_availability(self, request: ListEventsRequest) -> AvailabilityResult:
         return self._retry_read(lambda: self.backend.get_my_availability(request))
