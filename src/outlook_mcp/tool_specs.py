@@ -26,6 +26,7 @@ from .tools.email import (
     create_draft,
     create_folder,
     delete_email,
+    delete_folder,
     forward_email,
     get_attachment,
     get_email,
@@ -35,6 +36,7 @@ from .tools.email import (
     list_folders,
     mark_email,
     move_email,
+    rename_folder,
     reply_email,
     search_emails,
     send_draft,
@@ -181,6 +183,25 @@ TOOL_SPECS: list[ToolSpec] = [
         create_folder,
         request_model=models.CreateFolderRequest,
         response_model=models.ActionResult,
+    ),
+    ToolSpec(
+        "rename_folder",
+        "Rename a mailbox folder. Refuses distinguished folders (Inbox, Sent Items, "
+        "Calendar, etc.)",
+        rename_folder,
+        request_model=models.RenameFolderRequest,
+        response_model=models.ActionResult,
+        destructive=True,
+    ),
+    ToolSpec(
+        "delete_folder",
+        "Delete a mailbox folder and everything in it. Soft-deletes to Deleted Items "
+        "unless hard_delete is set. Refuses distinguished folders (Inbox, Sent Items, "
+        "Calendar, etc.)",
+        delete_folder,
+        request_model=models.DeleteFolderRequest,
+        response_model=models.ActionResult,
+        destructive=True,
     ),
     ToolSpec(
         "create_draft",

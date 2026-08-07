@@ -291,6 +291,16 @@ class CreateFolderRequest(ExchangeModel):
     parent: str | None = "inbox"
 
 
+class RenameFolderRequest(ExchangeModel):
+    folder: str = Field(min_length=1)
+    name: str = Field(min_length=1)
+
+
+class DeleteFolderRequest(ExchangeModel):
+    folder: str = Field(min_length=1)
+    hard_delete: bool = False
+
+
 class DraftEmailRequest(ExchangeModel):
     to: list[EmailStr] = Field(min_length=1)
     subject: str = Field(min_length=1)

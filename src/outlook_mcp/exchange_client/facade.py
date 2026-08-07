@@ -18,6 +18,7 @@ from ..models import (
     DeleteContactRequest,
     DeleteEmailRequest,
     DeleteEventRequest,
+    DeleteFolderRequest,
     DraftEmailRequest,
     EmailFull,
     EmailSummary,
@@ -38,6 +39,7 @@ from ..models import (
     MailboxInfo,
     MarkEmailRequest,
     PingResult,
+    RenameFolderRequest,
     ReplyEmailRequest,
     RespondToInviteRequest,
     SearchContactsRequest,
@@ -108,6 +110,12 @@ class ExchangeClient:
 
     def create_folder(self, request: CreateFolderRequest) -> ActionResult:
         return self.backend.create_folder(request)
+
+    def rename_folder(self, request: RenameFolderRequest) -> ActionResult:
+        return self.backend.rename_folder(request)
+
+    def delete_folder(self, request: DeleteFolderRequest) -> ActionResult:
+        return self.backend.delete_folder(request)
 
     def create_draft(self, request: DraftEmailRequest) -> ActionResult:
         return self.backend.create_draft(request)

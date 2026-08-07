@@ -23,6 +23,7 @@ from outlook_mcp.models import (
     DeleteContactRequest,
     DeleteEmailRequest,
     DeleteEventRequest,
+    DeleteFolderRequest,
     DraftEmailRequest,
     EmailAddress,
     EmailFull,
@@ -44,6 +45,7 @@ from outlook_mcp.models import (
     MailboxInfo,
     MarkEmailRequest,
     PingResult,
+    RenameFolderRequest,
     ReplyEmailRequest,
     RespondToInviteRequest,
     SearchContactsRequest,
@@ -195,6 +197,12 @@ class FakeExchangeBackend:
         return ActionResult(
             id="folder-new", status="created", path=f"{request.parent}/{request.name}"
         )
+
+    def rename_folder(self, request: RenameFolderRequest) -> ActionResult:
+        return ActionResult(id="folder-inbox", status="renamed", path=request.name)
+
+    def delete_folder(self, request: DeleteFolderRequest) -> ActionResult:
+        return ActionResult(id="folder-inbox", status="deleted")
 
     def create_draft(self, request: DraftEmailRequest) -> ActionResult:
         return ActionResult(id="draft-1", status="draft")
