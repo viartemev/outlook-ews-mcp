@@ -10,6 +10,7 @@ from ..models import (
     CategorizeEmailRequest,
     CreateFolderRequest,
     DeleteEmailRequest,
+    DeleteFolderRequest,
     DraftEmailRequest,
     FolderActionRequest,
     GetAttachmentRequest,
@@ -19,6 +20,7 @@ from ..models import (
     ListEmailsRequest,
     ListFoldersRequest,
     MarkEmailRequest,
+    RenameFolderRequest,
     ReplyEmailRequest,
     SearchEmailsRequest,
     SendDraftRequest,
@@ -58,6 +60,8 @@ categorize_email = tool_handler("categorize_email", CategorizeEmailRequest)
 list_categories = tool_handler("list_categories", ListCategoriesRequest)
 list_folders = tool_handler("list_folders", ListFoldersRequest)
 create_folder = tool_handler("create_folder", CreateFolderRequest)
+rename_folder = tool_handler("rename_folder", RenameFolderRequest)
+delete_folder = tool_handler("delete_folder", DeleteFolderRequest)
 create_draft = tool_handler(
     "create_draft", DraftEmailRequest, before=_validate_outgoing_attachments
 )

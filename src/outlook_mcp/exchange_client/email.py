@@ -20,6 +20,7 @@ from exchangelib.errors import (
 from exchangelib.extended_properties import ExtendedProperty, Flag
 from exchangelib.fields import InvalidField, InvalidFieldForVersion
 from exchangelib.folders import FolderCollection
+from exchangelib.items import HARD_DELETE, MOVE_TO_DELETED_ITEMS
 from exchangelib.properties import ConversationId
 
 from ..errors import APIError, NotFoundError
@@ -31,6 +32,7 @@ from ..models import (
     CategoryUsage,
     CreateFolderRequest,
     DeleteEmailRequest,
+    DeleteFolderRequest,
     DraftEmailRequest,
     EmailFull,
     EmailSummary,
@@ -44,6 +46,7 @@ from ..models import (
     ListEmailsRequest,
     ListFoldersRequest,
     MarkEmailRequest,
+    RenameFolderRequest,
     ReplyEmailRequest,
     SearchEmailsRequest,
     SendDraftRequest,
@@ -690,6 +693,39 @@ class EmailOperationsMixin(BaseEWSBackend):
             return ActionResult(
                 id=getattr(folder, "id", ""), status="created", path=self._folder_path(folder)
             )
+        except Exception as exc:  # noqa: BLE001
+            raise self._map_exception(exc) from exc
+
+    def _ensure_not_distinguished(self, folder: Folder, *, action: str) -> None:
+        # Exchange refuses server-side too (ErrorDeleteDistinguishedFolder), but a
+        # client-side check gives a clearer message and also covers rename, which
+        # the server otherwise allows even for folders like Inbox or Calendar.
+        if getattr(folder, "is_distinguished", False):
+            raise APIError(
+                "validation_error",
+                f"cannot {action} a distinguished folder (e.g. Inbox, Sent Items, Calendar)",
+                details=[{"field": "folder", "reason": "folder is distinguished"}],
+            )
+
+    def rename_folder(self, request: RenameFolderRequest) -> ActionResult:
+        folder = self._resolve_folder(request.folder)
+        self._ensure_not_distinguished(folder, action="rename")
+        folder.name = request.name
+        try:
+            folder.save(update_fields=["name"])
+            return ActionResult(
+                id=getattr(folder, "id", ""), status="renamed", path=self._folder_path(folder)
+            )
+        except Exception as exc:  # noqa: BLE001
+            raise self._map_exception(exc) from exc
+
+    def delete_folder(self, request: DeleteFolderRequest) -> ActionResult:
+        folder = self._resolve_folder(request.folder)
+        self._ensure_not_distinguished(folder, action="delete")
+        folder_id = getattr(folder, "id", "")
+        try:
+            folder.delete(delete_type=HARD_DELETE if request.hard_delete else MOVE_TO_DELETED_ITEMS)
+            return ActionResult(id=folder_id, status="deleted")
         except Exception as exc:  # noqa: BLE001
             raise self._map_exception(exc) from exc
 

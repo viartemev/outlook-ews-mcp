@@ -50,6 +50,8 @@ Secure MCP server for on-prem Microsoft Exchange (EWS) with tools for email, cal
 - `mark_email`
 - `list_folders`
 - `create_folder`
+- `rename_folder`
+- `delete_folder`
 - `create_draft`
 - `send_draft`
 - `get_attachment`

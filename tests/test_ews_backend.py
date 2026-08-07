@@ -21,6 +21,8 @@ from exchangelib import CalendarItem, Message
 from exchangelib.restriction import Q, Restriction
 from exchangelib.version import EXCHANGE_2016, Version
 
+from exchangelib.items import HARD_DELETE, MOVE_TO_DELETED_ITEMS
+
 import outlook_mcp.exchange_client.base as exchange_client_base
 import outlook_mcp.exchange_client.contacts as exchange_client_contacts
 import outlook_mcp.exchange_client.email as exchange_client_email
@@ -29,12 +31,14 @@ from outlook_mcp.exchange_client import EWSExchangeBackend
 from outlook_mcp.models import (
     ActionResult,
     DeleteContactRequest,
+    DeleteFolderRequest,
     FindFreeSlotsRequest,
     FolderActionRequest,
     ForwardEmailRequest,
     GetContactRequest,
     GetEmailRequest,
     ListEmailsRequest,
+    RenameFolderRequest,
     ReplyEmailRequest,
     SearchContactsRequest,
     SearchEmailsRequest,
@@ -1187,6 +1191,124 @@ def test_copy_email_handles_no_result_for_cross_mailbox_copy(settings) -> None:
     result = backend.copy_email(FolderActionRequest(id="msg-1", folder="Inbox"))
 
     assert result == ActionResult(id="msg-1", status="copied", new_folder="Inbox", new_id=None)
+
+
+class _FakeFolder:
+    def __init__(self, name: str, id_: str = "folder-1", is_distinguished: bool = False) -> None:
+        self.name = name
+        self.id = id_
+        self.is_distinguished = is_distinguished
+        self.parent = None
+        self.saved_update_fields: list[str] | None = None
+        self.delete_type: str | None = None
+
+    def save(self, update_fields=None):
+        self.saved_update_fields = update_fields
+
+    def delete(self, delete_type=None):
+        self.delete_type = delete_type
+
+
+def test_rename_folder_renames_and_returns_new_path(settings) -> None:
+    backend = EWSExchangeBackend(settings)
+    folder = _FakeFolder(name="Марафон")
+    account = _fake_account_for_folder_resolution(object())
+    account.inbox = folder
+    backend._account = account
+
+    result = backend.rename_folder(RenameFolderRequest(folder="inbox", name="Marathon"))
+
+    assert folder.name == "Marathon"
+    assert folder.saved_update_fields == ["name"]
+    assert result == ActionResult(id="folder-1", status="renamed", path="Marathon")
+
+
+def test_rename_folder_rejects_distinguished_folder(settings) -> None:
+    """Renaming Inbox/Calendar/etc. would succeed server-side but is never what a
+    caller actually wants -- refuse it client-side with a clear error instead."""
+    backend = EWSExchangeBackend(settings)
+    folder = _FakeFolder(name="Inbox", is_distinguished=True)
+    account = _fake_account_for_folder_resolution(object())
+    account.inbox = folder
+    backend._account = account
+
+    with pytest.raises(APIError) as excinfo:
+        backend.rename_folder(RenameFolderRequest(folder="inbox", name="Something"))
+
+    assert excinfo.value.code == "validation_error"
+    assert folder.name == "Inbox"
+    assert folder.saved_update_fields is None
+
+
+def test_rename_folder_maps_exception_from_save(settings) -> None:
+    backend = EWSExchangeBackend(settings)
+
+    class FailingFolder(_FakeFolder):
+        def save(self, update_fields=None):
+            raise UnauthorizedError("access denied")
+
+    folder = FailingFolder(name="Old")
+    account = _fake_account_for_folder_resolution(object())
+    account.inbox = folder
+    backend._account = account
+
+    with pytest.raises(AuthFailedError):
+        backend.rename_folder(RenameFolderRequest(folder="inbox", name="New"))
+
+
+def test_delete_folder_soft_deletes_by_default(settings) -> None:
+    backend = EWSExchangeBackend(settings)
+    folder = _FakeFolder(name="Old Folder", id_="folder-99")
+    account = _fake_account_for_folder_resolution(object())
+    account.inbox = folder
+    backend._account = account
+
+    result = backend.delete_folder(DeleteFolderRequest(folder="inbox"))
+
+    assert folder.delete_type == MOVE_TO_DELETED_ITEMS
+    assert result == ActionResult(id="folder-99", status="deleted")
+
+
+def test_delete_folder_hard_deletes_when_requested(settings) -> None:
+    backend = EWSExchangeBackend(settings)
+    folder = _FakeFolder(name="Old Folder", id_="folder-99")
+    account = _fake_account_for_folder_resolution(object())
+    account.inbox = folder
+    backend._account = account
+
+    backend.delete_folder(DeleteFolderRequest(folder="inbox", hard_delete=True))
+
+    assert folder.delete_type == HARD_DELETE
+
+
+def test_delete_folder_rejects_distinguished_folder(settings) -> None:
+    backend = EWSExchangeBackend(settings)
+    folder = _FakeFolder(name="Inbox", is_distinguished=True)
+    account = _fake_account_for_folder_resolution(object())
+    account.inbox = folder
+    backend._account = account
+
+    with pytest.raises(APIError) as excinfo:
+        backend.delete_folder(DeleteFolderRequest(folder="inbox"))
+
+    assert excinfo.value.code == "validation_error"
+    assert folder.delete_type is None
+
+
+def test_delete_folder_maps_exception_from_delete(settings) -> None:
+    backend = EWSExchangeBackend(settings)
+
+    class FailingFolder(_FakeFolder):
+        def delete(self, delete_type=None):
+            raise UnauthorizedError("access denied")
+
+    folder = FailingFolder(name="Old")
+    account = _fake_account_for_folder_resolution(object())
+    account.inbox = folder
+    backend._account = account
+
+    with pytest.raises(AuthFailedError):
+        backend.delete_folder(DeleteFolderRequest(folder="inbox"))
 
 
 def _bound_inbox() -> Inbox:

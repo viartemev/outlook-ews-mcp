@@ -21,6 +21,7 @@ from ..models import (
     DeleteContactRequest,
     DeleteEmailRequest,
     DeleteEventRequest,
+    DeleteFolderRequest,
     DraftEmailRequest,
     EmailFull,
     EmailSummary,
@@ -41,6 +42,7 @@ from ..models import (
     MailboxInfo,
     MarkEmailRequest,
     PingResult,
+    RenameFolderRequest,
     ReplyEmailRequest,
     RespondToInviteRequest,
     SearchContactsRequest,
@@ -112,6 +114,12 @@ class UnconfiguredExchangeBackend:
         self._raise()
 
     def create_folder(self, request: CreateFolderRequest) -> ActionResult:
+        self._raise()
+
+    def rename_folder(self, request: RenameFolderRequest) -> ActionResult:
+        self._raise()
+
+    def delete_folder(self, request: DeleteFolderRequest) -> ActionResult:
         self._raise()
 
     def create_draft(self, request: DraftEmailRequest) -> ActionResult:
