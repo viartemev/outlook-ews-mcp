@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import logging
 import re
+import threading
 from collections.abc import Iterable
 from contextvars import ContextVar
 from datetime import UTC, datetime
@@ -61,6 +62,12 @@ from ..models import EmailAddress, MailboxInfo, PingResult
 
 logger = logging.getLogger(__name__)
 _TIMEZONE_FALLBACK_PATCHED = False
+#: Guards _TIMEZONE_FALLBACK_PATCHED: the patch itself is idempotent, but without a
+#: lock, concurrent first calls (ToolGateway runs tool bodies in a thread pool once
+#: MCP_MAX_CONCURRENCY > 1) can both observe it unset and both proceed to patch --
+#: harmless here, but the same check-then-act shape as the account lock below, so
+#: it gets the same treatment rather than relying on the patch being a no-op twice.
+_TIMEZONE_FALLBACK_LOCK = threading.Lock()
 _GUID_TIMEZONE_RE = re.compile(
     r"^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$"
 )
@@ -80,11 +87,19 @@ class BaseEWSBackend:
     def __init__(self, settings: Settings) -> None:
         self.settings = settings
         self._account: Account | None = None
+        #: Guards the check-then-act below. ToolGateway runs tool bodies in a thread
+        #: pool (anyio.to_thread), so with MCP_MAX_CONCURRENCY > 1 an unguarded first
+        #: burst of concurrent calls could each see self._account as None and race to
+        #: build their own Account/Configuration/protocol, wasting an auth round trip
+        #: per racer and leaking every loser's protocol object.
+        self._account_lock = threading.Lock()
 
     @property
     def account(self) -> Account:
         if self._account is None:
-            self._account = self._build_account()
+            with self._account_lock:
+                if self._account is None:
+                    self._account = self._build_account()
         _active_timezone_fallback.set(self.settings.exchange_timezone_fallback)
         return self._account
 
@@ -196,20 +211,28 @@ class BaseEWSBackend:
         if _TIMEZONE_FALLBACK_PATCHED:
             return
 
-        original = EWSTimeZone.from_ms_id.__func__
+        with _TIMEZONE_FALLBACK_LOCK:
+            if _TIMEZONE_FALLBACK_PATCHED:
+                return
 
-        def from_ms_id_with_fallback(cls, ms_id):
-            try:
-                return original(cls, ms_id)
-            except UnknownTimeZone:
-                fallback_timezone = _active_timezone_fallback.get()
-                if fallback_timezone and isinstance(ms_id, str) and _GUID_TIMEZONE_RE.match(ms_id):
-                    logger.info("Mapping unknown Exchange timezone id to configured fallback")
-                    return cls(fallback_timezone)
-                raise
+            original = EWSTimeZone.from_ms_id.__func__
 
-        EWSTimeZone.from_ms_id = classmethod(from_ms_id_with_fallback)
-        _TIMEZONE_FALLBACK_PATCHED = True
+            def from_ms_id_with_fallback(cls, ms_id):
+                try:
+                    return original(cls, ms_id)
+                except UnknownTimeZone:
+                    fallback_timezone = _active_timezone_fallback.get()
+                    if (
+                        fallback_timezone
+                        and isinstance(ms_id, str)
+                        and _GUID_TIMEZONE_RE.match(ms_id)
+                    ):
+                        logger.info("Mapping unknown Exchange timezone id to configured fallback")
+                        return cls(fallback_timezone)
+                    raise
+
+            EWSTimeZone.from_ms_id = classmethod(from_ms_id_with_fallback)
+            _TIMEZONE_FALLBACK_PATCHED = True
 
     def _resolve_folder(self, value: str | None) -> Folder:
         account = self.account

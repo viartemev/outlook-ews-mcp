@@ -1,0 +1,24 @@
+version: 2
+updates:
+  # CI workflows pin actions by exact SHA (see .github/workflows/ci.yml) so builds
+  # never silently pick up a new action version -- but that also means security
+  # fixes never land without a bump. Dependabot proposes those bumps instead of
+  # relying on someone remembering to re-pin manually.
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+
+  # Dockerfile pins python:3.12-slim (both stages) and the uv builder image by
+  # digest; same rationale as above.
+  - package-ecosystem: "docker"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+
+  # Keeps pyproject.toml/uv.lock dependency bounds current; pip-audit in CI
+  # already flags known vulnerabilities, this catches routine version drift.
+  - package-ecosystem: "uv"
+    directory: "/"
+    schedule:
+      interval: "weekly"
