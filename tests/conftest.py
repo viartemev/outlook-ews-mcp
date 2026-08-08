@@ -9,7 +9,13 @@ from outlook_mcp.config import Settings
 from outlook_mcp.exchange_client import ExchangeClient
 from outlook_mcp.models import (
     ActionResult,
+    AddAttachmentRequest,
     AttachmentResult,
+    DeleteAttachmentRequest,
+    BulkDeleteEmailsRequest,
+    BulkItemResult,
+    BulkMoveEmailsRequest,
+    BulkResult,
     AvailabilityResult,
     CalendarInfo,
     CalendarEvent,
@@ -43,7 +49,13 @@ from outlook_mcp.models import (
     ListEventsRequest,
     ListFoldersRequest,
     MailboxInfo,
+    DelegateInfo,
+    CreateInboxRuleRequest,
+    DeleteInboxRuleRequest,
+    InboxRule,
+    UpdateInboxRuleRequest,
     MarkEmailRequest,
+    OutOfOfficeSettings,
     PingResult,
     RenameFolderRequest,
     ReplyEmailRequest,
@@ -77,6 +89,39 @@ class FakeExchangeBackend:
             quota_mb=1024,
             exchange_version="2019",
         )
+
+    def list_delegates(self) -> list[DelegateInfo]:
+        return [DelegateInfo(email="assistant@example.com", display_name="Assistant")]
+
+    def list_inbox_rules(self) -> list[InboxRule]:
+        return [InboxRule(id="rule-1", display_name="From boss", priority=1, is_enabled=True)]
+
+    def create_inbox_rule(self, request: CreateInboxRuleRequest) -> InboxRule:
+        return InboxRule(
+            id="rule-new",
+            display_name=request.display_name,
+            priority=request.priority,
+            is_enabled=request.is_enabled,
+            conditions=request.conditions,
+            actions=request.actions,
+        )
+
+    def update_inbox_rule(self, request: UpdateInboxRuleRequest) -> InboxRule:
+        return InboxRule(
+            id=request.id,
+            display_name="From boss",
+            priority=request.priority or 1,
+            is_enabled=request.is_enabled if request.is_enabled is not None else True,
+        )
+
+    def delete_inbox_rule(self, request: DeleteInboxRuleRequest) -> ActionResult:
+        return ActionResult(id=request.id, status="deleted")
+
+    def get_out_of_office(self) -> OutOfOfficeSettings:
+        return OutOfOfficeSettings(state="disabled")
+
+    def set_out_of_office(self, request: OutOfOfficeSettings) -> OutOfOfficeSettings:
+        return request
 
     def list_emails(self, request: ListEmailsRequest) -> list[EmailSummary]:
         return [
@@ -129,7 +174,9 @@ class FakeExchangeBackend:
         )
 
     def search_emails(self, request: SearchEmailsRequest) -> list[EmailSummary]:
-        return self.list_emails(ListEmailsRequest(subject=request.query, limit=request.limit))
+        return self.list_emails(
+            ListEmailsRequest(subject=request.query or request.aqs, limit=request.limit)
+        )
 
     def send_email(self, request: SendEmailRequest) -> SendResult:
         return SendResult(id="sent-1", status="sent")
@@ -159,6 +206,23 @@ class FakeExchangeBackend:
             field for field in ["read", "flag", "importance"] if getattr(request, field) is not None
         ]
         return ActionResult(id=request.id, status="updated", updated_fields=updated_fields)
+
+    def move_emails(self, request: BulkMoveEmailsRequest) -> BulkResult:
+        return BulkResult(
+            succeeded=[
+                BulkItemResult(id=item_id, new_id=f"{item_id}-moved") for item_id in request.ids
+            ]
+        )
+
+    def copy_emails(self, request: BulkMoveEmailsRequest) -> BulkResult:
+        return BulkResult(
+            succeeded=[
+                BulkItemResult(id=item_id, new_id=f"{item_id}-copy") for item_id in request.ids
+            ]
+        )
+
+    def delete_emails(self, request: BulkDeleteEmailsRequest) -> BulkResult:
+        return BulkResult(succeeded=[BulkItemResult(id=item_id) for item_id in request.ids])
 
     def categorize_email(self, request: CategorizeEmailRequest) -> ActionResult:
         existing = ["Existing"]
@@ -209,6 +273,12 @@ class FakeExchangeBackend:
 
     def send_draft(self, request: SendDraftRequest) -> SendResult:
         return SendResult(id=request.id, status="sent")
+
+    def add_attachment(self, request: AddAttachmentRequest) -> ActionResult:
+        return ActionResult(id=request.email_id, status="updated", updated_fields=["attachments"])
+
+    def delete_attachment(self, request: DeleteAttachmentRequest) -> ActionResult:
+        return ActionResult(id=request.email_id, status="updated", updated_fields=["attachments"])
 
     def get_attachment(self, request: GetAttachmentRequest) -> AttachmentResult:
         target = request.save_path or Path("/tmp/test.txt")

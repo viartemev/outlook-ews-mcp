@@ -14,6 +14,7 @@ from typing import Any
 from exchangelib import FileAttachment, Folder, HTMLBody, ItemAttachment, Message, Q
 from exchangelib.errors import (
     ErrorInvalidRestriction,
+    ErrorItemNotFound,
     ErrorUnsupportedPathForQuery,
     ErrorUnsupportedQueryFilter,
 )
@@ -27,7 +28,14 @@ from ..errors import APIError, NotFoundError
 from ..models import (
     ActionResult,
     Attachment,
+    AddAttachmentRequest,
     AttachmentResult,
+    BulkDeleteEmailsRequest,
+    DeleteAttachmentRequest,
+    BulkItemFailure,
+    BulkItemResult,
+    BulkMoveEmailsRequest,
+    BulkResult,
     CategorizeEmailRequest,
     CategoryUsage,
     CreateFolderRequest,
@@ -223,10 +231,22 @@ class EmailOperationsMixin(BaseEWSBackend):
         text, _ = self._extract_message_body(item)
         return text[:200]
 
-    def _make_message(self, request: SendEmailRequest | DraftEmailRequest) -> Message:
-        body: str | HTMLBody = (
-            HTMLBody(request.body) if request.body_type == "html" else request.body
+    def _with_signature(self, body: str, body_type: str, include: bool) -> str:
+        """Append the configured signature; html bodies get the html signature only,
+        text bodies the text one -- no cross-conversion between the two."""
+        if not include:
+            return body
+        signature = (
+            self.settings.signature_html if body_type == "html" else self.settings.signature_text
         )
+        if not signature:
+            return body
+        separator = "<br><br>" if body_type == "html" else "\n\n"
+        return f"{body}{separator}{signature}"
+
+    def _make_message(self, request: SendEmailRequest | DraftEmailRequest) -> Message:
+        body_text = self._with_signature(request.body, request.body_type, request.include_signature)
+        body: str | HTMLBody = HTMLBody(body_text) if request.body_type == "html" else body_text
         reply_to: str | None = getattr(request, "reply_to", None)
         importance: str | None = getattr(request, "importance", None)
         message = Message(
@@ -488,18 +508,39 @@ class EmailOperationsMixin(BaseEWSBackend):
                         if getattr(folder, "folder_class", None) == self._MAIL_FOLDER_CLASS
                     ],
                 )
-            query = (
-                Q(subject__icontains=request.query)
-                | Q(text_body__icontains=request.query)
-                | Q(author__icontains=request.query)
-            )
-            qs = (
-                searchable.filter(query).only(*_EMAIL_SUMMARY_FIELDS).order_by("-datetime_received")
-            )
-            items = list(qs[: request.limit])
+            if request.aqs:
+                # A QueryString is sent to EWS as its own FindItem element and cannot
+                # be combined with a Restriction, so no other filter is added here.
+                items = self._search_items(searchable, Q(request.aqs), request.limit)
+            else:
+                query = (
+                    Q(subject__icontains=request.query)
+                    | Q(text_body__icontains=request.query)
+                    | Q(author__icontains=request.query)
+                )
+                try:
+                    items = self._search_items(searchable, query, request.limit)
+                except ErrorUnsupportedPathForQuery:
+                    # Exchange 2019 on-prem rejects a substring restriction on
+                    # item:TextBody outright ("The property can not be used with
+                    # this type of restriction"), killing the whole search. Seen
+                    # live; subject and sender still match, so retry without the
+                    # body leg rather than failing the call.
+                    logger.info(
+                        "this server rejects substring matching on the body; "
+                        "searching subject and sender only"
+                    )
+                    query = Q(subject__icontains=request.query) | Q(author__icontains=request.query)
+                    items = self._search_items(searchable, query, request.limit)
         except Exception as exc:  # noqa: BLE001
             raise self._map_exception(exc) from exc
         return [self._to_email_summary(item) for item in items]
+
+    def _search_items(
+        self, searchable: Folder | FolderCollection, query: Q, limit: int
+    ) -> list[Any]:
+        qs = searchable.filter(query).only(*_EMAIL_SUMMARY_FIELDS).order_by("-datetime_received")
+        return list(qs[:limit])
 
     def send_email(self, request: SendEmailRequest) -> SendResult:
         message = self._make_message(request)
@@ -514,10 +555,11 @@ class EmailOperationsMixin(BaseEWSBackend):
         item = self._fetch_item(request.id, expected_type=Message)
         try:
             subject = reply_subject(item.subject)
+            body = self._with_signature(request.body, "text", request.include_signature)
             response = (
-                item.create_reply_all(subject=subject, body=request.body)
+                item.create_reply_all(subject=subject, body=body)
                 if request.reply_all
-                else item.create_reply(subject=subject, body=request.body)
+                else item.create_reply(subject=subject, body=body)
             )
             return self._send_response_object(response, request.attachments)
         except Exception as exc:  # noqa: BLE001
@@ -528,7 +570,7 @@ class EmailOperationsMixin(BaseEWSBackend):
         try:
             response = item.create_forward(
                 subject=forward_subject(item.subject),
-                body=request.comment or "",
+                body=self._with_signature(request.comment or "", "text", request.include_signature),
                 to_recipients=[self._mailbox(address) for address in request.to],
             )
             return self._send_response_object(response, request.attachments)
@@ -627,6 +669,51 @@ class EmailOperationsMixin(BaseEWSBackend):
         except Exception as exc:  # noqa: BLE001
             raise self._map_exception(exc, item_id=request.id) from exc
 
+    def _bulk_result(self, ids: list[str], results: list[Any]) -> BulkResult:
+        if len(results) != len(ids):
+            # Moving/copying into a public folder or another mailbox returns no
+            # per-item ids at all; pad so every input id still gets a verdict.
+            results = list(results) + [None] * (len(ids) - len(results))
+        succeeded: list[BulkItemResult] = []
+        failed: list[BulkItemFailure] = []
+        for item_id, result in zip(ids, results):
+            if isinstance(result, Exception):
+                mapped = self._map_exception(result, item_id=item_id)
+                failed.append(
+                    BulkItemFailure(id=item_id, error=mapped.code, message=mapped.message)
+                )
+            else:
+                new_id = result[0] if isinstance(result, tuple) else None
+                succeeded.append(BulkItemResult(id=item_id, new_id=new_id))
+        return BulkResult(succeeded=succeeded, failed=failed)
+
+    def move_emails(self, request: BulkMoveEmailsRequest) -> BulkResult:
+        destination = self._resolve_folder(request.folder)
+        ids = [(item_id, None) for item_id in request.ids]
+        try:
+            results = self.account.bulk_move(ids=ids, to_folder=destination)
+        except Exception as exc:  # noqa: BLE001
+            raise self._map_exception(exc) from exc
+        return self._bulk_result(request.ids, results)
+
+    def copy_emails(self, request: BulkMoveEmailsRequest) -> BulkResult:
+        destination = self._resolve_folder(request.folder)
+        ids = [(item_id, None) for item_id in request.ids]
+        try:
+            results = self.account.bulk_copy(ids=ids, to_folder=destination)
+        except Exception as exc:  # noqa: BLE001
+            raise self._map_exception(exc) from exc
+        return self._bulk_result(request.ids, results)
+
+    def delete_emails(self, request: BulkDeleteEmailsRequest) -> BulkResult:
+        delete_type = HARD_DELETE if request.hard_delete else MOVE_TO_DELETED_ITEMS
+        ids = [(item_id, None) for item_id in request.ids]
+        try:
+            results = self.account.bulk_delete(ids=ids, delete_type=delete_type)
+        except Exception as exc:  # noqa: BLE001
+            raise self._map_exception(exc) from exc
+        return self._bulk_result(request.ids, results)
+
     def categorize_email(self, request: CategorizeEmailRequest) -> ActionResult:
         item = self._fetch_item(request.id, expected_type=Message)
         current = list(getattr(item, "categories", None) or [])
@@ -654,7 +741,89 @@ class EmailOperationsMixin(BaseEWSBackend):
             categories=updated,
         )
 
+    #: Outlook's 25 preset category colours, by the index stored in the
+    #: CategoryList XML. -1 (or anything unknown) means "no colour".
+    _CATEGORY_COLORS = (
+        "red",
+        "orange",
+        "peach",
+        "yellow",
+        "green",
+        "teal",
+        "olive",
+        "blue",
+        "purple",
+        "maroon",
+        "steel",
+        "dark_steel",
+        "gray",
+        "dark_gray",
+        "black",
+        "dark_red",
+        "dark_orange",
+        "brown",
+        "dark_yellow",
+        "dark_green",
+        "dark_teal",
+        "dark_olive",
+        "dark_blue",
+        "dark_purple",
+        "dark_maroon",
+    )
+
+    def _master_category_list(self) -> list[CategoryUsage] | None:
+        """Read the mailbox master category list, or None when it does not exist.
+
+        Outlook stores it as the "CategoryList" user configuration on the
+        Calendar folder -- an XML document, not a folder of items. This is the
+        list the Outlook UI shows, including categories that are defined but not
+        currently applied to any message.
+        """
+        import xml.etree.ElementTree as ET
+
+        try:
+            config = self.account.calendar.get_user_configuration(name="CategoryList")
+        except ErrorItemNotFound:
+            return None
+        except Exception as exc:  # noqa: BLE001
+            raise self._map_exception(exc) from exc
+        xml_data = getattr(config, "xml_data", None)
+        if not xml_data:
+            return None
+        try:
+            root = ET.fromstring(xml_data)
+        except ET.ParseError:
+            logger.warning("CategoryList user configuration holds unparseable XML; ignoring it")
+            return None
+        namespace = root.tag.partition("}")[0].lstrip("{") if "}" in root.tag else ""
+        tag = f"{{{namespace}}}category" if namespace else "category"
+        result = []
+        for category in root.iter(tag):
+            name = (category.get("name") or "").strip()
+            if not name:
+                continue
+            try:
+                color_index = int(category.get("color", "-1"))
+            except ValueError:
+                color_index = -1
+            color = (
+                self._CATEGORY_COLORS[color_index]
+                if 0 <= color_index < len(self._CATEGORY_COLORS)
+                else None
+            )
+            try:
+                count = max(0, int(category.get("usageCount", "0")))
+            except ValueError:
+                count = 0
+            result.append(CategoryUsage(name=name, count=count, color=color))
+        return result or None
+
     def list_categories(self, request: ListCategoriesRequest) -> list[CategoryUsage]:
+        master = self._master_category_list()
+        if master is not None:
+            return sorted(master, key=lambda usage: (-usage.count, usage.name.casefold()))
+        # No master list on this mailbox -- fall back to counting what the most
+        # recent messages actually carry. Colours are unknown on this path.
         counts: Counter[str] = Counter()
         labels: dict[str, str] = {}
         for name in request.folders:
@@ -746,6 +915,55 @@ class EmailOperationsMixin(BaseEWSBackend):
             return SendResult(id=None, status="sent")
         except Exception as exc:  # noqa: BLE001
             raise self._map_exception(exc, item_id=request.id) from exc
+
+    def add_attachment(self, request: AddAttachmentRequest) -> ActionResult:
+        path = request.path
+        if not path.is_absolute():
+            root = self.settings.attachment_root
+            if root is None:
+                raise APIError(
+                    "validation_error",
+                    "relative attachment paths need EXCHANGE_ATTACHMENT_ROOT",
+                    details=[
+                        {
+                            "field": "path",
+                            "reason": "set EXCHANGE_ATTACHMENT_ROOT or pass an absolute path",
+                        }
+                    ],
+                )
+            # A relative path means "relative to the configured root" -- resolving
+            # it against the server's cwd would attach whatever happens to lie there.
+            path = root / path
+        if not path.is_file():
+            raise APIError(
+                "validation_error",
+                "attachment file does not exist",
+                details=[{"field": "path", "reason": f"no such file: {path}"}],
+            )
+        item = self._fetch_item(request.email_id, expected_type=Message)
+        try:
+            # Same fd-validated read path as outgoing mail, so a FIFO or a file
+            # swapped after the stat gets rejected here too.
+            self._attach_files(item, [path])
+        except APIError:
+            raise
+        except Exception as exc:  # noqa: BLE001
+            raise self._map_exception(exc, item_id=request.email_id) from exc
+        return ActionResult(id=request.email_id, status="updated", updated_fields=["attachments"])
+
+    def delete_attachment(self, request: DeleteAttachmentRequest) -> ActionResult:
+        item = self._fetch_item(request.email_id, expected_type=Message)
+        for attachment in getattr(item, "attachments", None) or []:
+            attachment_id = getattr(getattr(attachment, "attachment_id", None), "id", None)
+            if attachment_id == request.attachment_id:
+                try:
+                    item.detach(attachment)
+                except Exception as exc:  # noqa: BLE001
+                    raise self._map_exception(exc, item_id=request.email_id) from exc
+                return ActionResult(
+                    id=request.email_id, status="updated", updated_fields=["attachments"]
+                )
+        raise NotFoundError(request.attachment_id)
 
     def get_attachment(self, request: GetAttachmentRequest) -> AttachmentResult:
         item = self._fetch_item(request.email_id, expected_type=Message)

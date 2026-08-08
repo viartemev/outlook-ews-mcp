@@ -270,16 +270,45 @@ class BaseEWSBackend:
         if by_id is not None:
             return by_id
 
-        current = account.root
-        for part in [segment for segment in value.strip("/").split("/") if segment]:
+        parts = [segment for segment in value.strip("/").split("/") if segment]
+        if not parts:
+            return account.root
+
+        # A name or path may start at a well-known folder ("Inbox/Projects") or at
+        # the mailbox top level ("Projects"). Neither lives under account.root,
+        # whose children are Top of Information Store plus dozens of hidden system
+        # folders -- user folders hang off TOIS itself.
+        candidates: list[tuple[Folder, list[str]]] = []
+        if parts[0].lower() in builtin:
+            candidates.append((builtin[parts[0].lower()], parts[1:]))
+        try:
+            candidates.append((account.root.tois, parts))
+        except Exception:  # noqa: BLE001
+            # Not every mailbox exposes TOIS, or grants access to it.
+            logger.debug("Top of Information Store is unavailable; falling back to root")
+        candidates.append((account.root, parts))
+
+        for start, remainder in candidates:
+            found = self._walk_child_folders(start, remainder)
+            if found is not None:
+                return found
+        raise NotFoundError(value)
+
+    def _walk_child_folders(self, start: Folder, parts: list[str]) -> Folder | None:
+        current = start
+        for part in parts:
+            try:
+                children = current.children
+            except Exception:  # noqa: BLE001
+                return None
             next_folder = next(
-                (child for child in current.children if child.name.lower() == part.lower()),
+                (child for child in children if child.name.lower() == part.lower()),
                 None,
             )
             if next_folder is None:
-                raise NotFoundError(value)
+                return None
             current = next_folder
-        return current
+        return current if current is not start else None
 
     def _get_folder_by_id(self, folder_id: str) -> Folder | None:
         """Resolve a folder by EWS id with a single targeted GetFolder call.

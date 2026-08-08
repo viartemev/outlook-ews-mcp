@@ -26,23 +26,38 @@ from .tools.email import (
     create_draft,
     create_folder,
     delete_email,
+    delete_emails,
     delete_folder,
+    delete_attachment,
     forward_email,
     get_attachment,
     get_email,
     get_thread,
+    add_attachment,
     list_categories,
     list_emails,
     list_folders,
     mark_email,
     move_email,
+    move_emails,
+    copy_emails,
     rename_folder,
     reply_email,
     search_emails,
     send_draft,
     send_email,
 )
-from .tools.system import get_mailbox_info, ping_exchange
+from .tools.system import (
+    create_inbox_rule,
+    delete_inbox_rule,
+    get_mailbox_info,
+    get_out_of_office,
+    list_delegates,
+    list_inbox_rules,
+    ping_exchange,
+    update_inbox_rule,
+    set_out_of_office,
+)
 
 #: The single source of truth for every Outlook MCP tool: name, description,
 #: handler, request/response schema, and MCP annotations all live together so
@@ -61,6 +76,64 @@ TOOL_SPECS: list[ToolSpec] = [
         get_mailbox_info,
         response_model=models.MailboxInfo,
         read_only=True,
+    ),
+    ToolSpec(
+        "list_delegates",
+        "List mailbox delegates and their folder permission levels. Read-only: "
+        "managing delegates is not supported by exchangelib.",
+        list_delegates,
+        response_model=list[models.DelegateInfo],
+        read_only=True,
+    ),
+    ToolSpec(
+        "list_inbox_rules",
+        "List server-side inbox rules (the curated subset of conditions and "
+        "actions this API models)",
+        list_inbox_rules,
+        response_model=list[models.InboxRule],
+        read_only=True,
+    ),
+    ToolSpec(
+        "create_inbox_rule",
+        "Create a server-side inbox rule, e.g. 'from this sender -> move to "
+        "folder'. WARNING: managing rules over EWS removes the client-side rule blob desktop Outlook keeps, which can wipe rules created in Outlook itself.",
+        create_inbox_rule,
+        request_model=models.CreateInboxRuleRequest,
+        response_model=models.InboxRule,
+        destructive=True,
+    ),
+    ToolSpec(
+        "update_inbox_rule",
+        "Enable/disable an inbox rule or change its priority. Other fields are "
+        "deliberately not updatable here. WARNING: managing rules over EWS removes the client-side rule blob desktop Outlook keeps, which can wipe rules created in Outlook itself.",
+        update_inbox_rule,
+        request_model=models.UpdateInboxRuleRequest,
+        response_model=models.InboxRule,
+        destructive=True,
+    ),
+    ToolSpec(
+        "delete_inbox_rule",
+        "Delete a server-side inbox rule by id. WARNING: managing rules over EWS removes the client-side rule blob desktop Outlook keeps, which can wipe rules created in Outlook itself.",
+        delete_inbox_rule,
+        request_model=models.DeleteInboxRuleRequest,
+        response_model=models.ActionResult,
+        destructive=True,
+    ),
+    ToolSpec(
+        "get_out_of_office",
+        "Get the mailbox out-of-office (automatic reply) settings",
+        get_out_of_office,
+        response_model=models.OutOfOfficeSettings,
+        read_only=True,
+    ),
+    ToolSpec(
+        "set_out_of_office",
+        "Set the mailbox out-of-office (automatic reply): disabled, enabled, or "
+        "scheduled with a start/end window",
+        set_out_of_office,
+        request_model=models.OutOfOfficeSettings,
+        response_model=models.OutOfOfficeSettings,
+        destructive=True,
     ),
     ToolSpec(
         "list_emails",
@@ -90,7 +163,9 @@ TOOL_SPECS: list[ToolSpec] = [
     ),
     ToolSpec(
         "search_emails",
-        "Search emails",
+        "Search emails. Pass `query` for a substring match over subject/body/sender, "
+        "or `aqs` for server-side Advanced Query Syntax "
+        "(e.g. 'from:ivan AND hasattachments:true').",
         search_emails,
         request_model=models.SearchEmailsRequest,
         response_model=list[models.EmailSummary],
@@ -134,6 +209,31 @@ TOOL_SPECS: list[ToolSpec] = [
         copy_email,
         request_model=models.FolderActionRequest,
         response_model=models.ActionResult,
+    ),
+    ToolSpec(
+        "move_emails",
+        "Move many emails to another folder in one call. Per-item results: one "
+        "bad id does not fail the rest. Moved items get new ids.",
+        move_emails,
+        request_model=models.BulkMoveEmailsRequest,
+        response_model=models.BulkResult,
+        destructive=True,
+    ),
+    ToolSpec(
+        "copy_emails",
+        "Copy many emails to another folder in one call, with per-item results.",
+        copy_emails,
+        request_model=models.BulkMoveEmailsRequest,
+        response_model=models.BulkResult,
+    ),
+    ToolSpec(
+        "delete_emails",
+        "Delete many emails in one call, with per-item results. Soft-deletes to "
+        "Deleted Items unless hard_delete is set.",
+        delete_emails,
+        request_model=models.BulkDeleteEmailsRequest,
+        response_model=models.BulkResult,
+        destructive=True,
     ),
     ToolSpec(
         "delete_email",
@@ -216,6 +316,23 @@ TOOL_SPECS: list[ToolSpec] = [
         send_draft,
         request_model=models.SendDraftRequest,
         response_model=models.SendResult,
+        destructive=True,
+    ),
+    ToolSpec(
+        "add_attachment",
+        "Attach a local file to an existing message, typically a draft. The file "
+        "must live under EXCHANGE_ATTACHMENT_ROOT.",
+        add_attachment,
+        request_model=models.AddAttachmentRequest,
+        response_model=models.ActionResult,
+        destructive=True,
+    ),
+    ToolSpec(
+        "delete_attachment",
+        "Remove one attachment from a message by attachment id",
+        delete_attachment,
+        request_model=models.DeleteAttachmentRequest,
+        response_model=models.ActionResult,
         destructive=True,
     ),
     ToolSpec(

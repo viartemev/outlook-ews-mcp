@@ -7,6 +7,10 @@ from ..config import Settings
 from ..errors import APIError
 from ..exchange_client import ExchangeClient
 from ..models import (
+    AddAttachmentRequest,
+    DeleteAttachmentRequest,
+    BulkDeleteEmailsRequest,
+    BulkMoveEmailsRequest,
     CategorizeEmailRequest,
     CreateFolderRequest,
     DeleteEmailRequest,
@@ -53,6 +57,9 @@ forward_email = tool_handler(
     "forward_email", ForwardEmailRequest, before=_validate_outgoing_attachments
 )
 move_email = tool_handler("move_email", FolderActionRequest)
+move_emails = tool_handler("move_emails", BulkMoveEmailsRequest)
+copy_emails = tool_handler("copy_emails", BulkMoveEmailsRequest)
+delete_emails = tool_handler("delete_emails", BulkDeleteEmailsRequest)
 copy_email = tool_handler("copy_email", FolderActionRequest)
 delete_email = tool_handler("delete_email", DeleteEmailRequest)
 mark_email = tool_handler("mark_email", MarkEmailRequest)
@@ -69,6 +76,22 @@ send_draft = tool_handler("send_draft", SendDraftRequest)
 get_attachment = tool_handler(
     "get_attachment", GetAttachmentRequest, before=_validate_attachment_destination
 )
+
+
+def _validate_added_attachment(client: ExchangeClient, request: Any) -> None:
+    path = request.path
+    root = client.settings.attachment_root
+    if not path.is_absolute() and root is not None:
+        # Mirrors the backend: a relative path means "relative to the root",
+        # never relative to the server's own working directory.
+        path = root / path
+    _validate_attachments([path], client.settings)
+
+
+add_attachment = tool_handler(
+    "add_attachment", AddAttachmentRequest, before=_validate_added_attachment
+)
+delete_attachment = tool_handler("delete_attachment", DeleteAttachmentRequest)
 
 
 def _validate_within_root(paths: list[Path], root: Path | None, field: str) -> None:

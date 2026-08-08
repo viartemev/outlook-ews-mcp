@@ -6,7 +6,12 @@ from ..config import Settings
 from ..errors import ExchangeUnavailableError
 from ..models import (
     ActionResult,
+    AddAttachmentRequest,
     AttachmentResult,
+    DeleteAttachmentRequest,
+    BulkDeleteEmailsRequest,
+    BulkMoveEmailsRequest,
+    BulkResult,
     AvailabilityResult,
     CalendarInfo,
     CalendarEvent,
@@ -40,7 +45,13 @@ from ..models import (
     ListEventsRequest,
     ListFoldersRequest,
     MailboxInfo,
+    DelegateInfo,
+    CreateInboxRuleRequest,
+    DeleteInboxRuleRequest,
+    InboxRule,
+    UpdateInboxRuleRequest,
     MarkEmailRequest,
+    OutOfOfficeSettings,
     PingResult,
     RenameFolderRequest,
     ReplyEmailRequest,
@@ -69,6 +80,27 @@ class UnconfiguredExchangeBackend:
         self._raise()
 
     def get_mailbox_info(self) -> MailboxInfo:
+        self._raise()
+
+    def get_out_of_office(self) -> OutOfOfficeSettings:
+        self._raise()
+
+    def list_delegates(self) -> list[DelegateInfo]:
+        self._raise()
+
+    def list_inbox_rules(self) -> list[InboxRule]:
+        self._raise()
+
+    def create_inbox_rule(self, request: CreateInboxRuleRequest) -> InboxRule:
+        self._raise()
+
+    def update_inbox_rule(self, request: UpdateInboxRuleRequest) -> InboxRule:
+        self._raise()
+
+    def delete_inbox_rule(self, request: DeleteInboxRuleRequest) -> ActionResult:
+        self._raise()
+
+    def set_out_of_office(self, request: OutOfOfficeSettings) -> OutOfOfficeSettings:
         self._raise()
 
     def list_emails(self, request: ListEmailsRequest) -> list[EmailSummary]:
@@ -104,6 +136,15 @@ class UnconfiguredExchangeBackend:
     def mark_email(self, request: MarkEmailRequest) -> ActionResult:
         self._raise()
 
+    def move_emails(self, request: BulkMoveEmailsRequest) -> BulkResult:
+        self._raise()
+
+    def copy_emails(self, request: BulkMoveEmailsRequest) -> BulkResult:
+        self._raise()
+
+    def delete_emails(self, request: BulkDeleteEmailsRequest) -> BulkResult:
+        self._raise()
+
     def categorize_email(self, request: CategorizeEmailRequest) -> ActionResult:
         self._raise()
 
@@ -126,6 +167,12 @@ class UnconfiguredExchangeBackend:
         self._raise()
 
     def send_draft(self, request: SendDraftRequest) -> SendResult:
+        self._raise()
+
+    def add_attachment(self, request: AddAttachmentRequest) -> ActionResult:
+        self._raise()
+
+    def delete_attachment(self, request: DeleteAttachmentRequest) -> ActionResult:
         self._raise()
 
     def get_attachment(self, request: GetAttachmentRequest) -> AttachmentResult:

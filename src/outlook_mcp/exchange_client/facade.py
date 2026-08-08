@@ -8,7 +8,12 @@ from ..config import Settings
 from ..errors import APIError
 from ..models import (
     ActionResult,
+    AddAttachmentRequest,
     AttachmentResult,
+    DeleteAttachmentRequest,
+    BulkDeleteEmailsRequest,
+    BulkMoveEmailsRequest,
+    BulkResult,
     AvailabilityResult,
     CalendarInfo,
     CalendarEvent,
@@ -42,7 +47,13 @@ from ..models import (
     ListEventsRequest,
     ListFoldersRequest,
     MailboxInfo,
+    DelegateInfo,
+    CreateInboxRuleRequest,
+    DeleteInboxRuleRequest,
+    InboxRule,
+    UpdateInboxRuleRequest,
     MarkEmailRequest,
+    OutOfOfficeSettings,
     PingResult,
     RenameFolderRequest,
     ReplyEmailRequest,
@@ -105,6 +116,28 @@ class ExchangeClient:
     def get_mailbox_info(self) -> MailboxInfo:
         return self._retry_read(self.backend.get_mailbox_info)
 
+    def list_delegates(self) -> list[DelegateInfo]:
+        return self._retry_read(self.backend.list_delegates)
+
+    def list_inbox_rules(self) -> list[InboxRule]:
+        return self._retry_read(self.backend.list_inbox_rules)
+
+    def create_inbox_rule(self, request: CreateInboxRuleRequest) -> InboxRule:
+        return self.backend.create_inbox_rule(request)
+
+    def update_inbox_rule(self, request: UpdateInboxRuleRequest) -> InboxRule:
+        return self.backend.update_inbox_rule(request)
+
+    def delete_inbox_rule(self, request: DeleteInboxRuleRequest) -> ActionResult:
+        return self.backend.delete_inbox_rule(request)
+
+    def get_out_of_office(self) -> OutOfOfficeSettings:
+        return self._retry_read(self.backend.get_out_of_office)
+
+    def set_out_of_office(self, request: OutOfOfficeSettings) -> OutOfOfficeSettings:
+        # A write: never retried, same as every other mutation here.
+        return self.backend.set_out_of_office(request)
+
     def list_emails(self, request: ListEmailsRequest) -> list[EmailSummary]:
         return self._retry_read(lambda: self.backend.list_emails(request))
 
@@ -138,6 +171,15 @@ class ExchangeClient:
     def mark_email(self, request: MarkEmailRequest) -> ActionResult:
         return self.backend.mark_email(request)
 
+    def move_emails(self, request: BulkMoveEmailsRequest) -> BulkResult:
+        return self.backend.move_emails(request)
+
+    def copy_emails(self, request: BulkMoveEmailsRequest) -> BulkResult:
+        return self.backend.copy_emails(request)
+
+    def delete_emails(self, request: BulkDeleteEmailsRequest) -> BulkResult:
+        return self.backend.delete_emails(request)
+
     def categorize_email(self, request: CategorizeEmailRequest) -> ActionResult:
         return self.backend.categorize_email(request)
 
@@ -161,6 +203,12 @@ class ExchangeClient:
 
     def send_draft(self, request: SendDraftRequest) -> SendResult:
         return self.backend.send_draft(request)
+
+    def add_attachment(self, request: AddAttachmentRequest) -> ActionResult:
+        return self.backend.add_attachment(request)
+
+    def delete_attachment(self, request: DeleteAttachmentRequest) -> ActionResult:
+        return self.backend.delete_attachment(request)
 
     def get_attachment(self, request: GetAttachmentRequest) -> AttachmentResult:
         # Not retried despite being read-only: it writes the downloaded content to
