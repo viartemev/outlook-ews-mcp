@@ -207,6 +207,7 @@ class SendEmailRequest(ExchangeModel):
     reply_to: EmailStr | None = None
     attachments: list[Path] = Field(default_factory=list)
     importance: Literal["low", "normal", "high"] = "normal"
+    include_signature: bool = True
 
 
 class ReplyEmailRequest(ExchangeModel):
@@ -214,6 +215,7 @@ class ReplyEmailRequest(ExchangeModel):
     body: str
     reply_all: bool = False
     attachments: list[Path] = Field(default_factory=list)
+    include_signature: bool = True
 
 
 class ForwardEmailRequest(ExchangeModel):
@@ -221,6 +223,7 @@ class ForwardEmailRequest(ExchangeModel):
     to: list[EmailStr] = Field(min_length=1)
     comment: str | None = None
     attachments: list[Path] = Field(default_factory=list)
+    include_signature: bool = True
 
 
 class FolderActionRequest(ExchangeModel):
@@ -367,6 +370,7 @@ class DraftEmailRequest(ExchangeModel):
     cc: list[EmailStr] = Field(default_factory=list)
     bcc: list[EmailStr] = Field(default_factory=list)
     attachments: list[Path] = Field(default_factory=list)
+    include_signature: bool = True
 
 
 class SendDraftRequest(ExchangeModel):

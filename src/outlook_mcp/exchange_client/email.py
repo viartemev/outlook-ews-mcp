@@ -230,10 +230,22 @@ class EmailOperationsMixin(BaseEWSBackend):
         text, _ = self._extract_message_body(item)
         return text[:200]
 
-    def _make_message(self, request: SendEmailRequest | DraftEmailRequest) -> Message:
-        body: str | HTMLBody = (
-            HTMLBody(request.body) if request.body_type == "html" else request.body
+    def _with_signature(self, body: str, body_type: str, include: bool) -> str:
+        """Append the configured signature; html bodies get the html signature only,
+        text bodies the text one -- no cross-conversion between the two."""
+        if not include:
+            return body
+        signature = (
+            self.settings.signature_html if body_type == "html" else self.settings.signature_text
         )
+        if not signature:
+            return body
+        separator = "<br><br>" if body_type == "html" else "\n\n"
+        return f"{body}{separator}{signature}"
+
+    def _make_message(self, request: SendEmailRequest | DraftEmailRequest) -> Message:
+        body_text = self._with_signature(request.body, request.body_type, request.include_signature)
+        body: str | HTMLBody = HTMLBody(body_text) if request.body_type == "html" else body_text
         reply_to: str | None = getattr(request, "reply_to", None)
         importance: str | None = getattr(request, "importance", None)
         message = Message(
@@ -526,10 +538,11 @@ class EmailOperationsMixin(BaseEWSBackend):
         item = self._fetch_item(request.id, expected_type=Message)
         try:
             subject = reply_subject(item.subject)
+            body = self._with_signature(request.body, "text", request.include_signature)
             response = (
-                item.create_reply_all(subject=subject, body=request.body)
+                item.create_reply_all(subject=subject, body=body)
                 if request.reply_all
-                else item.create_reply(subject=subject, body=request.body)
+                else item.create_reply(subject=subject, body=body)
             )
             return self._send_response_object(response, request.attachments)
         except Exception as exc:  # noqa: BLE001
@@ -540,7 +553,7 @@ class EmailOperationsMixin(BaseEWSBackend):
         try:
             response = item.create_forward(
                 subject=forward_subject(item.subject),
-                body=request.comment or "",
+                body=self._with_signature(request.comment or "", "text", request.include_signature),
                 to_recipients=[self._mailbox(address) for address in request.to],
             )
             return self._send_response_object(response, request.attachments)
