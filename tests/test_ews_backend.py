@@ -826,6 +826,77 @@ def test_resolve_folder_falls_back_to_name_lookup_when_id_lookup_errors(
     assert result is child
 
 
+class _EmptyIdLookup:
+    def __init__(self, account, folders) -> None:
+        pass
+
+    def resolve(self):
+        return iter(())
+
+
+def test_resolve_folder_finds_user_folders_under_top_of_information_store(
+    settings, monkeypatch
+) -> None:
+    """A real mailbox keeps user folders under Top of Information Store; root's
+    own children are TOIS plus dozens of hidden system folders. Verified against
+    a live Exchange 2019 mailbox where every user folder failed to resolve."""
+    backend = EWSExchangeBackend(settings)
+    projects = SimpleNamespace(name="Help Заявки", children=[])
+    tois = SimpleNamespace(name="Top of Information Store", children=[projects])
+    root = SimpleNamespace(name="root", children=[tois], tois=tois)
+
+    monkeypatch.setattr(exchange_client_base, "FolderCollection", _EmptyIdLookup)
+    backend._account = _fake_account_for_folder_resolution(root)
+
+    assert backend._resolve_folder("Help Заявки") is projects
+    # Case-insensitive, like every other name comparison in this resolver.
+    assert backend._resolve_folder("help заявки") is projects
+
+
+def test_resolve_folder_walks_a_path_rooted_at_a_wellknown_folder(settings, monkeypatch) -> None:
+    backend = EWSExchangeBackend(settings)
+    clients = SimpleNamespace(name="Clients", children=[])
+    projects = SimpleNamespace(name="Projects", children=[clients])
+    inbox = SimpleNamespace(name="Входящие", children=[projects])
+    tois = SimpleNamespace(name="Top of Information Store", children=[inbox])
+    root = SimpleNamespace(name="root", children=[tois], tois=tois)
+
+    monkeypatch.setattr(exchange_client_base, "FolderCollection", _EmptyIdLookup)
+    account = _fake_account_for_folder_resolution(root)
+    account.inbox = inbox
+    backend._account = account
+
+    assert backend._resolve_folder("Inbox/Projects/Clients") is clients
+
+
+def test_resolve_folder_survives_a_mailbox_without_tois(settings, monkeypatch) -> None:
+    backend = EWSExchangeBackend(settings)
+    child = SimpleNamespace(name="Projects", children=[])
+
+    class RootWithoutTois(SimpleNamespace):
+        @property
+        def tois(self):
+            raise ErrorItemNotFound("no TOIS on this mailbox")
+
+    root = RootWithoutTois(name="root", children=[child])
+    monkeypatch.setattr(exchange_client_base, "FolderCollection", _EmptyIdLookup)
+    backend._account = _fake_account_for_folder_resolution(root)
+
+    assert backend._resolve_folder("Projects") is child
+
+
+def test_resolve_folder_raises_not_found_for_an_unknown_path(settings, monkeypatch) -> None:
+    backend = EWSExchangeBackend(settings)
+    tois = SimpleNamespace(name="Top of Information Store", children=[])
+    root = SimpleNamespace(name="root", children=[tois], tois=tois)
+
+    monkeypatch.setattr(exchange_client_base, "FolderCollection", _EmptyIdLookup)
+    backend._account = _fake_account_for_folder_resolution(root)
+
+    with pytest.raises(NotFoundError):
+        backend._resolve_folder("Nope/Nowhere")
+
+
 def test_resolve_folder_by_id_propagates_auth_failure_instead_of_swallowing_it(
     settings, monkeypatch
 ) -> None:
