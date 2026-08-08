@@ -443,6 +443,9 @@ class ListCategoriesRequest(ExchangeModel):
 class CategoryUsage(ExchangeModel):
     name: str
     count: int
+    #: Outlook preset colour name; None when the mailbox master list is
+    #: unavailable and counts were collected from recent messages instead.
+    color: str | None = None
 
 
 class ListFoldersRequest(ExchangeModel):

@@ -14,6 +14,7 @@ from typing import Any
 from exchangelib import FileAttachment, Folder, HTMLBody, ItemAttachment, Message, Q
 from exchangelib.errors import (
     ErrorInvalidRestriction,
+    ErrorItemNotFound,
     ErrorUnsupportedPathForQuery,
     ErrorUnsupportedQueryFilter,
 )
@@ -724,7 +725,89 @@ class EmailOperationsMixin(BaseEWSBackend):
             categories=updated,
         )
 
+    #: Outlook's 25 preset category colours, by the index stored in the
+    #: CategoryList XML. -1 (or anything unknown) means "no colour".
+    _CATEGORY_COLORS = (
+        "red",
+        "orange",
+        "peach",
+        "yellow",
+        "green",
+        "teal",
+        "olive",
+        "blue",
+        "purple",
+        "maroon",
+        "steel",
+        "dark_steel",
+        "gray",
+        "dark_gray",
+        "black",
+        "dark_red",
+        "dark_orange",
+        "brown",
+        "dark_yellow",
+        "dark_green",
+        "dark_teal",
+        "dark_olive",
+        "dark_blue",
+        "dark_purple",
+        "dark_maroon",
+    )
+
+    def _master_category_list(self) -> list[CategoryUsage] | None:
+        """Read the mailbox master category list, or None when it does not exist.
+
+        Outlook stores it as the "CategoryList" user configuration on the
+        Calendar folder -- an XML document, not a folder of items. This is the
+        list the Outlook UI shows, including categories that are defined but not
+        currently applied to any message.
+        """
+        import xml.etree.ElementTree as ET
+
+        try:
+            config = self.account.calendar.get_user_configuration(name="CategoryList")
+        except ErrorItemNotFound:
+            return None
+        except Exception as exc:  # noqa: BLE001
+            raise self._map_exception(exc) from exc
+        xml_data = getattr(config, "xml_data", None)
+        if not xml_data:
+            return None
+        try:
+            root = ET.fromstring(xml_data)
+        except ET.ParseError:
+            logger.warning("CategoryList user configuration holds unparseable XML; ignoring it")
+            return None
+        namespace = root.tag.partition("}")[0].lstrip("{") if "}" in root.tag else ""
+        tag = f"{{{namespace}}}category" if namespace else "category"
+        result = []
+        for category in root.iter(tag):
+            name = (category.get("name") or "").strip()
+            if not name:
+                continue
+            try:
+                color_index = int(category.get("color", "-1"))
+            except ValueError:
+                color_index = -1
+            color = (
+                self._CATEGORY_COLORS[color_index]
+                if 0 <= color_index < len(self._CATEGORY_COLORS)
+                else None
+            )
+            try:
+                count = max(0, int(category.get("usageCount", "0")))
+            except ValueError:
+                count = 0
+            result.append(CategoryUsage(name=name, count=count, color=color))
+        return result or None
+
     def list_categories(self, request: ListCategoriesRequest) -> list[CategoryUsage]:
+        master = self._master_category_list()
+        if master is not None:
+            return sorted(master, key=lambda usage: (-usage.count, usage.name.casefold()))
+        # No master list on this mailbox -- fall back to counting what the most
+        # recent messages actually carry. Colours are unknown on this path.
         counts: Counter[str] = Counter()
         labels: dict[str, str] = {}
         for name in request.folders:
