@@ -9,6 +9,9 @@ import outlook_mcp.exchange_client.mailbox as mailbox_module
 from outlook_mcp.errors import NotFoundError
 from outlook_mcp.exchange_client import EWSExchangeBackend
 from outlook_mcp.models import (
+    CreateInboxRuleActions,
+    CreateInboxRuleConditions,
+    InboxRule,
     CreateInboxRuleRequest,
     DeleteInboxRuleRequest,
     InboxRuleActions,
@@ -97,8 +100,8 @@ def test_list_inbox_rules_maps_the_curated_subset(backend) -> None:
 def test_create_inbox_rule_builds_ews_conditions_and_actions(backend) -> None:
     request = CreateInboxRuleRequest(
         display_name="Filed",
-        conditions=InboxRuleConditions(from_addresses=["boss@example.com"]),
-        actions=InboxRuleActions(assign_categories=["Boss"], mark_as_read=True),
+        conditions=CreateInboxRuleConditions(from_addresses=["boss@example.com"]),
+        actions=CreateInboxRuleActions(assign_categories=["Boss"], mark_as_read=True),
     )
     FakeRuleService.reset(
         rules=[_server_rule(display_name="Filed", actions=Actions(mark_as_read=True))]
@@ -150,18 +153,38 @@ def test_create_inbox_rule_requires_a_condition_and_an_action() -> None:
     with pytest.raises(ValueError, match="at least one condition"):
         CreateInboxRuleRequest(
             display_name="Empty",
-            conditions=InboxRuleConditions(),
-            actions=InboxRuleActions(mark_as_read=True),
+            conditions=CreateInboxRuleConditions(),
+            actions=CreateInboxRuleActions(mark_as_read=True),
         )
 
     with pytest.raises(ValueError, match="at least one action"):
         CreateInboxRuleRequest(
             display_name="Empty",
-            conditions=InboxRuleConditions(has_attachments=True),
-            actions=InboxRuleActions(),
+            conditions=CreateInboxRuleConditions(has_attachments=True),
+            actions=CreateInboxRuleActions(),
         )
 
 
 def test_update_inbox_rule_requires_something_to_update() -> None:
     with pytest.raises(ValueError, match="nothing to update"):
         UpdateInboxRuleRequest(id="rule-1")
+
+
+def test_a_rule_read_from_the_server_survives_x500_addresses() -> None:
+    """A live mailbox had a rule whose from_addresses held an X.500 distinguished
+    name, which crashed list_inbox_rules. Read models must accept whatever the
+    server reports; only *creating* a rule stays strict."""
+    x500 = "/o=TANDER/ou=Exchange Administrative Group/cn=Recipients/cn=abc-support"
+
+    rule = InboxRule(
+        display_name="From support notebook",
+        conditions=InboxRuleConditions(from_addresses=[x500]),
+        actions=InboxRuleActions(forward_to=[x500]),
+    )
+
+    assert rule.conditions.from_addresses == [x500]
+
+    with pytest.raises(ValueError):
+        CreateInboxRuleConditions(from_addresses=[x500])
+    with pytest.raises(ValueError):
+        CreateInboxRuleActions(forward_to=[x500])

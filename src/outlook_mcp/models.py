@@ -260,7 +260,10 @@ class MarkEmailRequest(ExchangeModel):
 
 
 class InboxRuleConditions(ExchangeModel):
-    from_addresses: list[EmailStr] = Field(default_factory=list)
+    #: Lenient on purpose: the server reports whatever a rule was created with,
+    #: including X.500 distinguished names for internal senders. Read paths must
+    #: survive that; outgoing rules use CreateInboxRuleConditions below.
+    from_addresses: list[ServerAddress] = Field(default_factory=list)
     contains_sender_strings: list[str] = Field(default_factory=list)
     contains_subject_strings: list[str] = Field(default_factory=list)
     contains_subject_or_body_strings: list[str] = Field(default_factory=list)
@@ -284,7 +287,7 @@ class InboxRuleActions(ExchangeModel):
     assign_categories: list[str] = Field(default_factory=list)
     mark_as_read: bool | None = None
     delete: bool | None = None
-    forward_to: list[EmailStr] = Field(default_factory=list)
+    forward_to: list[ServerAddress] = Field(default_factory=list)
 
     def is_empty(self) -> bool:
         return not (
@@ -294,6 +297,16 @@ class InboxRuleActions(ExchangeModel):
             or self.delete is not None
             or self.forward_to
         )
+
+
+class CreateInboxRuleConditions(InboxRuleConditions):
+    #: Strict where the base is lenient: a new rule must not be created against
+    #: a garbage address, only read back with one.
+    from_addresses: list[EmailStr] = Field(default_factory=list)
+
+
+class CreateInboxRuleActions(InboxRuleActions):
+    forward_to: list[EmailStr] = Field(default_factory=list)
 
 
 class InboxRule(ExchangeModel):
@@ -311,8 +324,8 @@ class CreateInboxRuleRequest(ExchangeModel):
     display_name: str = Field(min_length=1)
     priority: int = Field(default=1, ge=1)
     is_enabled: bool = True
-    conditions: InboxRuleConditions
-    actions: InboxRuleActions
+    conditions: CreateInboxRuleConditions
+    actions: CreateInboxRuleActions
     #: EWS documented behaviour: managing rules over EWS removes the client-side
     #: rule blob that desktop Outlook keeps, which can wipe rules created there.
     remove_outlook_rule_blob: bool = True
