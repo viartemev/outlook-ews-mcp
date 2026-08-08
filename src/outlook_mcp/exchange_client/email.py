@@ -917,11 +917,34 @@ class EmailOperationsMixin(BaseEWSBackend):
             raise self._map_exception(exc, item_id=request.id) from exc
 
     def add_attachment(self, request: AddAttachmentRequest) -> ActionResult:
+        path = request.path
+        if not path.is_absolute():
+            root = self.settings.attachment_root
+            if root is None:
+                raise APIError(
+                    "validation_error",
+                    "relative attachment paths need EXCHANGE_ATTACHMENT_ROOT",
+                    details=[
+                        {
+                            "field": "path",
+                            "reason": "set EXCHANGE_ATTACHMENT_ROOT or pass an absolute path",
+                        }
+                    ],
+                )
+            # A relative path means "relative to the configured root" -- resolving
+            # it against the server's cwd would attach whatever happens to lie there.
+            path = root / path
+        if not path.is_file():
+            raise APIError(
+                "validation_error",
+                "attachment file does not exist",
+                details=[{"field": "path", "reason": f"no such file: {path}"}],
+            )
         item = self._fetch_item(request.email_id, expected_type=Message)
         try:
             # Same fd-validated read path as outgoing mail, so a FIFO or a file
             # swapped after the stat gets rejected here too.
-            self._attach_files(item, [request.path])
+            self._attach_files(item, [path])
         except APIError:
             raise
         except Exception as exc:  # noqa: BLE001

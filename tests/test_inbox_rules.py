@@ -43,17 +43,30 @@ class FakeGet(FakeRuleService):
 
 class FakeCreate(FakeRuleService):
     def call(self, rule, remove_outlook_rule_blob=True):
-        FakeRuleService.calls["create"].append((rule, remove_outlook_rule_blob))
+        def lazy():
+            # Like the real service: the request is only sent when consumed.
+            FakeRuleService.calls["create"].append((rule, remove_outlook_rule_blob))
+            yield from ()
+
+        return lazy()
 
 
 class FakeSet(FakeRuleService):
     def call(self, rule, remove_outlook_rule_blob=True):
-        FakeRuleService.calls["set"].append((rule, remove_outlook_rule_blob))
+        def lazy():
+            FakeRuleService.calls["set"].append((rule, remove_outlook_rule_blob))
+            yield from ()
+
+        return lazy()
 
 
 class FakeDelete(FakeRuleService):
     def call(self, rule, remove_outlook_rule_blob=True):
-        FakeRuleService.calls["delete"].append((rule.id, remove_outlook_rule_blob))
+        def lazy():
+            FakeRuleService.calls["delete"].append((rule.id, remove_outlook_rule_blob))
+            yield from ()
+
+        return lazy()
 
 
 @pytest.fixture

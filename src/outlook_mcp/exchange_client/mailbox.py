@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Literal, cast
+from typing import Any, Literal, cast
 
 from exchangelib.properties import (
     Actions,
@@ -201,11 +201,24 @@ class MailboxSettingsMixin(BaseEWSBackend):
             result.append(self._rule_to_model(rule))
         return result
 
+    def _consume_rule_service(self, elements: Any) -> None:
+        """Drain a rule-service generator so the request is actually sent.
+
+        exchangelib's Create/Set/DeleteInboxRule.call() return a lazy generator;
+        nothing goes over the wire until it is consumed. Any element may also be
+        an Exception describing a per-rule operation error.
+        """
+        for element in elements:
+            if isinstance(element, Exception):
+                raise element
+
     def create_inbox_rule(self, request: CreateInboxRuleRequest) -> InboxRule:
         rule = self._rule_from_request(request)
         try:
-            CreateInboxRule(account=self.account).call(
-                rule=rule, remove_outlook_rule_blob=request.remove_outlook_rule_blob
+            self._consume_rule_service(
+                CreateInboxRule(account=self.account).call(
+                    rule=rule, remove_outlook_rule_blob=request.remove_outlook_rule_blob
+                )
             )
         except Exception as exc:  # noqa: BLE001
             raise self._map_exception(exc) from exc
@@ -232,9 +245,11 @@ class MailboxSettingsMixin(BaseEWSBackend):
                 if request.priority is not None:
                     rule.priority = request.priority
                 try:
-                    SetInboxRule(account=self.account).call(
-                        rule=rule,
-                        remove_outlook_rule_blob=request.remove_outlook_rule_blob,
+                    self._consume_rule_service(
+                        SetInboxRule(account=self.account).call(
+                            rule=rule,
+                            remove_outlook_rule_blob=request.remove_outlook_rule_blob,
+                        )
                     )
                 except Exception as exc:  # noqa: BLE001
                     raise self._map_exception(exc) from exc
@@ -244,8 +259,10 @@ class MailboxSettingsMixin(BaseEWSBackend):
     def delete_inbox_rule(self, request: DeleteInboxRuleRequest) -> ActionResult:
         rule = Rule(id=request.id)
         try:
-            DeleteInboxRule(account=self.account).call(
-                rule=rule, remove_outlook_rule_blob=request.remove_outlook_rule_blob
+            self._consume_rule_service(
+                DeleteInboxRule(account=self.account).call(
+                    rule=rule, remove_outlook_rule_blob=request.remove_outlook_rule_blob
+                )
             )
         except Exception as exc:  # noqa: BLE001
             raise self._map_exception(exc) from exc

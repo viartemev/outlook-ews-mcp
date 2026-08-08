@@ -79,7 +79,13 @@ get_attachment = tool_handler(
 
 
 def _validate_added_attachment(client: ExchangeClient, request: Any) -> None:
-    _validate_attachments([request.path], client.settings)
+    path = request.path
+    root = client.settings.attachment_root
+    if not path.is_absolute() and root is not None:
+        # Mirrors the backend: a relative path means "relative to the root",
+        # never relative to the server's own working directory.
+        path = root / path
+    _validate_attachments([path], client.settings)
 
 
 add_attachment = tool_handler(
