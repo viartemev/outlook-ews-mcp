@@ -28,6 +28,11 @@ from ..models import (
     ActionResult,
     Attachment,
     AttachmentResult,
+    BulkDeleteEmailsRequest,
+    BulkItemFailure,
+    BulkItemResult,
+    BulkMoveEmailsRequest,
+    BulkResult,
     CategorizeEmailRequest,
     CategoryUsage,
     CreateFolderRequest,
@@ -631,6 +636,51 @@ class EmailOperationsMixin(BaseEWSBackend):
             return ActionResult(id=request.id, status="updated", updated_fields=updated_fields)
         except Exception as exc:  # noqa: BLE001
             raise self._map_exception(exc, item_id=request.id) from exc
+
+    def _bulk_result(self, ids: list[str], results: list[Any]) -> BulkResult:
+        if len(results) != len(ids):
+            # Moving/copying into a public folder or another mailbox returns no
+            # per-item ids at all; pad so every input id still gets a verdict.
+            results = list(results) + [None] * (len(ids) - len(results))
+        succeeded: list[BulkItemResult] = []
+        failed: list[BulkItemFailure] = []
+        for item_id, result in zip(ids, results):
+            if isinstance(result, Exception):
+                mapped = self._map_exception(result, item_id=item_id)
+                failed.append(
+                    BulkItemFailure(id=item_id, error=mapped.code, message=mapped.message)
+                )
+            else:
+                new_id = result[0] if isinstance(result, tuple) else None
+                succeeded.append(BulkItemResult(id=item_id, new_id=new_id))
+        return BulkResult(succeeded=succeeded, failed=failed)
+
+    def move_emails(self, request: BulkMoveEmailsRequest) -> BulkResult:
+        destination = self._resolve_folder(request.folder)
+        ids = [(item_id, None) for item_id in request.ids]
+        try:
+            results = self.account.bulk_move(ids=ids, to_folder=destination)
+        except Exception as exc:  # noqa: BLE001
+            raise self._map_exception(exc) from exc
+        return self._bulk_result(request.ids, results)
+
+    def copy_emails(self, request: BulkMoveEmailsRequest) -> BulkResult:
+        destination = self._resolve_folder(request.folder)
+        ids = [(item_id, None) for item_id in request.ids]
+        try:
+            results = self.account.bulk_copy(ids=ids, to_folder=destination)
+        except Exception as exc:  # noqa: BLE001
+            raise self._map_exception(exc) from exc
+        return self._bulk_result(request.ids, results)
+
+    def delete_emails(self, request: BulkDeleteEmailsRequest) -> BulkResult:
+        delete_type = HARD_DELETE if request.hard_delete else MOVE_TO_DELETED_ITEMS
+        ids = [(item_id, None) for item_id in request.ids]
+        try:
+            results = self.account.bulk_delete(ids=ids, delete_type=delete_type)
+        except Exception as exc:  # noqa: BLE001
+            raise self._map_exception(exc) from exc
+        return self._bulk_result(request.ids, results)
 
     def categorize_email(self, request: CategorizeEmailRequest) -> ActionResult:
         item = self._fetch_item(request.id, expected_type=Message)

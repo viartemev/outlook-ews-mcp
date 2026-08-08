@@ -256,6 +256,33 @@ class MarkEmailRequest(ExchangeModel):
         return self
 
 
+class BulkMoveEmailsRequest(ExchangeModel):
+    ids: list[str] = Field(min_length=1, max_length=500)
+    folder: str = Field(min_length=1)
+
+
+class BulkDeleteEmailsRequest(ExchangeModel):
+    ids: list[str] = Field(min_length=1, max_length=500)
+    hard_delete: bool = False
+
+
+class BulkItemResult(ExchangeModel):
+    id: str
+    #: Move/copy give the item a new id; the old one is dead after the operation.
+    new_id: str | None = None
+
+
+class BulkItemFailure(ExchangeModel):
+    id: str
+    error: str
+    message: str
+
+
+class BulkResult(ExchangeModel):
+    succeeded: list[BulkItemResult] = Field(default_factory=list)
+    failed: list[BulkItemFailure] = Field(default_factory=list)
+
+
 class CategorizeEmailRequest(ExchangeModel):
     id: str
     categories: list[str] = Field(default_factory=list)

@@ -9,6 +9,9 @@ from ..errors import APIError
 from ..models import (
     ActionResult,
     AttachmentResult,
+    BulkDeleteEmailsRequest,
+    BulkMoveEmailsRequest,
+    BulkResult,
     AvailabilityResult,
     CalendarInfo,
     CalendarEvent,
@@ -137,6 +140,15 @@ class ExchangeClient:
 
     def mark_email(self, request: MarkEmailRequest) -> ActionResult:
         return self.backend.mark_email(request)
+
+    def move_emails(self, request: BulkMoveEmailsRequest) -> BulkResult:
+        return self.backend.move_emails(request)
+
+    def copy_emails(self, request: BulkMoveEmailsRequest) -> BulkResult:
+        return self.backend.copy_emails(request)
+
+    def delete_emails(self, request: BulkDeleteEmailsRequest) -> BulkResult:
+        return self.backend.delete_emails(request)
 
     def categorize_email(self, request: CategorizeEmailRequest) -> ActionResult:
         return self.backend.categorize_email(request)

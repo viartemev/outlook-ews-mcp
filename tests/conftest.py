@@ -10,6 +10,10 @@ from outlook_mcp.exchange_client import ExchangeClient
 from outlook_mcp.models import (
     ActionResult,
     AttachmentResult,
+    BulkDeleteEmailsRequest,
+    BulkItemResult,
+    BulkMoveEmailsRequest,
+    BulkResult,
     AvailabilityResult,
     CalendarInfo,
     CalendarEvent,
@@ -161,6 +165,23 @@ class FakeExchangeBackend:
             field for field in ["read", "flag", "importance"] if getattr(request, field) is not None
         ]
         return ActionResult(id=request.id, status="updated", updated_fields=updated_fields)
+
+    def move_emails(self, request: BulkMoveEmailsRequest) -> BulkResult:
+        return BulkResult(
+            succeeded=[
+                BulkItemResult(id=item_id, new_id=f"{item_id}-moved") for item_id in request.ids
+            ]
+        )
+
+    def copy_emails(self, request: BulkMoveEmailsRequest) -> BulkResult:
+        return BulkResult(
+            succeeded=[
+                BulkItemResult(id=item_id, new_id=f"{item_id}-copy") for item_id in request.ids
+            ]
+        )
+
+    def delete_emails(self, request: BulkDeleteEmailsRequest) -> BulkResult:
+        return BulkResult(succeeded=[BulkItemResult(id=item_id) for item_id in request.ids])
 
     def categorize_email(self, request: CategorizeEmailRequest) -> ActionResult:
         existing = ["Existing"]

@@ -47,6 +47,7 @@ Secure MCP server for on-prem Microsoft Exchange (EWS) with tools for email, cal
 - `move_email`
 - `copy_email`
 - `delete_email`
+- `move_emails` / `copy_emails` / `delete_emails` — bulk variants with per-item results
 - `mark_email`
 - `list_folders`
 - `create_folder`

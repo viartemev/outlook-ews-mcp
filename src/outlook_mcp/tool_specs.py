@@ -26,6 +26,7 @@ from .tools.email import (
     create_draft,
     create_folder,
     delete_email,
+    delete_emails,
     delete_folder,
     forward_email,
     get_attachment,
@@ -36,6 +37,8 @@ from .tools.email import (
     list_folders,
     mark_email,
     move_email,
+    move_emails,
+    copy_emails,
     rename_folder,
     reply_email,
     search_emails,
@@ -136,6 +139,31 @@ TOOL_SPECS: list[ToolSpec] = [
         copy_email,
         request_model=models.FolderActionRequest,
         response_model=models.ActionResult,
+    ),
+    ToolSpec(
+        "move_emails",
+        "Move many emails to another folder in one call. Per-item results: one "
+        "bad id does not fail the rest. Moved items get new ids.",
+        move_emails,
+        request_model=models.BulkMoveEmailsRequest,
+        response_model=models.BulkResult,
+        destructive=True,
+    ),
+    ToolSpec(
+        "copy_emails",
+        "Copy many emails to another folder in one call, with per-item results.",
+        copy_emails,
+        request_model=models.BulkMoveEmailsRequest,
+        response_model=models.BulkResult,
+    ),
+    ToolSpec(
+        "delete_emails",
+        "Delete many emails in one call, with per-item results. Soft-deletes to "
+        "Deleted Items unless hard_delete is set.",
+        delete_emails,
+        request_model=models.BulkDeleteEmailsRequest,
+        response_model=models.BulkResult,
+        destructive=True,
     ),
     ToolSpec(
         "delete_email",

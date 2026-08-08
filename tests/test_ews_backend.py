@@ -1454,6 +1454,61 @@ def test_search_emails_matches_subject_or_body_or_sender_in_one_pass(settings) -
     assert "author" in restriction_text
 
 
+def test_bulk_move_reports_per_item_results_without_failing_the_batch(settings) -> None:
+    """One bad id out of a batch must not undo or hide the moves that worked."""
+    backend = EWSExchangeBackend(settings)
+
+    def bulk_move(ids, to_folder):
+        return [("new-1", "ck"), ErrorItemNotFound("gone"), ("new-3", "ck")]
+
+    account = _fake_account_for_folder_resolution(object())
+    account.inbox = object()
+    account.bulk_move = bulk_move
+    backend._account = account
+
+    from outlook_mcp.models import BulkMoveEmailsRequest
+
+    result = backend.move_emails(BulkMoveEmailsRequest(ids=["a", "b", "c"], folder="inbox"))
+
+    assert [(r.id, r.new_id) for r in result.succeeded] == [("a", "new-1"), ("c", "new-3")]
+    assert [(f.id, f.error) for f in result.failed] == [("b", "not_found")]
+
+
+def test_bulk_delete_maps_soft_and_hard_delete_types(settings) -> None:
+    backend = EWSExchangeBackend(settings)
+    captured: list[str] = []
+
+    def bulk_delete(ids, delete_type):
+        captured.append(delete_type)
+        return [True for _ in ids]
+
+    backend._account = SimpleNamespace(bulk_delete=bulk_delete)
+
+    from outlook_mcp.models import BulkDeleteEmailsRequest
+
+    backend.delete_emails(BulkDeleteEmailsRequest(ids=["a"]))
+    backend.delete_emails(BulkDeleteEmailsRequest(ids=["a"], hard_delete=True))
+
+    assert captured == [MOVE_TO_DELETED_ITEMS, HARD_DELETE]
+
+
+def test_bulk_move_to_a_public_folder_still_gives_every_id_a_verdict(settings) -> None:
+    """Moving into a public folder returns no per-item ids at all; every input
+    id must still come back as succeeded rather than the call crashing."""
+    backend = EWSExchangeBackend(settings)
+    account = _fake_account_for_folder_resolution(object())
+    account.inbox = object()
+    account.bulk_move = lambda ids, to_folder: []
+    backend._account = account
+
+    from outlook_mcp.models import BulkMoveEmailsRequest
+
+    result = backend.move_emails(BulkMoveEmailsRequest(ids=["a", "b"], folder="inbox"))
+
+    assert [r.id for r in result.succeeded] == ["a", "b"]
+    assert result.failed == []
+
+
 def test_search_emails_aqs_sends_a_query_string_not_a_restriction(settings) -> None:
     """AQS goes to EWS as its own FindItem QueryString element and cannot be
     combined with a Restriction, so the substring filters must not be added."""

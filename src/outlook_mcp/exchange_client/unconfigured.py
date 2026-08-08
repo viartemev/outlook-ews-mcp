@@ -7,6 +7,9 @@ from ..errors import ExchangeUnavailableError
 from ..models import (
     ActionResult,
     AttachmentResult,
+    BulkDeleteEmailsRequest,
+    BulkMoveEmailsRequest,
+    BulkResult,
     AvailabilityResult,
     CalendarInfo,
     CalendarEvent,
@@ -102,6 +105,15 @@ class UnconfiguredExchangeBackend:
         self._raise()
 
     def mark_email(self, request: MarkEmailRequest) -> ActionResult:
+        self._raise()
+
+    def move_emails(self, request: BulkMoveEmailsRequest) -> BulkResult:
+        self._raise()
+
+    def copy_emails(self, request: BulkMoveEmailsRequest) -> BulkResult:
+        self._raise()
+
+    def delete_emails(self, request: BulkDeleteEmailsRequest) -> BulkResult:
         self._raise()
 
     def categorize_email(self, request: CategorizeEmailRequest) -> ActionResult:
