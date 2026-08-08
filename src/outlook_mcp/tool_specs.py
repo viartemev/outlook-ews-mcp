@@ -90,7 +90,9 @@ TOOL_SPECS: list[ToolSpec] = [
     ),
     ToolSpec(
         "search_emails",
-        "Search emails",
+        "Search emails. Pass `query` for a substring match over subject/body/sender, "
+        "or `aqs` for server-side Advanced Query Syntax "
+        "(e.g. 'from:ivan AND hasattachments:true').",
         search_emails,
         request_model=models.SearchEmailsRequest,
         response_model=list[models.EmailSummary],

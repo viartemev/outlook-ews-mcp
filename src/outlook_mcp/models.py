@@ -316,9 +316,19 @@ class SendDraftRequest(ExchangeModel):
 
 
 class SearchEmailsRequest(ExchangeModel):
-    query: str = Field(min_length=1)
+    #: Substring match over subject, body and sender.
+    query: str | None = Field(default=None, min_length=1)
+    #: EWS Advanced Query Syntax, e.g. 'from:ivan AND hasattachments:true'.
+    #: Server-side full-text search; needs content indexing enabled on the server.
+    aqs: str | None = Field(default=None, min_length=1)
     folder: str | None = None
     limit: int = Field(default=20, ge=1, le=100)
+
+    @model_validator(mode="after")
+    def validate_selector(self) -> "SearchEmailsRequest":
+        if bool(self.query) == bool(self.aqs):
+            raise ValueError("exactly one of query or aqs must be provided")
+        return self
 
 
 class GetAttachmentRequest(ExchangeModel):

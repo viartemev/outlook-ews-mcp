@@ -1454,6 +1454,47 @@ def test_search_emails_matches_subject_or_body_or_sender_in_one_pass(settings) -
     assert "author" in restriction_text
 
 
+def test_search_emails_aqs_sends_a_query_string_not_a_restriction(settings) -> None:
+    """AQS goes to EWS as its own FindItem QueryString element and cannot be
+    combined with a Restriction, so the substring filters must not be added."""
+    backend = EWSExchangeBackend(settings)
+    captured: dict = {}
+
+    class FakeQuerySet:
+        def filter(self, restriction):
+            captured["restriction"] = restriction
+            return self
+
+        def only(self, *fields):
+            return self
+
+        def order_by(self, *args):
+            return self
+
+        def __getitem__(self, item):
+            return []
+
+    account = _fake_account_for_folder_resolution(object())
+    account.inbox = FakeQuerySet()
+    backend._account = account
+
+    backend.search_emails(
+        SearchEmailsRequest(aqs="from:ivan AND hasattachments:true", folder="inbox")
+    )
+
+    q = captured["restriction"]
+    assert q.query_string == "from:ivan AND hasattachments:true"
+    assert "icontains" not in str(q)
+
+
+def test_search_emails_requires_exactly_one_of_query_or_aqs() -> None:
+    with pytest.raises(ValueError, match="exactly one of query or aqs"):
+        SearchEmailsRequest(query="hello", aqs="from:ivan")
+
+    with pytest.raises(ValueError, match="exactly one of query or aqs"):
+        SearchEmailsRequest(folder="inbox")
+
+
 def test_search_emails_defaults_to_mail_folders_only(settings, monkeypatch) -> None:
     """Regression guard: search_emails used to default to Inbox only. It should
     now search the whole mailbox by default, but only actual mail folders

@@ -129,7 +129,9 @@ class FakeExchangeBackend:
         )
 
     def search_emails(self, request: SearchEmailsRequest) -> list[EmailSummary]:
-        return self.list_emails(ListEmailsRequest(subject=request.query, limit=request.limit))
+        return self.list_emails(
+            ListEmailsRequest(subject=request.query or request.aqs, limit=request.limit)
+        )
 
     def send_email(self, request: SendEmailRequest) -> SendResult:
         return SendResult(id="sent-1", status="sent")

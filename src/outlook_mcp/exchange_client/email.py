@@ -488,11 +488,16 @@ class EmailOperationsMixin(BaseEWSBackend):
                         if getattr(folder, "folder_class", None) == self._MAIL_FOLDER_CLASS
                     ],
                 )
-            query = (
-                Q(subject__icontains=request.query)
-                | Q(text_body__icontains=request.query)
-                | Q(author__icontains=request.query)
-            )
+            if request.aqs:
+                # A QueryString is sent to EWS as its own FindItem element and cannot
+                # be combined with a Restriction, so no other filter is added here.
+                query = Q(request.aqs)
+            else:
+                query = (
+                    Q(subject__icontains=request.query)
+                    | Q(text_body__icontains=request.query)
+                    | Q(author__icontains=request.query)
+                )
             qs = (
                 searchable.filter(query).only(*_EMAIL_SUMMARY_FIELDS).order_by("-datetime_received")
             )
