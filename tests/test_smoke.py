@@ -44,3 +44,41 @@ def test_env_flag(monkeypatch) -> None:
 
     monkeypatch.setenv("OUTLOOK_MCP_SMOKE_INCLUDE_DATA", "0")
     assert _env_flag("OUTLOOK_MCP_SMOKE_INCLUDE_DATA") is False
+
+
+def test_main_prints_a_sanitized_payload(monkeypatch, capsys, settings) -> None:
+    import json
+
+    import outlook_mcp.smoke as smoke
+    from conftest import FakeExchangeBackend
+
+    monkeypatch.setattr(smoke, "get_settings", lambda: settings)
+    monkeypatch.setattr(smoke, "build_default_backend", lambda s: FakeExchangeBackend())
+    monkeypatch.delenv("OUTLOOK_MCP_SMOKE_INCLUDE_DATA", raising=False)
+
+    smoke.main()
+
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["data_included"] is False
+    assert "recent_inbox" not in payload
+    # The mailbox address must come out masked, never verbatim.
+    assert payload["mailbox_info"]["email_address"] != "user@example.com"
+    assert payload["mailbox_info"]["email_address"].endswith("@example.com")
+
+
+def test_main_includes_real_data_only_on_explicit_opt_in(monkeypatch, capsys, settings) -> None:
+    import json
+
+    import outlook_mcp.smoke as smoke
+    from conftest import FakeExchangeBackend
+
+    monkeypatch.setattr(smoke, "get_settings", lambda: settings)
+    monkeypatch.setattr(smoke, "build_default_backend", lambda s: FakeExchangeBackend())
+    monkeypatch.setenv("OUTLOOK_MCP_SMOKE_INCLUDE_DATA", "true")
+
+    smoke.main()
+
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["data_included"] is True
+    assert payload["recent_inbox"]
+    assert payload["upcoming_events"]
