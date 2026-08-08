@@ -50,6 +50,7 @@ from .tools.email import (
 from .tools.system import (
     get_mailbox_info,
     get_out_of_office,
+    list_delegates,
     ping_exchange,
     set_out_of_office,
 )
@@ -70,6 +71,14 @@ TOOL_SPECS: list[ToolSpec] = [
         "Get mailbox metadata",
         get_mailbox_info,
         response_model=models.MailboxInfo,
+        read_only=True,
+    ),
+    ToolSpec(
+        "list_delegates",
+        "List mailbox delegates and their folder permission levels. Read-only: "
+        "managing delegates is not supported by exchangelib.",
+        list_delegates,
+        response_model=list[models.DelegateInfo],
         read_only=True,
     ),
     ToolSpec(

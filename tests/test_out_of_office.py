@@ -92,3 +92,43 @@ def test_out_of_office_scheduled_rejects_a_reversed_window() -> None:
                 "end": "2026-08-10T09:00:00+00:00",
             }
         )
+
+
+def test_list_delegates_maps_user_and_permission_fields(settings) -> None:
+    from outlook_mcp.exchange_client import EWSExchangeBackend as Backend
+
+    delegate = SimpleNamespace(
+        user_id=SimpleNamespace(
+            primary_smtp_address="assistant@example.com", display_name="Assistant"
+        ),
+        delegate_permissions=SimpleNamespace(
+            calendar_folder_permission_level="Editor",
+            inbox_folder_permission_level="Reviewer",
+            tasks_folder_permission_level=None,
+            contacts_folder_permission_level="None",
+        ),
+        receive_copies_of_meeting_messages=True,
+        view_private_items=False,
+    )
+    backend = Backend(settings)
+    backend._account = SimpleNamespace(delegates=[delegate])
+
+    result = backend.list_delegates()
+
+    assert len(result) == 1
+    info = result[0]
+    assert info.email == "assistant@example.com"
+    assert info.permissions.calendar == "Editor"
+    assert info.permissions.inbox == "Reviewer"
+    # A level the server reports as absent reads as "None", not a crash.
+    assert info.permissions.tasks == "None"
+    assert info.receives_copies_of_meeting_messages is True
+
+
+def test_list_delegates_empty_mailbox_is_a_valid_answer(settings) -> None:
+    from outlook_mcp.exchange_client import EWSExchangeBackend as Backend
+
+    backend = Backend(settings)
+    backend._account = SimpleNamespace(delegates=[])
+
+    assert backend.list_delegates() == []

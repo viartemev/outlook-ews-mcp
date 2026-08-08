@@ -45,6 +45,7 @@ from ..models import (
     ListEventsRequest,
     ListFoldersRequest,
     MailboxInfo,
+    DelegateInfo,
     MarkEmailRequest,
     OutOfOfficeSettings,
     PingResult,
@@ -78,6 +79,9 @@ class UnconfiguredExchangeBackend:
         self._raise()
 
     def get_out_of_office(self) -> OutOfOfficeSettings:
+        self._raise()
+
+    def list_delegates(self) -> list[DelegateInfo]:
         self._raise()
 
     def set_out_of_office(self, request: OutOfOfficeSettings) -> OutOfOfficeSettings:

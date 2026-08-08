@@ -47,6 +47,7 @@ from ..models import (
     ListEventsRequest,
     ListFoldersRequest,
     MailboxInfo,
+    DelegateInfo,
     MarkEmailRequest,
     OutOfOfficeSettings,
     PingResult,
@@ -110,6 +111,9 @@ class ExchangeClient:
 
     def get_mailbox_info(self) -> MailboxInfo:
         return self._retry_read(self.backend.get_mailbox_info)
+
+    def list_delegates(self) -> list[DelegateInfo]:
+        return self._retry_read(self.backend.list_delegates)
 
     def get_out_of_office(self) -> OutOfOfficeSettings:
         return self._retry_read(self.backend.get_out_of_office)

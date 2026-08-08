@@ -49,6 +49,7 @@ from outlook_mcp.models import (
     ListEventsRequest,
     ListFoldersRequest,
     MailboxInfo,
+    DelegateInfo,
     MarkEmailRequest,
     OutOfOfficeSettings,
     PingResult,
@@ -84,6 +85,9 @@ class FakeExchangeBackend:
             quota_mb=1024,
             exchange_version="2019",
         )
+
+    def list_delegates(self) -> list[DelegateInfo]:
+        return [DelegateInfo(email="assistant@example.com", display_name="Assistant")]
 
     def get_out_of_office(self) -> OutOfOfficeSettings:
         return OutOfOfficeSettings(state="disabled")

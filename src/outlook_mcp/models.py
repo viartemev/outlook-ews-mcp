@@ -259,6 +259,21 @@ class MarkEmailRequest(ExchangeModel):
         return self
 
 
+class DelegatePermissionLevels(ExchangeModel):
+    calendar: str = "None"
+    inbox: str = "None"
+    tasks: str = "None"
+    contacts: str = "None"
+
+
+class DelegateInfo(ExchangeModel):
+    email: ServerAddress | None = None
+    display_name: str | None = None
+    permissions: DelegatePermissionLevels = Field(default_factory=DelegatePermissionLevels)
+    receives_copies_of_meeting_messages: bool = False
+    can_view_private_items: bool = False
+
+
 class OutOfOfficeSettings(ExchangeModel):
     state: Literal["disabled", "enabled", "scheduled"]
     #: Who outside the organisation gets the external reply.
