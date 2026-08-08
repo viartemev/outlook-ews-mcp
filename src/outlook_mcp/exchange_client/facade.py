@@ -8,7 +8,9 @@ from ..config import Settings
 from ..errors import APIError
 from ..models import (
     ActionResult,
+    AddAttachmentRequest,
     AttachmentResult,
+    DeleteAttachmentRequest,
     BulkDeleteEmailsRequest,
     BulkMoveEmailsRequest,
     BulkResult,
@@ -173,6 +175,12 @@ class ExchangeClient:
 
     def send_draft(self, request: SendDraftRequest) -> SendResult:
         return self.backend.send_draft(request)
+
+    def add_attachment(self, request: AddAttachmentRequest) -> ActionResult:
+        return self.backend.add_attachment(request)
+
+    def delete_attachment(self, request: DeleteAttachmentRequest) -> ActionResult:
+        return self.backend.delete_attachment(request)
 
     def get_attachment(self, request: GetAttachmentRequest) -> AttachmentResult:
         # Not retried despite being read-only: it writes the downloaded content to

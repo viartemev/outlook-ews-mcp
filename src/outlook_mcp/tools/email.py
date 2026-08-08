@@ -7,6 +7,8 @@ from ..config import Settings
 from ..errors import APIError
 from ..exchange_client import ExchangeClient
 from ..models import (
+    AddAttachmentRequest,
+    DeleteAttachmentRequest,
     BulkDeleteEmailsRequest,
     BulkMoveEmailsRequest,
     CategorizeEmailRequest,
@@ -74,6 +76,16 @@ send_draft = tool_handler("send_draft", SendDraftRequest)
 get_attachment = tool_handler(
     "get_attachment", GetAttachmentRequest, before=_validate_attachment_destination
 )
+
+
+def _validate_added_attachment(client: ExchangeClient, request: Any) -> None:
+    _validate_attachments([request.path], client.settings)
+
+
+add_attachment = tool_handler(
+    "add_attachment", AddAttachmentRequest, before=_validate_added_attachment
+)
+delete_attachment = tool_handler("delete_attachment", DeleteAttachmentRequest)
 
 
 def _validate_within_root(paths: list[Path], root: Path | None, field: str) -> None:

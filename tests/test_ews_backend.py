@@ -1454,6 +1454,77 @@ def test_search_emails_matches_subject_or_body_or_sender_in_one_pass(settings) -
     assert "author" in restriction_text
 
 
+def test_add_attachment_attaches_through_the_validated_read_path(settings, tmp_path) -> None:
+    backend = EWSExchangeBackend(settings)
+    attachment_path = tmp_path / "note.txt"
+    attachment_path.write_text("hi")
+    attached: list[str] = []
+
+    class FakeItem(Message):
+        def attach(self, attachment):
+            attached.append(attachment.name)
+
+    item = FakeItem()
+
+    def fetch(ids, folder=None):
+        yield item
+
+    backend._account = SimpleNamespace(fetch=fetch)
+
+    from outlook_mcp.models import AddAttachmentRequest
+
+    result = backend.add_attachment(AddAttachmentRequest(email_id="msg-1", path=attachment_path))
+
+    assert attached == ["note.txt"]
+    assert result.updated_fields == ["attachments"]
+
+
+def test_delete_attachment_detaches_the_matching_attachment_only(settings) -> None:
+    backend = EWSExchangeBackend(settings)
+    detached: list[str] = []
+
+    def make_attachment(att_id):
+        return SimpleNamespace(attachment_id=SimpleNamespace(id=att_id), name=att_id)
+
+    class FakeItem(Message):
+        pass
+
+    item = FakeItem()
+    item.attachments = [make_attachment("att-1"), make_attachment("att-2")]
+    item.detach = lambda attachment: detached.append(attachment.name)
+
+    def fetch(ids, folder=None):
+        yield item
+
+    backend._account = SimpleNamespace(fetch=fetch)
+
+    from outlook_mcp.models import DeleteAttachmentRequest
+
+    backend.delete_attachment(DeleteAttachmentRequest(email_id="msg-1", attachment_id="att-2"))
+
+    assert detached == ["att-2"]
+
+
+def test_delete_attachment_reports_an_unknown_id_as_not_found(settings) -> None:
+    backend = EWSExchangeBackend(settings)
+
+    class FakeItem(Message):
+        pass
+
+    item = FakeItem()
+    item.attachments = []
+
+    def fetch(ids, folder=None):
+        yield item
+
+    backend._account = SimpleNamespace(fetch=fetch)
+
+    from outlook_mcp.models import DeleteAttachmentRequest
+
+    with pytest.raises(NotFoundError):
+        backend.delete_attachment(DeleteAttachmentRequest(email_id="msg-1", attachment_id="nope"))
+
+
 def test_bulk_move_reports_per_item_results_without_failing_the_batch(settings) -> None:
     """One bad id out of a batch must not undo or hide the moves that worked."""
     backend = EWSExchangeBackend(settings)

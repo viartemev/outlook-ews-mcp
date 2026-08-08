@@ -9,7 +9,9 @@ from outlook_mcp.config import Settings
 from outlook_mcp.exchange_client import ExchangeClient
 from outlook_mcp.models import (
     ActionResult,
+    AddAttachmentRequest,
     AttachmentResult,
+    DeleteAttachmentRequest,
     BulkDeleteEmailsRequest,
     BulkItemResult,
     BulkMoveEmailsRequest,
@@ -232,6 +234,12 @@ class FakeExchangeBackend:
 
     def send_draft(self, request: SendDraftRequest) -> SendResult:
         return SendResult(id=request.id, status="sent")
+
+    def add_attachment(self, request: AddAttachmentRequest) -> ActionResult:
+        return ActionResult(id=request.email_id, status="updated", updated_fields=["attachments"])
+
+    def delete_attachment(self, request: DeleteAttachmentRequest) -> ActionResult:
+        return ActionResult(id=request.email_id, status="updated", updated_fields=["attachments"])
 
     def get_attachment(self, request: GetAttachmentRequest) -> AttachmentResult:
         target = request.save_path or Path("/tmp/test.txt")

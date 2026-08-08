@@ -256,6 +256,17 @@ class MarkEmailRequest(ExchangeModel):
         return self
 
 
+class AddAttachmentRequest(ExchangeModel):
+    email_id: str
+    #: Local file to attach; must live under EXCHANGE_ATTACHMENT_ROOT.
+    path: Path
+
+
+class DeleteAttachmentRequest(ExchangeModel):
+    email_id: str
+    attachment_id: str
+
+
 class BulkMoveEmailsRequest(ExchangeModel):
     ids: list[str] = Field(min_length=1, max_length=500)
     folder: str = Field(min_length=1)

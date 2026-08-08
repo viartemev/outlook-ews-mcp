@@ -6,7 +6,9 @@ from ..config import Settings
 from ..errors import ExchangeUnavailableError
 from ..models import (
     ActionResult,
+    AddAttachmentRequest,
     AttachmentResult,
+    DeleteAttachmentRequest,
     BulkDeleteEmailsRequest,
     BulkMoveEmailsRequest,
     BulkResult,
@@ -138,6 +140,12 @@ class UnconfiguredExchangeBackend:
         self._raise()
 
     def send_draft(self, request: SendDraftRequest) -> SendResult:
+        self._raise()
+
+    def add_attachment(self, request: AddAttachmentRequest) -> ActionResult:
+        self._raise()
+
+    def delete_attachment(self, request: DeleteAttachmentRequest) -> ActionResult:
         self._raise()
 
     def get_attachment(self, request: GetAttachmentRequest) -> AttachmentResult:

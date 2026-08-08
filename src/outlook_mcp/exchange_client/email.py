@@ -27,8 +27,10 @@ from ..errors import APIError, NotFoundError
 from ..models import (
     ActionResult,
     Attachment,
+    AddAttachmentRequest,
     AttachmentResult,
     BulkDeleteEmailsRequest,
+    DeleteAttachmentRequest,
     BulkItemFailure,
     BulkItemResult,
     BulkMoveEmailsRequest,
@@ -801,6 +803,32 @@ class EmailOperationsMixin(BaseEWSBackend):
             return SendResult(id=None, status="sent")
         except Exception as exc:  # noqa: BLE001
             raise self._map_exception(exc, item_id=request.id) from exc
+
+    def add_attachment(self, request: AddAttachmentRequest) -> ActionResult:
+        item = self._fetch_item(request.email_id, expected_type=Message)
+        try:
+            # Same fd-validated read path as outgoing mail, so a FIFO or a file
+            # swapped after the stat gets rejected here too.
+            self._attach_files(item, [request.path])
+        except APIError:
+            raise
+        except Exception as exc:  # noqa: BLE001
+            raise self._map_exception(exc, item_id=request.email_id) from exc
+        return ActionResult(id=request.email_id, status="updated", updated_fields=["attachments"])
+
+    def delete_attachment(self, request: DeleteAttachmentRequest) -> ActionResult:
+        item = self._fetch_item(request.email_id, expected_type=Message)
+        for attachment in getattr(item, "attachments", None) or []:
+            attachment_id = getattr(getattr(attachment, "attachment_id", None), "id", None)
+            if attachment_id == request.attachment_id:
+                try:
+                    item.detach(attachment)
+                except Exception as exc:  # noqa: BLE001
+                    raise self._map_exception(exc, item_id=request.email_id) from exc
+                return ActionResult(
+                    id=request.email_id, status="updated", updated_fields=["attachments"]
+                )
+        raise NotFoundError(request.attachment_id)
 
     def get_attachment(self, request: GetAttachmentRequest) -> AttachmentResult:
         item = self._fetch_item(request.email_id, expected_type=Message)
