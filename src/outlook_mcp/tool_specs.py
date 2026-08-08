@@ -47,7 +47,12 @@ from .tools.email import (
     send_draft,
     send_email,
 )
-from .tools.system import get_mailbox_info, ping_exchange
+from .tools.system import (
+    get_mailbox_info,
+    get_out_of_office,
+    ping_exchange,
+    set_out_of_office,
+)
 
 #: The single source of truth for every Outlook MCP tool: name, description,
 #: handler, request/response schema, and MCP annotations all live together so
@@ -66,6 +71,22 @@ TOOL_SPECS: list[ToolSpec] = [
         get_mailbox_info,
         response_model=models.MailboxInfo,
         read_only=True,
+    ),
+    ToolSpec(
+        "get_out_of_office",
+        "Get the mailbox out-of-office (automatic reply) settings",
+        get_out_of_office,
+        response_model=models.OutOfOfficeSettings,
+        read_only=True,
+    ),
+    ToolSpec(
+        "set_out_of_office",
+        "Set the mailbox out-of-office (automatic reply): disabled, enabled, or "
+        "scheduled with a start/end window",
+        set_out_of_office,
+        request_model=models.OutOfOfficeSettings,
+        response_model=models.OutOfOfficeSettings,
+        destructive=True,
     ),
     ToolSpec(
         "list_emails",

@@ -50,6 +50,7 @@ from outlook_mcp.models import (
     ListFoldersRequest,
     MailboxInfo,
     MarkEmailRequest,
+    OutOfOfficeSettings,
     PingResult,
     RenameFolderRequest,
     ReplyEmailRequest,
@@ -83,6 +84,12 @@ class FakeExchangeBackend:
             quota_mb=1024,
             exchange_version="2019",
         )
+
+    def get_out_of_office(self) -> OutOfOfficeSettings:
+        return OutOfOfficeSettings(state="disabled")
+
+    def set_out_of_office(self, request: OutOfOfficeSettings) -> OutOfOfficeSettings:
+        return request
 
     def list_emails(self, request: ListEmailsRequest) -> list[EmailSummary]:
         return [

@@ -46,6 +46,7 @@ from ..models import (
     ListFoldersRequest,
     MailboxInfo,
     MarkEmailRequest,
+    OutOfOfficeSettings,
     PingResult,
     RenameFolderRequest,
     ReplyEmailRequest,
@@ -74,6 +75,12 @@ class UnconfiguredExchangeBackend:
         self._raise()
 
     def get_mailbox_info(self) -> MailboxInfo:
+        self._raise()
+
+    def get_out_of_office(self) -> OutOfOfficeSettings:
+        self._raise()
+
+    def set_out_of_office(self, request: OutOfOfficeSettings) -> OutOfOfficeSettings:
         self._raise()
 
     def list_emails(self, request: ListEmailsRequest) -> list[EmailSummary]:

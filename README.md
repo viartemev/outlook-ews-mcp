@@ -36,6 +36,7 @@ Secure MCP server for on-prem Microsoft Exchange (EWS) with tools for email, cal
 ### System
 - `ping_exchange`
 - `get_mailbox_info`
+- `get_out_of_office` / `set_out_of_office`
 
 ### Email
 - `list_emails`

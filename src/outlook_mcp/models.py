@@ -256,6 +256,26 @@ class MarkEmailRequest(ExchangeModel):
         return self
 
 
+class OutOfOfficeSettings(ExchangeModel):
+    state: Literal["disabled", "enabled", "scheduled"]
+    #: Who outside the organisation gets the external reply.
+    external_audience: Literal["none", "known", "all"] = "all"
+    internal_reply: str | None = None
+    external_reply: str | None = None
+    #: Only meaningful (and required) when state is "scheduled".
+    start: datetime | None = None
+    end: datetime | None = None
+
+    @model_validator(mode="after")
+    def validate_schedule(self) -> "OutOfOfficeSettings":
+        if self.state == "scheduled":
+            if self.start is None or self.end is None:
+                raise ValueError("state='scheduled' requires both start and end")
+            if self.end <= self.start:
+                raise ValueError("end must be greater than start")
+        return self
+
+
 class AddAttachmentRequest(ExchangeModel):
     email_id: str
     #: Local file to attach; must live under EXCHANGE_ATTACHMENT_ROOT.

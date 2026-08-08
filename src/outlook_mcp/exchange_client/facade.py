@@ -48,6 +48,7 @@ from ..models import (
     ListFoldersRequest,
     MailboxInfo,
     MarkEmailRequest,
+    OutOfOfficeSettings,
     PingResult,
     RenameFolderRequest,
     ReplyEmailRequest,
@@ -109,6 +110,13 @@ class ExchangeClient:
 
     def get_mailbox_info(self) -> MailboxInfo:
         return self._retry_read(self.backend.get_mailbox_info)
+
+    def get_out_of_office(self) -> OutOfOfficeSettings:
+        return self._retry_read(self.backend.get_out_of_office)
+
+    def set_out_of_office(self, request: OutOfOfficeSettings) -> OutOfOfficeSettings:
+        # A write: never retried, same as every other mutation here.
+        return self.backend.set_out_of_office(request)
 
     def list_emails(self, request: ListEmailsRequest) -> list[EmailSummary]:
         return self._retry_read(lambda: self.backend.list_emails(request))
