@@ -511,20 +511,36 @@ class EmailOperationsMixin(BaseEWSBackend):
             if request.aqs:
                 # A QueryString is sent to EWS as its own FindItem element and cannot
                 # be combined with a Restriction, so no other filter is added here.
-                query = Q(request.aqs)
+                items = self._search_items(searchable, Q(request.aqs), request.limit)
             else:
                 query = (
                     Q(subject__icontains=request.query)
                     | Q(text_body__icontains=request.query)
                     | Q(author__icontains=request.query)
                 )
-            qs = (
-                searchable.filter(query).only(*_EMAIL_SUMMARY_FIELDS).order_by("-datetime_received")
-            )
-            items = list(qs[: request.limit])
+                try:
+                    items = self._search_items(searchable, query, request.limit)
+                except ErrorUnsupportedPathForQuery:
+                    # Exchange 2019 on-prem rejects a substring restriction on
+                    # item:TextBody outright ("The property can not be used with
+                    # this type of restriction"), killing the whole search. Seen
+                    # live; subject and sender still match, so retry without the
+                    # body leg rather than failing the call.
+                    logger.info(
+                        "this server rejects substring matching on the body; "
+                        "searching subject and sender only"
+                    )
+                    query = Q(subject__icontains=request.query) | Q(author__icontains=request.query)
+                    items = self._search_items(searchable, query, request.limit)
         except Exception as exc:  # noqa: BLE001
             raise self._map_exception(exc) from exc
         return [self._to_email_summary(item) for item in items]
+
+    def _search_items(
+        self, searchable: Folder | FolderCollection, query: Q, limit: int
+    ) -> list[Any]:
+        qs = searchable.filter(query).only(*_EMAIL_SUMMARY_FIELDS).order_by("-datetime_received")
+        return list(qs[:limit])
 
     def send_email(self, request: SendEmailRequest) -> SendResult:
         message = self._make_message(request)

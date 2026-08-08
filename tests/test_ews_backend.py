@@ -8,6 +8,7 @@ from types import SimpleNamespace
 import pytest
 from exchangelib.errors import (
     ErrorAccessDenied,
+    ErrorUnsupportedPathForQuery,
     ErrorInvalidIdMalformed,
     ErrorIrresolvableConflict,
     ErrorItemNotFound,
@@ -1649,6 +1650,52 @@ def test_bulk_move_to_a_public_folder_still_gives_every_id_a_verdict(settings) -
 
     assert [r.id for r in result.succeeded] == ["a", "b"]
     assert result.failed == []
+
+
+def test_search_emails_retries_without_the_body_leg_when_the_server_rejects_it(
+    settings,
+) -> None:
+    """Live Exchange 2019 rejects a substring restriction on item:TextBody with
+    ErrorUnsupportedPathForQuery, which used to kill the whole search."""
+    backend = EWSExchangeBackend(settings)
+    attempts: list[str] = []
+
+    class FakeQuerySet:
+        def __init__(self, fail_on_body):
+            self.fail_on_body = fail_on_body
+
+        def filter(self, restriction):
+            attempts.append(str(restriction))
+            if self.fail_on_body and "text_body" in str(restriction):
+                self.explode = True
+            else:
+                self.explode = False
+            return self
+
+        def only(self, *fields):
+            return self
+
+        def order_by(self, *args):
+            return self
+
+        def __getitem__(self, item):
+            if self.explode:
+                raise ErrorUnsupportedPathForQuery(
+                    "The property can not be used with this type of restriction."
+                )
+            return []
+
+    account = _fake_account_for_folder_resolution(object())
+    account.inbox = FakeQuerySet(fail_on_body=True)
+    backend._account = account
+
+    result = backend.search_emails(SearchEmailsRequest(query="заявка", folder="inbox"))
+
+    assert result == []
+    assert len(attempts) == 2
+    assert "text_body" in attempts[0]
+    assert "text_body" not in attempts[1]
+    assert "subject" in attempts[1]
 
 
 def test_search_emails_aqs_sends_a_query_string_not_a_restriction(settings) -> None:
