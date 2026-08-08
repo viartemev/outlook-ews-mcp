@@ -48,10 +48,14 @@ from .tools.email import (
     send_email,
 )
 from .tools.system import (
+    create_inbox_rule,
+    delete_inbox_rule,
     get_mailbox_info,
     get_out_of_office,
     list_delegates,
+    list_inbox_rules,
     ping_exchange,
+    update_inbox_rule,
     set_out_of_office,
 )
 
@@ -80,6 +84,40 @@ TOOL_SPECS: list[ToolSpec] = [
         list_delegates,
         response_model=list[models.DelegateInfo],
         read_only=True,
+    ),
+    ToolSpec(
+        "list_inbox_rules",
+        "List server-side inbox rules (the curated subset of conditions and "
+        "actions this API models)",
+        list_inbox_rules,
+        response_model=list[models.InboxRule],
+        read_only=True,
+    ),
+    ToolSpec(
+        "create_inbox_rule",
+        "Create a server-side inbox rule, e.g. 'from this sender -> move to "
+        "folder'. WARNING: managing rules over EWS removes the client-side rule blob desktop Outlook keeps, which can wipe rules created in Outlook itself.",
+        create_inbox_rule,
+        request_model=models.CreateInboxRuleRequest,
+        response_model=models.InboxRule,
+        destructive=True,
+    ),
+    ToolSpec(
+        "update_inbox_rule",
+        "Enable/disable an inbox rule or change its priority. Other fields are "
+        "deliberately not updatable here. WARNING: managing rules over EWS removes the client-side rule blob desktop Outlook keeps, which can wipe rules created in Outlook itself.",
+        update_inbox_rule,
+        request_model=models.UpdateInboxRuleRequest,
+        response_model=models.InboxRule,
+        destructive=True,
+    ),
+    ToolSpec(
+        "delete_inbox_rule",
+        "Delete a server-side inbox rule by id. WARNING: managing rules over EWS removes the client-side rule blob desktop Outlook keeps, which can wipe rules created in Outlook itself.",
+        delete_inbox_rule,
+        request_model=models.DeleteInboxRuleRequest,
+        response_model=models.ActionResult,
+        destructive=True,
     ),
     ToolSpec(
         "get_out_of_office",

@@ -38,6 +38,7 @@ Secure MCP server for on-prem Microsoft Exchange (EWS) with tools for email, cal
 - `get_mailbox_info`
 - `get_out_of_office` / `set_out_of_office`
 - `list_delegates` (read-only)
+- `list_inbox_rules` / `create_inbox_rule` / `update_inbox_rule` / `delete_inbox_rule` — **managing rules over EWS can wipe client-side rules created in desktop Outlook** (documented EWS behaviour; see tool descriptions)
 
 ### Email
 - `list_emails`

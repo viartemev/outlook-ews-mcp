@@ -259,6 +259,94 @@ class MarkEmailRequest(ExchangeModel):
         return self
 
 
+class InboxRuleConditions(ExchangeModel):
+    from_addresses: list[EmailStr] = Field(default_factory=list)
+    contains_sender_strings: list[str] = Field(default_factory=list)
+    contains_subject_strings: list[str] = Field(default_factory=list)
+    contains_subject_or_body_strings: list[str] = Field(default_factory=list)
+    has_attachments: bool | None = None
+    importance: Literal["low", "normal", "high"] | None = None
+
+    def is_empty(self) -> bool:
+        return not (
+            self.from_addresses
+            or self.contains_sender_strings
+            or self.contains_subject_strings
+            or self.contains_subject_or_body_strings
+            or self.has_attachments is not None
+            or self.importance is not None
+        )
+
+
+class InboxRuleActions(ExchangeModel):
+    #: Folder name, path or id, resolved the same way move_email resolves it.
+    move_to_folder: str | None = None
+    assign_categories: list[str] = Field(default_factory=list)
+    mark_as_read: bool | None = None
+    delete: bool | None = None
+    forward_to: list[EmailStr] = Field(default_factory=list)
+
+    def is_empty(self) -> bool:
+        return not (
+            self.move_to_folder
+            or self.assign_categories
+            or self.mark_as_read is not None
+            or self.delete is not None
+            or self.forward_to
+        )
+
+
+class InboxRule(ExchangeModel):
+    id: str | None = None
+    display_name: str
+    priority: int = 1
+    is_enabled: bool = True
+    #: Set by the server for rules it cannot fully express over EWS.
+    is_not_supported: bool = False
+    conditions: InboxRuleConditions = Field(default_factory=InboxRuleConditions)
+    actions: InboxRuleActions = Field(default_factory=InboxRuleActions)
+
+
+class CreateInboxRuleRequest(ExchangeModel):
+    display_name: str = Field(min_length=1)
+    priority: int = Field(default=1, ge=1)
+    is_enabled: bool = True
+    conditions: InboxRuleConditions
+    actions: InboxRuleActions
+    #: EWS documented behaviour: managing rules over EWS removes the client-side
+    #: rule blob that desktop Outlook keeps, which can wipe rules created there.
+    remove_outlook_rule_blob: bool = True
+
+    @model_validator(mode="after")
+    def validate_rule(self) -> "CreateInboxRuleRequest":
+        if self.conditions.is_empty():
+            raise ValueError("at least one condition is required")
+        if self.actions.is_empty():
+            raise ValueError("at least one action is required")
+        return self
+
+
+class UpdateInboxRuleRequest(ExchangeModel):
+    id: str
+    #: Only these two are updatable: a full update would have to round-trip the
+    #: rule through this API's curated subset and silently drop any condition or
+    #: action the subset does not model.
+    is_enabled: bool | None = None
+    priority: int | None = Field(default=None, ge=1)
+    remove_outlook_rule_blob: bool = True
+
+    @model_validator(mode="after")
+    def validate_update(self) -> "UpdateInboxRuleRequest":
+        if self.is_enabled is None and self.priority is None:
+            raise ValueError("nothing to update: set is_enabled and/or priority")
+        return self
+
+
+class DeleteInboxRuleRequest(ExchangeModel):
+    id: str
+    remove_outlook_rule_blob: bool = True
+
+
 class DelegatePermissionLevels(ExchangeModel):
     calendar: str = "None"
     inbox: str = "None"

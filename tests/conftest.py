@@ -50,6 +50,10 @@ from outlook_mcp.models import (
     ListFoldersRequest,
     MailboxInfo,
     DelegateInfo,
+    CreateInboxRuleRequest,
+    DeleteInboxRuleRequest,
+    InboxRule,
+    UpdateInboxRuleRequest,
     MarkEmailRequest,
     OutOfOfficeSettings,
     PingResult,
@@ -88,6 +92,30 @@ class FakeExchangeBackend:
 
     def list_delegates(self) -> list[DelegateInfo]:
         return [DelegateInfo(email="assistant@example.com", display_name="Assistant")]
+
+    def list_inbox_rules(self) -> list[InboxRule]:
+        return [InboxRule(id="rule-1", display_name="From boss", priority=1, is_enabled=True)]
+
+    def create_inbox_rule(self, request: CreateInboxRuleRequest) -> InboxRule:
+        return InboxRule(
+            id="rule-new",
+            display_name=request.display_name,
+            priority=request.priority,
+            is_enabled=request.is_enabled,
+            conditions=request.conditions,
+            actions=request.actions,
+        )
+
+    def update_inbox_rule(self, request: UpdateInboxRuleRequest) -> InboxRule:
+        return InboxRule(
+            id=request.id,
+            display_name="From boss",
+            priority=request.priority or 1,
+            is_enabled=request.is_enabled if request.is_enabled is not None else True,
+        )
+
+    def delete_inbox_rule(self, request: DeleteInboxRuleRequest) -> ActionResult:
+        return ActionResult(id=request.id, status="deleted")
 
     def get_out_of_office(self) -> OutOfOfficeSettings:
         return OutOfOfficeSettings(state="disabled")

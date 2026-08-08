@@ -48,6 +48,10 @@ from ..models import (
     ListFoldersRequest,
     MailboxInfo,
     DelegateInfo,
+    CreateInboxRuleRequest,
+    DeleteInboxRuleRequest,
+    InboxRule,
+    UpdateInboxRuleRequest,
     MarkEmailRequest,
     OutOfOfficeSettings,
     PingResult,
@@ -114,6 +118,18 @@ class ExchangeClient:
 
     def list_delegates(self) -> list[DelegateInfo]:
         return self._retry_read(self.backend.list_delegates)
+
+    def list_inbox_rules(self) -> list[InboxRule]:
+        return self._retry_read(self.backend.list_inbox_rules)
+
+    def create_inbox_rule(self, request: CreateInboxRuleRequest) -> InboxRule:
+        return self.backend.create_inbox_rule(request)
+
+    def update_inbox_rule(self, request: UpdateInboxRuleRequest) -> InboxRule:
+        return self.backend.update_inbox_rule(request)
+
+    def delete_inbox_rule(self, request: DeleteInboxRuleRequest) -> ActionResult:
+        return self.backend.delete_inbox_rule(request)
 
     def get_out_of_office(self) -> OutOfOfficeSettings:
         return self._retry_read(self.backend.get_out_of_office)

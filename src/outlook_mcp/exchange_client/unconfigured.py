@@ -46,6 +46,10 @@ from ..models import (
     ListFoldersRequest,
     MailboxInfo,
     DelegateInfo,
+    CreateInboxRuleRequest,
+    DeleteInboxRuleRequest,
+    InboxRule,
+    UpdateInboxRuleRequest,
     MarkEmailRequest,
     OutOfOfficeSettings,
     PingResult,
@@ -82,6 +86,18 @@ class UnconfiguredExchangeBackend:
         self._raise()
 
     def list_delegates(self) -> list[DelegateInfo]:
+        self._raise()
+
+    def list_inbox_rules(self) -> list[InboxRule]:
+        self._raise()
+
+    def create_inbox_rule(self, request: CreateInboxRuleRequest) -> InboxRule:
+        self._raise()
+
+    def update_inbox_rule(self, request: UpdateInboxRuleRequest) -> InboxRule:
+        self._raise()
+
+    def delete_inbox_rule(self, request: DeleteInboxRuleRequest) -> ActionResult:
         self._raise()
 
     def set_out_of_office(self, request: OutOfOfficeSettings) -> OutOfOfficeSettings:
