@@ -90,3 +90,37 @@ def test_attachment_limits_use_exchange_prefixed_aliases():
     assert settings.attachment_max_size_mb == 11
     assert settings.attachment_max_count == 12
     assert settings.attachment_max_total_size_mb == 26
+
+
+@pytest.mark.parametrize(
+    "env_name",
+    [
+        "EXCHANGE_EMAIL_ADDRESS",
+        "EXCHANGE_VERSION",
+        "EXCHANGE_IMPERSONATE_AS",
+        "EXCHANGE_ATTACHMENT_ROOT",
+        "LOG_FILE",
+    ],
+)
+@pytest.mark.parametrize("blank", ["", "   "])
+def test_blank_optional_env_values_mean_unset(env_name, blank):
+    """dotenv delivers a bare `NAME=` line as an empty string, not a missing key."""
+    field = {
+        "EXCHANGE_EMAIL_ADDRESS": "exchange_email_address",
+        "EXCHANGE_VERSION": "exchange_version",
+        "EXCHANGE_IMPERSONATE_AS": "exchange_impersonate_as",
+        "EXCHANGE_ATTACHMENT_ROOT": "attachment_root",
+        "LOG_FILE": "log_file",
+    }[env_name]
+
+    settings = Settings(_env_file=None, **_kwargs(**{env_name: blank}))
+
+    assert getattr(settings, field) is None
+
+
+def test_blank_attachment_root_does_not_become_the_current_directory():
+    """Path("") is Path("."): a blank EXCHANGE_ATTACHMENT_ROOT used to silently
+    turn the server's cwd into the attachment sandbox instead of staying off."""
+    settings = Settings(_env_file=None, **_kwargs(EXCHANGE_ATTACHMENT_ROOT=""))
+
+    assert settings.attachment_root is None

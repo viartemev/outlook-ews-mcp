@@ -5,7 +5,7 @@ from pathlib import Path
 from typing import Literal
 from urllib.parse import urlparse
 
-from pydantic import Field, SecretStr, model_validator
+from pydantic import Field, SecretStr, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -76,6 +76,25 @@ class Settings(BaseSettings):
         alias="LOG_LEVEL",
     )
     log_file: Path | None = Field(default=None, alias="LOG_FILE")
+
+    @field_validator(
+        "exchange_email_address",
+        "exchange_version",
+        "exchange_impersonate_as",
+        "attachment_root",
+        "log_file",
+        mode="before",
+    )
+    @classmethod
+    def _blank_env_value_means_unset(cls, value: object) -> object:
+        # .env.example ships optional settings as bare `NAME=` lines, and dotenv
+        # delivers those as empty strings, not as missing keys. Without this,
+        # Path-typed fields turn "" into Path(".") -- EXCHANGE_ATTACHMENT_ROOT
+        # would silently sandbox attachments to the server's cwd instead of
+        # staying disabled.
+        if isinstance(value, str) and not value.strip():
+            return None
+        return value
 
     @model_validator(mode="after")
     def _reject_insecure_basic_auth(self) -> "Settings":
