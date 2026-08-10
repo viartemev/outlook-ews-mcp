@@ -39,8 +39,14 @@ class SlowRegistry:
             self.active -= 1
 
 
-def _tool(registry: SlowRegistry, gateway: ToolGateway):
-    spec = ToolSpec("get_email", "Get an email", lambda c, a: None, request_model=GetEmailRequest)
+def _tool(registry: SlowRegistry, gateway: ToolGateway, *, read_only: bool = False):
+    spec = ToolSpec(
+        "get_email",
+        "Get an email",
+        lambda c, a: None,
+        request_model=GetEmailRequest,
+        read_only=read_only,
+    )
     return bind_mcp_tool(registry.call, spec, gateway)
 
 
@@ -70,7 +76,10 @@ def test_a_running_tool_does_not_freeze_the_event_loop() -> None:
     assert ticks > 5, f"event loop was blocked; it only ticked {ticks} times"
 
 
-def test_concurrent_calls_run_strictly_one_at_a_time() -> None:
+def test_concurrent_mutating_calls_run_strictly_one_at_a_time() -> None:
+    """Mutations are never safe to overlap: two writes can race on the same item,
+    and Account state (folder hierarchy, item caches) is not audited for
+    write-vs-read races. Even with permits to spare, writes go one by one."""
     registry = SlowRegistry()
     tool_fn = _tool(registry, ToolGateway(_settings()))
 
@@ -106,9 +115,11 @@ def test_the_queue_is_first_in_first_out() -> None:
     assert registry.started == [f"email-{index}" for index in range(6)]
 
 
-def test_the_concurrency_setting_is_honoured() -> None:
+def test_read_only_calls_overlap_up_to_the_concurrency_setting() -> None:
+    """Read-only tools each take one permit, so an agent asking for the email,
+    the folder list and the calendar pays the slowest round trip, not the sum."""
     registry = SlowRegistry()
-    tool_fn = _tool(registry, ToolGateway(_settings(MCP_MAX_CONCURRENCY=3)))
+    tool_fn = _tool(registry, ToolGateway(_settings(MCP_MAX_CONCURRENCY=3)), read_only=True)
 
     async def run_all() -> None:
         async def one(index: int) -> None:
@@ -234,3 +245,140 @@ def test_every_registered_tool_is_awaitable(client, settings) -> None:
     ]
 
     assert sync_tools == []
+
+
+class KindedRegistry(SlowRegistry):
+    """SlowRegistry that also tracks overlap per call kind (read vs write)."""
+
+    def __init__(self, delay: float = 0.05) -> None:
+        super().__init__(delay)
+        self.active_kinds: list[str] = []
+        self.observed_mixes: list[tuple[str, ...]] = []
+
+    def call(self, name: str, arguments: dict) -> tuple[dict, bool]:
+        kind = "read" if name.startswith("read") else "write"
+        self.active_kinds.append(kind)
+        self.observed_mixes.append(tuple(sorted(self.active_kinds)))
+        try:
+            return super().call(name, arguments)
+        finally:
+            self.active_kinds.remove(kind)
+
+
+def _kinded_tools(registry: KindedRegistry, gateway: ToolGateway):
+    read_spec = ToolSpec(
+        "read_tool", "Read", lambda c, a: None, request_model=GetEmailRequest, read_only=True
+    )
+    write_spec = ToolSpec("write_tool", "Write", lambda c, a: None, request_model=GetEmailRequest)
+    return (
+        bind_mcp_tool(registry.call, read_spec, gateway),
+        bind_mcp_tool(registry.call, write_spec, gateway),
+    )
+
+
+def test_a_mutating_call_never_overlaps_a_read() -> None:
+    """The write path collects every permit before running, so at no observed
+    moment may a write share the mailbox with any other call."""
+    registry = KindedRegistry(delay=0.02)
+    read_fn, write_fn = _kinded_tools(registry, ToolGateway(_settings(MCP_MAX_CONCURRENCY=4)))
+
+    async def run_all() -> None:
+        async with anyio.create_task_group() as tg:
+            for index in range(4):
+                tg.start_soon(lambda i=index: read_fn(id=f"email-r{i}"))
+            tg.start_soon(lambda: write_fn(id="email-w"))
+            for index in range(4, 8):
+                tg.start_soon(lambda i=index: read_fn(id=f"email-r{i}"))
+
+    anyio.run(run_all)
+
+    for mix in registry.observed_mixes:
+        if "write" in mix:
+            assert mix == ("write",), f"a write ran alongside {mix}"
+    assert any(mix == ("write",) for mix in registry.observed_mixes)
+
+
+def test_a_writer_is_not_starved_by_a_stream_of_readers() -> None:
+    """The failure mode the turnstile exists for: the writer re-queues for each
+    permit, so without the turnstile every newly arriving reader overtakes it and
+    a busy agent could postpone its one mutation indefinitely."""
+    registry = SlowRegistry(delay=0.02)
+    gateway = ToolGateway(_settings(MCP_MAX_CONCURRENCY=2))
+    read_fn = _tool(registry, gateway, read_only=True)
+    write_fn = _tool(registry, gateway)
+
+    async def run_all() -> None:
+        async with anyio.create_task_group() as tg:
+            tg.start_soon(lambda: read_fn(id="read-0"))
+            tg.start_soon(lambda: read_fn(id="read-1"))
+            await anyio.sleep(0)
+            tg.start_soon(lambda: write_fn(id="write"))
+            await anyio.sleep(0)
+            for index in range(2, 8):
+                tg.start_soon(lambda i=index: read_fn(id=f"read-{i}"))
+                await anyio.sleep(0)
+
+    anyio.run(run_all)
+
+    write_position = registry.started.index("write")
+    assert write_position <= 3, (
+        f"the write ran {write_position} calls in, after readers that arrived later: "
+        f"{registry.started}"
+    )
+
+
+def test_reads_and_writes_share_the_admission_cap() -> None:
+    """server_busy counts every admitted call -- running or waiting, read or
+    write -- because the cap protects the process, not one of the two paths."""
+    registry = SlowRegistry(delay=0.05)
+    gateway = ToolGateway(_settings(MCP_MAX_CONCURRENCY=1, MCP_MAX_QUEUE_SIZE=2))
+    read_fn = _tool(registry, gateway, read_only=True)
+    write_fn = _tool(registry, gateway)
+
+    async def run_all() -> list:
+        results = [None] * 4
+
+        async def run_and_store(index: int, fn) -> None:
+            results[index] = await fn(id=f"email-{index}")
+
+        async with anyio.create_task_group() as tg:
+            tg.start_soon(run_and_store, 0, read_fn)
+            await anyio.sleep(0)
+            tg.start_soon(run_and_store, 1, write_fn)
+            await anyio.sleep(0)
+            tg.start_soon(run_and_store, 2, read_fn)
+            await anyio.sleep(0)
+            tg.start_soon(run_and_store, 3, write_fn)
+        return results
+
+    results = anyio.run(run_all)
+
+    rejected = [r for r in results if r.isError and r.structuredContent["error"] == "server_busy"]
+    assert len(rejected) == 2
+
+
+def test_the_read_only_flag_agrees_with_the_facade_retry_classification() -> None:
+    """spec.read_only now drives scheduling, not just the readOnlyHint shown to
+    clients. ExchangeClient keeps its own independent idempotency classification:
+    only calls that are safe to repeat go through _retry_read. A tool the gateway
+    parallelizes as a read but the facade refuses to retry (or vice versa) means
+    one of the two classifications is wrong."""
+    import inspect as inspect_module
+
+    from outlook_mcp.exchange_client import ExchangeClient
+    from outlook_mcp.tool_specs import TOOL_SPECS
+
+    # Read-only for the mailbox but not idempotent for the local machine: it
+    # writes the download to disk, and a retry after a partial download would
+    # leave an orphaned file (see the comment on ExchangeClient.get_attachment).
+    retry_exempt = {"get_attachment"}
+
+    for spec in TOOL_SPECS:
+        if spec.name in retry_exempt:
+            continue
+        method = getattr(ExchangeClient, spec.handler.__name__)
+        retries = "_retry_read" in inspect_module.getsource(method)
+        assert retries == spec.read_only, (
+            f"{spec.name}: read_only={spec.read_only} but the facade "
+            f"{'uses' if retries else 'does not use'} _retry_read"
+        )
