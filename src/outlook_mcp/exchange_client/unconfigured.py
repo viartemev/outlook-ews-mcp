@@ -8,6 +8,10 @@ from ..models import (
     ActionResult,
     AddAttachmentRequest,
     AttachmentResult,
+    BulkCategorizeEmailsRequest,
+    BulkDeleteEventsRequest,
+    BulkMarkEmailsRequest,
+    BulkRespondToInvitesRequest,
     DeleteAttachmentRequest,
     BulkDeleteEmailsRequest,
     BulkMoveEmailsRequest,
@@ -29,6 +33,7 @@ from ..models import (
     DeleteFolderRequest,
     DraftEmailRequest,
     EmailFull,
+    EmailMimeResult,
     EmailSummary,
     FolderActionRequest,
     FolderInfo,
@@ -37,6 +42,7 @@ from ..models import (
     FreeSlot,
     GetAttachmentRequest,
     GetContactRequest,
+    GetEmailMimeRequest,
     GetEmailRequest,
     GetEventRequest,
     GetThreadRequest,
@@ -44,6 +50,7 @@ from ..models import (
     ListEmailsRequest,
     ListEventsRequest,
     ListFoldersRequest,
+    ListRoomsRequest,
     MailboxInfo,
     DelegateInfo,
     CreateInboxRuleRequest,
@@ -56,6 +63,8 @@ from ..models import (
     RenameFolderRequest,
     ReplyEmailRequest,
     RespondToInviteRequest,
+    RoomInfo,
+    RoomListInfo,
     SearchContactsRequest,
     SearchEmailsRequest,
     SendDraftRequest,
@@ -63,6 +72,7 @@ from ..models import (
     SendResult,
     Thread,
     UpdateContactRequest,
+    UpdateDraftRequest,
     UpdateEventRequest,
 )
 
@@ -145,6 +155,12 @@ class UnconfiguredExchangeBackend:
     def delete_emails(self, request: BulkDeleteEmailsRequest) -> BulkResult:
         self._raise()
 
+    def mark_emails(self, request: BulkMarkEmailsRequest) -> BulkResult:
+        self._raise()
+
+    def categorize_emails(self, request: BulkCategorizeEmailsRequest) -> BulkResult:
+        self._raise()
+
     def categorize_email(self, request: CategorizeEmailRequest) -> ActionResult:
         self._raise()
 
@@ -166,6 +182,9 @@ class UnconfiguredExchangeBackend:
     def create_draft(self, request: DraftEmailRequest) -> ActionResult:
         self._raise()
 
+    def update_draft(self, request: UpdateDraftRequest) -> ActionResult:
+        self._raise()
+
     def send_draft(self, request: SendDraftRequest) -> SendResult:
         self._raise()
 
@@ -176,6 +195,9 @@ class UnconfiguredExchangeBackend:
         self._raise()
 
     def get_attachment(self, request: GetAttachmentRequest) -> AttachmentResult:
+        self._raise()
+
+    def get_email_mime(self, request: GetEmailMimeRequest) -> EmailMimeResult:
         self._raise()
 
     def list_events(self, request: ListEventsRequest) -> list[CalendarEvent]:
@@ -199,10 +221,22 @@ class UnconfiguredExchangeBackend:
     def find_free_slots(self, request: FindFreeSlotsRequest) -> list[FreeSlot]:
         self._raise()
 
+    def delete_events(self, request: BulkDeleteEventsRequest) -> BulkResult:
+        self._raise()
+
+    def respond_to_invites(self, request: BulkRespondToInvitesRequest) -> BulkResult:
+        self._raise()
+
     def get_my_availability(self, request: ListEventsRequest) -> AvailabilityResult:
         self._raise()
 
     def list_calendars(self) -> list[CalendarInfo]:
+        self._raise()
+
+    def list_room_lists(self) -> list[RoomListInfo]:
+        self._raise()
+
+    def list_rooms(self, request: ListRoomsRequest) -> list[RoomInfo]:
         self._raise()
 
     def search_contacts(self, request: SearchContactsRequest) -> list[ContactSummary]:

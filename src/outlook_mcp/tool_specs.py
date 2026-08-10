@@ -5,12 +5,16 @@ from .mcp_tools import ToolSpec
 from .tools.calendar import (
     create_event,
     delete_event,
+    delete_events,
     find_free_slots,
     get_event,
     get_my_availability,
     list_calendars,
     list_events,
+    list_room_lists,
+    list_rooms,
     respond_to_invite,
+    respond_to_invites,
     update_event,
 )
 from .tools.contacts import (
@@ -22,6 +26,7 @@ from .tools.contacts import (
 )
 from .tools.email import (
     categorize_email,
+    categorize_emails,
     copy_email,
     create_draft,
     create_folder,
@@ -32,12 +37,14 @@ from .tools.email import (
     forward_email,
     get_attachment,
     get_email,
+    get_email_mime,
     get_thread,
     add_attachment,
     list_categories,
     list_emails,
     list_folders,
     mark_email,
+    mark_emails,
     move_email,
     move_emails,
     copy_emails,
@@ -46,6 +53,7 @@ from .tools.email import (
     search_emails,
     send_draft,
     send_email,
+    update_draft,
 )
 from .tools.system import (
     create_inbox_rule,
@@ -149,6 +157,14 @@ TOOL_SPECS: list[ToolSpec] = [
         get_email,
         request_model=models.GetEmailRequest,
         response_model=models.EmailFull,
+        read_only=True,
+    ),
+    ToolSpec(
+        "get_email_mime",
+        "Export a message's raw RFC 822 MIME content, base64-encoded",
+        get_email_mime,
+        request_model=models.GetEmailMimeRequest,
+        response_model=models.EmailMimeResult,
         read_only=True,
     ),
     ToolSpec(
@@ -261,6 +277,24 @@ TOOL_SPECS: list[ToolSpec] = [
         destructive=True,
     ),
     ToolSpec(
+        "mark_emails",
+        "Update read state, importance, or the follow-up flag on multiple emails in "
+        "one call, with per-item results.",
+        mark_emails,
+        request_model=models.BulkMarkEmailsRequest,
+        response_model=models.BulkResult,
+        destructive=True,
+    ),
+    ToolSpec(
+        "categorize_emails",
+        "Set, add, or remove Outlook categories on multiple emails in one call, "
+        "with per-item results.",
+        categorize_emails,
+        request_model=models.BulkCategorizeEmailsRequest,
+        response_model=models.BulkResult,
+        destructive=True,
+    ),
+    ToolSpec(
         "list_categories",
         "List the categories in use, with counts. Collected from the most recent "
         "messages of the given folders, not from the mailbox master category list.",
@@ -311,6 +345,15 @@ TOOL_SPECS: list[ToolSpec] = [
         response_model=models.ActionResult,
     ),
     ToolSpec(
+        "update_draft",
+        "Update an existing email draft. Omitted fields are left unchanged; "
+        "'attachments', if given, replaces the draft's entire attachment set",
+        update_draft,
+        request_model=models.UpdateDraftRequest,
+        response_model=models.ActionResult,
+        destructive=True,
+    ),
+    ToolSpec(
         "send_draft",
         "Send a draft email",
         send_draft,
@@ -344,7 +387,9 @@ TOOL_SPECS: list[ToolSpec] = [
     ),
     ToolSpec(
         "list_events",
-        "List calendar events in a time range",
+        "List calendar events in a time range. Set mailbox to view a colleague's "
+        "default calendar instead of your own (requires delegate/impersonation "
+        "access already granted on the server; not combinable with calendar_id)",
         list_events,
         request_model=models.ListEventsRequest,
         response_model=list[models.CalendarEvent],
@@ -352,7 +397,8 @@ TOOL_SPECS: list[ToolSpec] = [
     ),
     ToolSpec(
         "get_event",
-        "Get a calendar event by ID",
+        "Get a calendar event by ID. Set mailbox to read from a colleague's "
+        "default calendar instead of your own",
         get_event,
         request_model=models.GetEventRequest,
         response_model=models.CalendarEvent,
@@ -399,8 +445,24 @@ TOOL_SPECS: list[ToolSpec] = [
         read_only=True,
     ),
     ToolSpec(
+        "delete_events",
+        "Delete multiple calendar events in one call, with per-item results",
+        delete_events,
+        request_model=models.BulkDeleteEventsRequest,
+        response_model=models.BulkResult,
+        destructive=True,
+    ),
+    ToolSpec(
+        "respond_to_invites",
+        "Respond to multiple calendar invites in one call, with per-item results",
+        respond_to_invites,
+        request_model=models.BulkRespondToInvitesRequest,
+        response_model=models.BulkResult,
+        destructive=True,
+    ),
+    ToolSpec(
         "get_my_availability",
-        "Get free and busy slots",
+        "Get free and busy slots. Set mailbox to check a colleague's calendar instead of your own",
         get_my_availability,
         request_model=models.ListEventsRequest,
         response_model=models.AvailabilityResult,
@@ -411,6 +473,21 @@ TOOL_SPECS: list[ToolSpec] = [
         "List calendars",
         list_calendars,
         response_model=list[models.CalendarInfo],
+        read_only=True,
+    ),
+    ToolSpec(
+        "list_room_lists",
+        "List Room Finder room lists (groups of meeting rooms)",
+        list_room_lists,
+        response_model=list[models.RoomListInfo],
+        read_only=True,
+    ),
+    ToolSpec(
+        "list_rooms",
+        "List the meeting rooms in a Room Finder room list",
+        list_rooms,
+        request_model=models.ListRoomsRequest,
+        response_model=list[models.RoomInfo],
         read_only=True,
     ),
     ToolSpec(

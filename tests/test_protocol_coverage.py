@@ -60,6 +60,12 @@ def _sample_request(method_name: str):
         ),
         models.BulkMoveEmailsRequest: models.BulkMoveEmailsRequest(ids=["email-1"], folder="inbox"),
         models.BulkDeleteEmailsRequest: models.BulkDeleteEmailsRequest(ids=["email-1"]),
+        models.UpdateDraftRequest: models.UpdateDraftRequest(id="draft-1", subject="Hi"),
+        models.GetEmailMimeRequest: models.GetEmailMimeRequest(id="email-1"),
+        models.BulkMarkEmailsRequest: models.BulkMarkEmailsRequest(ids=["email-1"], read=True),
+        models.BulkCategorizeEmailsRequest: models.BulkCategorizeEmailsRequest(
+            ids=["email-1"], categories=["Important"]
+        ),
         models.ListEventsRequest: models.ListEventsRequest(
             start="2026-04-13T09:00:00+00:00", end="2026-04-13T18:00:00+00:00"
         ),
@@ -78,6 +84,11 @@ def _sample_request(method_name: str):
             start="2026-04-13T09:00:00+00:00",
             end="2026-04-13T18:00:00+00:00",
         ),
+        models.BulkDeleteEventsRequest: models.BulkDeleteEventsRequest(ids=["event-1"]),
+        models.BulkRespondToInvitesRequest: models.BulkRespondToInvitesRequest(
+            ids=["event-1"], response="accept"
+        ),
+        models.ListRoomsRequest: models.ListRoomsRequest(room_list="rooms@example.com"),
         models.SearchContactsRequest: models.SearchContactsRequest(query="ivan"),
         models.GetContactRequest: models.GetContactRequest(id="contact-1"),
         models.CreateContactRequest: models.CreateContactRequest(display_name="Ivan"),

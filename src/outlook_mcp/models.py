@@ -492,6 +492,22 @@ class DraftEmailRequest(ExchangeModel):
     include_signature: bool = True
 
 
+class UpdateDraftRequest(ExchangeModel):
+    """A partial update: omitted fields are left unchanged. ``attachments``, when
+    present, replaces the draft's entire attachment set (there is no add/remove
+    mode -- see ``model_fields_set`` usage in ``exchange_client/email.py``'s
+    ``update_draft``)."""
+
+    id: str
+    to: list[EmailStr] | None = None
+    subject: str | None = Field(default=None, min_length=1)
+    body: str | None = None
+    body_type: Literal["text", "html"] = "text"
+    cc: list[EmailStr] | None = None
+    bcc: list[EmailStr] | None = None
+    attachments: list[Path] | None = None
+
+
 class SendDraftRequest(ExchangeModel):
     id: str
 
@@ -518,22 +534,88 @@ class GetAttachmentRequest(ExchangeModel):
     save_path: Path | None = None
 
 
+class GetEmailMimeRequest(ExchangeModel):
+    id: str
+
+
+class EmailMimeResult(ExchangeModel):
+    id: str
+    filename: str
+    content_type: str = "message/rfc822"
+    size: int
+    #: Raw RFC 822 message, base64-encoded (the source can contain arbitrary
+    #: bytes -- inline attachment payloads, non-UTF-8 header encodings -- so
+    #: it isn't safe to hand back as plain text).
+    mime_base64: str
+
+
+class BulkMarkEmailsRequest(ExchangeModel):
+    ids: list[str] = Field(min_length=1, max_length=500)
+    read: bool | None = None
+    flag: Literal["flagged", "complete", "none"] | None = None
+    importance: Literal["low", "normal", "high"] | None = None
+    flag_start_date: datetime | None = None
+    flag_due_date: datetime | None = None
+
+    @model_validator(mode="after")
+    def validate_flag_dates(self) -> "BulkMarkEmailsRequest":
+        if (
+            self.flag_start_date is not None
+            and self.flag_due_date is not None
+            and self.flag_due_date < self.flag_start_date
+        ):
+            raise ValueError("flag_due_date must not be earlier than flag_start_date")
+        if self.flag == "none" and (
+            self.flag_start_date is not None or self.flag_due_date is not None
+        ):
+            raise ValueError("flag dates cannot be combined with flag='none'")
+        return self
+
+
+class BulkCategorizeEmailsRequest(ExchangeModel):
+    ids: list[str] = Field(min_length=1, max_length=500)
+    categories: list[str] = Field(default_factory=list)
+    mode: Literal["set", "add", "remove"] = "set"
+
+    @model_validator(mode="after")
+    def validate_categories(self) -> "BulkCategorizeEmailsRequest":
+        if self.mode in {"add", "remove"} and not self.categories:
+            raise ValueError(f"categories must not be empty when mode is '{self.mode}'")
+        if any(not name.strip() for name in self.categories):
+            raise ValueError("category names must not be blank")
+        return self
+
+
 class ListEventsRequest(ExchangeModel):
     start: datetime
     end: datetime
     calendar_id: str | None = None
     include_recurring: bool = True
+    #: View another mailbox's default calendar instead of the service account's own
+    #: (requires delegate/impersonation access to that mailbox on the server side).
+    #: Not combinable with calendar_id -- mailbox scoping only ever targets that
+    #: mailbox's default calendar.
+    mailbox: EmailStr | None = None
 
     @model_validator(mode="after")
     def validate_range(self) -> "ListEventsRequest":
         if self.end <= self.start:
             raise ValueError("end must be greater than start")
+        if self.mailbox is not None and self.calendar_id is not None:
+            raise ValueError("mailbox cannot be combined with calendar_id")
         return self
 
 
 class GetEventRequest(ExchangeModel):
     id: str
     calendar_id: str | None = None
+    mailbox: EmailStr | None = None
+
+    @model_validator(mode="after")
+    def validate_mailbox(self) -> "GetEventRequest":
+        if self.mailbox is not None and self.calendar_id is not None:
+            raise ValueError("mailbox cannot be combined with calendar_id")
+        return self
 
 
 class WorkHours(ExchangeModel):
@@ -610,6 +692,20 @@ class DeleteEventRequest(ExchangeModel):
 
 class RespondToInviteRequest(ExchangeModel):
     id: str
+    calendar_id: str | None = None
+    response: Literal["accept", "tentative", "decline"]
+    message: str | None = None
+
+
+class BulkDeleteEventsRequest(ExchangeModel):
+    ids: list[str] = Field(min_length=1, max_length=50)
+    calendar_id: str | None = None
+    notify_attendees: bool = True
+    cancel_message: str | None = None
+
+
+class BulkRespondToInvitesRequest(ExchangeModel):
+    ids: list[str] = Field(min_length=1, max_length=50)
     calendar_id: str | None = None
     response: Literal["accept", "tentative", "decline"]
     message: str | None = None
@@ -711,6 +807,20 @@ class CalendarInfo(ExchangeModel):
     is_default: bool = False
     color: str | None = None
     owner_email: ServerAddress | None = None
+
+
+class RoomListInfo(ExchangeModel):
+    name: str
+    email: ServerAddress
+
+
+class RoomInfo(ExchangeModel):
+    name: str
+    email: ServerAddress
+
+
+class ListRoomsRequest(ExchangeModel):
+    room_list: EmailStr
 
 
 class AvailabilityResult(ExchangeModel):

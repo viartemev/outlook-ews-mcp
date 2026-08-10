@@ -11,6 +11,10 @@ from outlook_mcp.models import (
     ActionResult,
     AddAttachmentRequest,
     AttachmentResult,
+    BulkCategorizeEmailsRequest,
+    BulkDeleteEventsRequest,
+    BulkMarkEmailsRequest,
+    BulkRespondToInvitesRequest,
     DeleteAttachmentRequest,
     BulkDeleteEmailsRequest,
     BulkItemResult,
@@ -33,6 +37,7 @@ from outlook_mcp.models import (
     DraftEmailRequest,
     EmailAddress,
     EmailFull,
+    EmailMimeResult,
     EmailSummary,
     FolderActionRequest,
     FolderInfo,
@@ -41,6 +46,7 @@ from outlook_mcp.models import (
     FreeSlot,
     GetAttachmentRequest,
     GetContactRequest,
+    GetEmailMimeRequest,
     GetEmailRequest,
     GetEventRequest,
     GetThreadRequest,
@@ -48,6 +54,7 @@ from outlook_mcp.models import (
     ListEmailsRequest,
     ListEventsRequest,
     ListFoldersRequest,
+    ListRoomsRequest,
     MailboxInfo,
     DelegateInfo,
     CreateInboxRuleRequest,
@@ -60,6 +67,8 @@ from outlook_mcp.models import (
     RenameFolderRequest,
     ReplyEmailRequest,
     RespondToInviteRequest,
+    RoomInfo,
+    RoomListInfo,
     SearchContactsRequest,
     SearchEmailsRequest,
     SendDraftRequest,
@@ -67,6 +76,7 @@ from outlook_mcp.models import (
     SendResult,
     Thread,
     UpdateContactRequest,
+    UpdateDraftRequest,
     UpdateEventRequest,
 )
 
@@ -224,6 +234,12 @@ class FakeExchangeBackend:
     def delete_emails(self, request: BulkDeleteEmailsRequest) -> BulkResult:
         return BulkResult(succeeded=[BulkItemResult(id=item_id) for item_id in request.ids])
 
+    def mark_emails(self, request: BulkMarkEmailsRequest) -> BulkResult:
+        return BulkResult(succeeded=[BulkItemResult(id=item_id) for item_id in request.ids])
+
+    def categorize_emails(self, request: BulkCategorizeEmailsRequest) -> BulkResult:
+        return BulkResult(succeeded=[BulkItemResult(id=item_id) for item_id in request.ids])
+
     def categorize_email(self, request: CategorizeEmailRequest) -> ActionResult:
         existing = ["Existing"]
         if request.mode == "set":
@@ -271,6 +287,15 @@ class FakeExchangeBackend:
     def create_draft(self, request: DraftEmailRequest) -> ActionResult:
         return ActionResult(id="draft-1", status="draft")
 
+    def update_draft(self, request: UpdateDraftRequest) -> ActionResult:
+        fields_set = request.model_fields_set
+        updated_fields = [
+            field
+            for field in ["to", "subject", "body", "cc", "bcc", "attachments"]
+            if field in fields_set
+        ]
+        return ActionResult(id=request.id, status="updated", updated_fields=updated_fields)
+
     def send_draft(self, request: SendDraftRequest) -> SendResult:
         return SendResult(id=request.id, status="sent")
 
@@ -287,6 +312,14 @@ class FakeExchangeBackend:
             size=5,
             saved_path=str(target),
             content_type="text/plain",
+        )
+
+    def get_email_mime(self, request: GetEmailMimeRequest) -> EmailMimeResult:
+        return EmailMimeResult(
+            id=request.id,
+            filename="message.eml",
+            size=5,
+            mime_base64="aGVsbG8=",
         )
 
     def list_events(self, request: ListEventsRequest) -> list[CalendarEvent]:
@@ -335,6 +368,12 @@ class FakeExchangeBackend:
     def respond_to_invite(self, request: RespondToInviteRequest) -> ActionResult:
         return ActionResult(id=request.id, status=request.response)
 
+    def delete_events(self, request: BulkDeleteEventsRequest) -> BulkResult:
+        return BulkResult(succeeded=[BulkItemResult(id=item_id) for item_id in request.ids])
+
+    def respond_to_invites(self, request: BulkRespondToInvitesRequest) -> BulkResult:
+        return BulkResult(succeeded=[BulkItemResult(id=item_id) for item_id in request.ids])
+
     def find_free_slots(self, request: FindFreeSlotsRequest) -> list[FreeSlot]:
         return [
             FreeSlot(
@@ -358,6 +397,12 @@ class FakeExchangeBackend:
                 id="cal-1", name="Calendar", is_default=True, owner_email="user@example.com"
             )
         ]
+
+    def list_room_lists(self) -> list[RoomListInfo]:
+        return [RoomListInfo(name="Building A", email="buildinga@example.com")]
+
+    def list_rooms(self, request: ListRoomsRequest) -> list[RoomInfo]:
+        return [RoomInfo(name="Room 101", email="room101@example.com")]
 
     def search_contacts(self, request: SearchContactsRequest) -> list[ContactSummary]:
         return [

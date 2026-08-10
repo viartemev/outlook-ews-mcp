@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import base64
 import errno
 import logging
 import os
@@ -30,7 +31,9 @@ from ..models import (
     Attachment,
     AddAttachmentRequest,
     AttachmentResult,
+    BulkCategorizeEmailsRequest,
     BulkDeleteEmailsRequest,
+    BulkMarkEmailsRequest,
     DeleteAttachmentRequest,
     BulkItemFailure,
     BulkItemResult,
@@ -43,11 +46,13 @@ from ..models import (
     DeleteFolderRequest,
     DraftEmailRequest,
     EmailFull,
+    EmailMimeResult,
     EmailSummary,
     FolderActionRequest,
     FolderInfo,
     ForwardEmailRequest,
     GetAttachmentRequest,
+    GetEmailMimeRequest,
     GetEmailRequest,
     GetThreadRequest,
     ListCategoriesRequest,
@@ -61,6 +66,7 @@ from ..models import (
     SendEmailRequest,
     SendResult,
     Thread,
+    UpdateDraftRequest,
 )
 from .base import BaseEWSBackend
 
@@ -714,6 +720,31 @@ class EmailOperationsMixin(BaseEWSBackend):
             raise self._map_exception(exc) from exc
         return self._bulk_result(request.ids, results)
 
+    def mark_emails(self, request: BulkMarkEmailsRequest) -> BulkResult:
+        # Not a native EWS batch operation the way move/copy/delete are, so this
+        # loops through mark_email() per id via the shared _bulk() helper.
+        return self._bulk(
+            request.ids,
+            lambda item_id: self.mark_email(
+                MarkEmailRequest(
+                    id=item_id,
+                    read=request.read,
+                    flag=request.flag,
+                    importance=request.importance,
+                    flag_start_date=request.flag_start_date,
+                    flag_due_date=request.flag_due_date,
+                )
+            ),
+        )
+
+    def categorize_emails(self, request: BulkCategorizeEmailsRequest) -> BulkResult:
+        return self._bulk(
+            request.ids,
+            lambda item_id: self.categorize_email(
+                CategorizeEmailRequest(id=item_id, categories=request.categories, mode=request.mode)
+            ),
+        )
+
     def categorize_email(self, request: CategorizeEmailRequest) -> ActionResult:
         item = self._fetch_item(request.id, expected_type=Message)
         current = list(getattr(item, "categories", None) or [])
@@ -906,6 +937,43 @@ class EmailOperationsMixin(BaseEWSBackend):
         except Exception as exc:  # noqa: BLE001
             raise self._map_exception(exc) from exc
 
+    def update_draft(self, request: UpdateDraftRequest) -> ActionResult:
+        item = self._fetch_item(request.id, folder=self.account.drafts, expected_type=Message)
+        updated_fields: list[str] = []
+        save_fields: list[str] = []
+        # A field name in `fields_set` means the caller explicitly included it in the
+        # request (even as an empty list) -- an omitted field is left untouched. Mirrors
+        # the fields_set handling in update_contact/update_event.
+        fields_set = request.model_fields_set
+        field_map = {
+            "to": "to_recipients",
+            "subject": "subject",
+            "body": "body",
+            "cc": "cc_recipients",
+            "bcc": "bcc_recipients",
+        }
+        for request_field, item_field in field_map.items():
+            if request_field not in fields_set:
+                continue
+            value = getattr(request, request_field)
+            if request_field == "body" and value is not None:
+                value = HTMLBody(value) if request.body_type == "html" else value
+            elif request_field in ("to", "cc", "bcc"):
+                value = [self._mailbox(address) for address in value or []]
+            setattr(item, item_field, value)
+            updated_fields.append(request_field)
+            save_fields.append(item_field)
+        try:
+            if "attachments" in fields_set:
+                item.detach(list(item.attachments))
+                self._attach_files(item, request.attachments or [])
+                updated_fields.append("attachments")
+            if save_fields:
+                item.save(update_fields=save_fields)
+            return ActionResult(id=request.id, status="updated", updated_fields=updated_fields)
+        except Exception as exc:  # noqa: BLE001
+            raise self._map_exception(exc, item_id=request.id) from exc
+
     def send_draft(self, request: SendDraftRequest) -> SendResult:
         item = self._fetch_item(request.id, folder=self.account.drafts, expected_type=Message)
         try:
@@ -964,6 +1032,26 @@ class EmailOperationsMixin(BaseEWSBackend):
                     id=request.email_id, status="updated", updated_fields=["attachments"]
                 )
         raise NotFoundError(request.attachment_id)
+
+    def get_email_mime(self, request: GetEmailMimeRequest) -> EmailMimeResult:
+        item = self._fetch_item(request.id, expected_type=Message)
+        try:
+            raw = item.mime_content
+        except Exception as exc:  # noqa: BLE001
+            raise self._map_exception(exc, item_id=request.id) from exc
+        if raw is None:
+            raise APIError(
+                "exchange_error", "exchange did not return MIME content for this message"
+            )
+        if isinstance(raw, str):
+            raw = raw.encode("utf-8")
+        filename = self._sanitize_attachment_filename(f"{item.subject or 'message'}.eml")
+        return EmailMimeResult(
+            id=request.id,
+            filename=filename,
+            size=len(raw),
+            mime_base64=base64.b64encode(raw).decode("ascii"),
+        )
 
     def get_attachment(self, request: GetAttachmentRequest) -> AttachmentResult:
         item = self._fetch_item(request.email_id, expected_type=Message)

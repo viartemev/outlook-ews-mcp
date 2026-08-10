@@ -21,8 +21,11 @@ Secure MCP server for on-prem Microsoft Exchange (EWS) with tools for email, cal
 
 ## Highlights
 
-- email operations: list, search, read, send, reply, forward, move, copy, delete, mark
-- calendar operations: list, create, update, delete, respond to invites, find free slots
+- email operations: list, search (substring or AQS), read, send, reply, forward, move,
+  copy, delete, mark, categorize, bulk actions, raw MIME export, attachment add/delete
+- Inbox Rules, Out-of-Office (automatic replies), and read-only delegate listing
+- calendar operations: list, create, update, delete, respond to invites, find free
+  slots, view a shared/delegate mailbox's calendar, Room Finder, bulk actions
 - contacts operations: search, read, create, update, delete
 - folder operations and attachment download
 - Exchange auth via `NTLM` and `Basic`
@@ -43,6 +46,8 @@ Secure MCP server for on-prem Microsoft Exchange (EWS) with tools for email, cal
 ### Email
 - `list_emails`
 - `get_email`
+- `get_email_mime` — raw RFC 822 message content, base64-encoded
+- `get_thread`
 - `search_emails`
 - `send_email`
 - `reply_email`
@@ -52,25 +57,31 @@ Secure MCP server for on-prem Microsoft Exchange (EWS) with tools for email, cal
 - `delete_email`
 - `move_emails` / `copy_emails` / `delete_emails` — bulk variants with per-item results
 - `mark_email`
+- `categorize_email`
+- `mark_emails` / `categorize_emails` — bulk variants with per-item results
+- `list_categories`
 - `list_folders`
 - `create_folder`
 - `rename_folder`
 - `delete_folder`
 - `create_draft`
+- `update_draft` — partial update; `attachments`, if given, replaces the whole set
 - `send_draft`
 - `get_attachment`
 - `add_attachment` / `delete_attachment`
 
 ### Calendar
-- `list_events`
-- `get_event`
+- `list_events` / `get_event` / `get_my_availability` — pass `mailbox` to view a
+  colleague's default calendar instead of your own (requires delegate/impersonation
+  access already granted on the server; not combinable with `calendar_id`)
 - `create_event`
 - `update_event`
 - `delete_event`
 - `respond_to_invite`
+- `delete_events` / `respond_to_invites` — bulk variants with per-item results
 - `find_free_slots`
-- `get_my_availability`
 - `list_calendars`
+- `list_room_lists` / `list_rooms` — Room Finder
 
 ### Contacts
 - `search_contacts`

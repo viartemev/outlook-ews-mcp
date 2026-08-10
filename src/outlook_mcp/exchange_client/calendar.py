@@ -18,6 +18,9 @@ from ..models import (
     ActionResult,
     Attendee as ApiAttendee,
     AvailabilityResult,
+    BulkDeleteEventsRequest,
+    BulkRespondToInvitesRequest,
+    BulkResult,
     CalendarEvent,
     CalendarInfo,
     CreateEventRequest,
@@ -27,8 +30,11 @@ from ..models import (
     FreeSlot,
     GetEventRequest,
     ListEventsRequest,
+    ListRoomsRequest,
     RecurrencePattern,
     RespondToInviteRequest,
+    RoomInfo,
+    RoomListInfo,
     UpdateEventRequest,
     WorkHours,
 )
@@ -138,8 +144,13 @@ class CalendarOperationsMixin(BaseEWSBackend):
             free_slots.append(FreeSlot(start=cursor, end=end, all_available=True))
         return free_slots
 
-    def _calendar_folder(self, calendar_id: str | None) -> Any:
-        folder = self.account.calendar if not calendar_id else self._resolve_folder(calendar_id)
+    def _calendar_folder(self, calendar_id: str | None, mailbox: str | None = None) -> Any:
+        if mailbox:
+            # calendar_id + mailbox is rejected at the request-model level, so this
+            # only ever targets that mailbox's own default calendar.
+            folder = self._account_for(mailbox).calendar
+        else:
+            folder = self.account.calendar if not calendar_id else self._resolve_folder(calendar_id)
         folder_class = getattr(folder, "folder_class", None)
         if calendar_id and folder_class is not None and folder_class != self._CALENDAR_FOLDER_CLASS:
             raise APIError(
@@ -150,7 +161,10 @@ class CalendarOperationsMixin(BaseEWSBackend):
         return folder
 
     def list_events(self, request: ListEventsRequest) -> list[CalendarEvent]:
-        folder = self._calendar_folder(request.calendar_id)
+        folder = self._calendar_folder(request.calendar_id, request.mailbox)
+        # The query window is always computed in the service account's own timezone,
+        # even when `mailbox` targets another account -- resolving the target
+        # mailbox's own timezone would need an extra round trip this doesn't make.
         start = self._to_ews_datetime(request.start)
         end = self._to_ews_datetime(request.end)
         qs = folder.view(start=start, end=end)
@@ -165,8 +179,9 @@ class CalendarOperationsMixin(BaseEWSBackend):
     def get_event(self, request: GetEventRequest) -> CalendarEvent:
         item = self._fetch_item(
             request.id,
-            folder=self._calendar_folder(request.calendar_id),
+            folder=self._calendar_folder(request.calendar_id, request.mailbox),
             expected_type=CalendarItem,
+            account=self._account_for(request.mailbox) if request.mailbox else None,
         )
         return self._to_calendar_event(item)
 
@@ -495,3 +510,46 @@ class CalendarOperationsMixin(BaseEWSBackend):
             )
             for folder in folders
         ]
+
+    def list_room_lists(self) -> list[RoomListInfo]:
+        try:
+            room_lists = list(self.account.protocol.get_roomlists())
+        except Exception as exc:  # noqa: BLE001
+            raise self._map_exception(exc) from exc
+        return [
+            RoomListInfo(name=room_list.name, email=room_list.email_address)
+            for room_list in room_lists
+        ]
+
+    def list_rooms(self, request: ListRoomsRequest) -> list[RoomInfo]:
+        try:
+            rooms = list(self.account.protocol.get_rooms(str(request.room_list)))
+        except Exception as exc:  # noqa: BLE001
+            raise self._map_exception(exc) from exc
+        return [RoomInfo(name=room.name, email=room.email_address) for room in rooms]
+
+    def delete_events(self, request: BulkDeleteEventsRequest) -> BulkResult:
+        return self._bulk(
+            request.ids,
+            lambda item_id: self.delete_event(
+                DeleteEventRequest(
+                    id=item_id,
+                    calendar_id=request.calendar_id,
+                    notify_attendees=request.notify_attendees,
+                    cancel_message=request.cancel_message,
+                )
+            ),
+        )
+
+    def respond_to_invites(self, request: BulkRespondToInvitesRequest) -> BulkResult:
+        return self._bulk(
+            request.ids,
+            lambda item_id: self.respond_to_invite(
+                RespondToInviteRequest(
+                    id=item_id,
+                    calendar_id=request.calendar_id,
+                    response=request.response,
+                    message=request.message,
+                )
+            ),
+        )
