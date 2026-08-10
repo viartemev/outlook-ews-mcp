@@ -19,11 +19,7 @@ logger = logging.getLogger(__name__)
 
 def configure_logging(settings: Settings) -> None:
     handlers: list[logging.Handler]
-    if (
-        settings.log_file
-        and str(settings.log_file).strip() not in {"", "."}
-        and not settings.log_file.is_dir()
-    ):
+    if settings.log_file is not None and not settings.log_file.is_dir():
         handlers = [logging.FileHandler(settings.log_file)]
     else:
         handlers = [logging.StreamHandler(sys.stderr)]

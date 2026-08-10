@@ -30,10 +30,13 @@ from outlook_mcp.models import (
     CategoryUsage,
     CreateEventRequest,
     CreateEventResult,
+    CreateInboxRuleRequest,
+    DelegateInfo,
     DeleteContactRequest,
     DeleteEmailRequest,
     DeleteEventRequest,
     DeleteFolderRequest,
+    DeleteInboxRuleRequest,
     DraftEmailRequest,
     EmailAddress,
     EmailFull,
@@ -50,17 +53,13 @@ from outlook_mcp.models import (
     GetEmailRequest,
     GetEventRequest,
     GetThreadRequest,
+    InboxRule,
     ListCategoriesRequest,
     ListEmailsRequest,
     ListEventsRequest,
     ListFoldersRequest,
     ListRoomsRequest,
     MailboxInfo,
-    DelegateInfo,
-    CreateInboxRuleRequest,
-    DeleteInboxRuleRequest,
-    InboxRule,
-    UpdateInboxRuleRequest,
     MarkEmailRequest,
     OutOfOfficeSettings,
     PingResult,
@@ -78,6 +77,7 @@ from outlook_mcp.models import (
     UpdateContactRequest,
     UpdateDraftRequest,
     UpdateEventRequest,
+    UpdateInboxRuleRequest,
 )
 
 
@@ -160,6 +160,14 @@ class FakeExchangeBackend:
             body_text="Body",
             conversation_id="conv-1",
             headers={"X-Test": "1"},
+        )
+
+    def get_email_mime(self, request: GetEmailMimeRequest) -> EmailMimeResult:
+        return EmailMimeResult(
+            id=request.id,
+            filename="message.eml",
+            size=5,
+            mime_base64="aGVsbG8=",
         )
 
     def get_thread(self, request: GetThreadRequest) -> Thread:
@@ -312,14 +320,6 @@ class FakeExchangeBackend:
             size=5,
             saved_path=str(target),
             content_type="text/plain",
-        )
-
-    def get_email_mime(self, request: GetEmailMimeRequest) -> EmailMimeResult:
-        return EmailMimeResult(
-            id=request.id,
-            filename="message.eml",
-            size=5,
-            mime_base64="aGVsbG8=",
         )
 
     def list_events(self, request: ListEventsRequest) -> list[CalendarEvent]:

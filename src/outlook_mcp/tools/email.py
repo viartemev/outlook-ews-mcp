@@ -46,16 +46,16 @@ def _validate_outgoing_attachments(client: ExchangeClient, request: Any) -> None
     _validate_attachments(request.attachments, client.settings)
 
 
-def _validate_attachment_destination(client: ExchangeClient, request: Any) -> None:
-    if request.save_path is not None:
-        _validate_within_root([request.save_path], client.settings.attachment_root, "save_path")
-
-
 def _validate_outgoing_attachments_if_set(client: ExchangeClient, request: Any) -> None:
     # UpdateDraftRequest.attachments is None when the caller didn't touch attachments
     # at all, vs. a (possibly empty) list when they want to replace the whole set.
     if request.attachments is not None:
         _validate_attachments(request.attachments, client.settings)
+
+
+def _validate_attachment_destination(client: ExchangeClient, request: Any) -> None:
+    if request.save_path is not None:
+        _validate_within_root([request.save_path], client.settings.attachment_root, "save_path")
 
 
 list_emails = tool_handler("list_emails", ListEmailsRequest)
