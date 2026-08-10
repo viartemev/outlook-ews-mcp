@@ -92,7 +92,12 @@ def test_list_events_queries_the_mailbox_calendar_not_the_service_account(
     backend._account = SimpleNamespace(
         calendar=SimpleNamespace(view=own_view), default_timezone=UTC
     )
-    other_calendar = SimpleNamespace(view=lambda start, end: [])
+
+    class _EventQuery(list):
+        def only(self, *fields):
+            return self
+
+    other_calendar = SimpleNamespace(view=lambda start, end: _EventQuery())
     monkeypatch.setattr(
         backend, "_account_for", lambda mailbox: SimpleNamespace(calendar=other_calendar)
     )

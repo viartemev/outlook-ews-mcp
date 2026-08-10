@@ -43,10 +43,16 @@ def _message(item_id: str, subject: str, hour: int, body: str = "") -> SimpleNam
 
 
 class FakeQuerySet:
-    """Just enough of an exchangelib queryset for _thread_items: order_by + slicing."""
+    """Just enough of an exchangelib queryset for _thread_items: only + order_by
+    + slicing."""
 
     def __init__(self, items: list) -> None:
         self.items = items
+        self.only_fields: tuple = ()
+
+    def only(self, *fields) -> "FakeQuerySet":
+        self.only_fields = fields
+        return self
 
     def order_by(self, *fields) -> "FakeQuerySet":
         return self
@@ -56,7 +62,10 @@ class FakeQuerySet:
 
 
 class StubThreadBackend(EWSExchangeBackend):
-    """Real get_thread logic with only the two EWS round trips replaced."""
+    """Real get_thread logic with only the three EWS round trips replaced.
+
+    The stub items already carry their bodies, so the body fetch is an identity;
+    _fetch_thread_bodies has its own tests against a fake account.fetch."""
 
     def __init__(self, settings, items_by_folder: dict[str, list], anchor=None) -> None:
         super().__init__(settings)
@@ -66,11 +75,14 @@ class StubThreadBackend(EWSExchangeBackend):
     def _resolve_folder(self, value):
         return value
 
-    def _fetch_item(self, item_id, folder=None, expected_type=None):
+    def _fetch_item(self, item_id, folder=None, expected_type=None, **kwargs):
         return self._anchor
 
     def _thread_items(self, folder, conversation_id, subject, limit):
         return list(self._items_by_folder.get(folder, []))
+
+    def _fetch_thread_bodies(self, selected, anchor):
+        return selected
 
 
 @pytest.mark.parametrize(

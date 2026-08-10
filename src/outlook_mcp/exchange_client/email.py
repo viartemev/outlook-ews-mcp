@@ -23,7 +23,7 @@ from exchangelib.extended_properties import ExtendedProperty, Flag
 from exchangelib.fields import InvalidField, InvalidFieldForVersion
 from exchangelib.folders import FolderCollection
 from exchangelib.items import HARD_DELETE, MOVE_TO_DELETED_ITEMS
-from exchangelib.properties import ConversationId
+from exchangelib.properties import ConversationId, ItemId
 
 from ..errors import APIError, NotFoundError
 from ..models import (
@@ -121,7 +121,6 @@ _EMAIL_SUMMARY_FIELDS = (
     "subject",
     "author",
     "sender",
-    "to_recipients",
     "datetime_received",
     "datetime_sent",
     "datetime_created",
@@ -131,6 +130,18 @@ _EMAIL_SUMMARY_FIELDS = (
     "importance",
     "categories",
     "conversation_id",
+)
+
+#: What get_thread's candidate pass actually reads: enough to dedup across
+#: folders, sort by arrival and match subjects. Bodies come later, in one bulk
+#: fetch for only the messages that survive the limit -- see
+#: _fetch_thread_bodies.
+_THREAD_CANDIDATE_FIELDS = (
+    "subject",
+    "conversation_id",
+    "datetime_received",
+    "datetime_sent",
+    "datetime_created",
 )
 
 #: Reply/forward markers Outlook writes, in the locales this server sees. The
@@ -188,7 +199,6 @@ class EmailOperationsMixin(BaseEWSBackend):
                     getattr(item, "author", None) or getattr(item, "sender", None)
                 )
             },
-            to=self._recipients(getattr(item, "to_recipients", None)),
             date=getattr(item, "datetime_received", None)
             or getattr(item, "datetime_sent", None)
             or getattr(item, "datetime_created", None)
@@ -210,7 +220,7 @@ class EmailOperationsMixin(BaseEWSBackend):
             downloadable=not isinstance(attachment, ItemAttachment),
         )
 
-    def _to_email_full(self, item: Any) -> EmailFull:
+    def _to_email_full(self, item: Any, include_headers: bool = False) -> EmailFull:
         body_text, body_html = self._extract_message_body(item)
         max_chars = self.settings.email_body_max_chars
         truncated = False
@@ -222,6 +232,7 @@ class EmailOperationsMixin(BaseEWSBackend):
             truncated = True
         return EmailFull(
             **self._to_email_summary(item).model_dump(by_alias=True),
+            to=self._recipients(getattr(item, "to_recipients", None)),
             cc=self._recipients(getattr(item, "cc_recipients", None)),
             bcc=self._recipients(getattr(item, "bcc_recipients", None)),
             body_text=body_text,
@@ -229,7 +240,9 @@ class EmailOperationsMixin(BaseEWSBackend):
             attachments=[
                 self._attachment_metadata(a) for a in getattr(item, "attachments", None) or []
             ],
-            headers=self._headers_to_dict(getattr(item, "headers", None)),
+            headers=(
+                self._headers_to_dict(getattr(item, "headers", None)) if include_headers else {}
+            ),
             truncated=truncated,
         )
 
@@ -414,7 +427,7 @@ class EmailOperationsMixin(BaseEWSBackend):
 
     def get_email(self, request: GetEmailRequest) -> EmailFull:
         item = self._fetch_item(request.id, expected_type=Message)
-        return self._to_email_full(item)
+        return self._to_email_full(item, include_headers=request.include_headers)
 
     #: Standard EWS folder class for mail folders; excludes calendar/contacts/tasks
     #: folders when a search walks the whole mailbox.
@@ -444,7 +457,10 @@ class EmailOperationsMixin(BaseEWSBackend):
 
         found = sorted(collected.values(), key=self._received_at)
         truncated = len(found) > request.limit
-        messages = [self._to_email_full(item) for item in found[-request.limit :]]
+        selected = found[-request.limit :]
+        messages = [
+            self._to_email_full(item) for item in self._fetch_thread_bodies(selected, anchor)
+        ]
         return Thread(
             conversation_id=conversation_id,
             subject=normalize_subject(subject or (messages[0].subject if messages else "")),
@@ -453,13 +469,52 @@ class EmailOperationsMixin(BaseEWSBackend):
             truncated=truncated,
         )
 
+    def _fetch_thread_bodies(self, selected: list[Any], anchor: Any) -> list[Any]:
+        """Swap the candidates that survived dedup and the limit for full items.
+
+        _thread_items deliberately fetches thin summaries: get_thread collects up
+        to `limit` candidates from *each* folder and then discards everything past
+        the overall limit, so fetching bodies up front pulls whole messages across
+        the wire only to throw most of them away. Only the survivors are worth a
+        full fetch, and all of them come back in one GetItem round trip. The
+        anchor already came through _fetch_item complete and is kept as is.
+
+        A message deleted between the two phases comes back as ErrorItemNotFound;
+        it genuinely no longer exists, so it is dropped rather than failing the
+        whole thread. Any other error element says nothing about existence and is
+        surfaced like every other failure in this module.
+        """
+        need = [item for item in selected if item is not anchor]
+        if not need:
+            return selected
+        fetched: dict[str, Any] = {}
+        try:
+            ids = [ItemId(id=item.id, changekey=None) for item in need]
+            for result in self.account.fetch(ids=ids):
+                if isinstance(result, ErrorItemNotFound):
+                    continue
+                if isinstance(result, Exception):
+                    raise result
+                fetched[result.id] = result
+        except Exception as exc:  # noqa: BLE001
+            raise self._map_exception(exc) from exc
+        full_items = []
+        for item in selected:
+            if item is anchor:
+                full_items.append(item)
+            elif item.id in fetched:
+                full_items.append(fetched[item.id])
+        return full_items
+
     def _thread_items(
         self, folder: Folder, conversation_id: str | None, subject: str | None, limit: int
     ) -> list[Any]:
         if conversation_id:
             try:
                 qs = folder.filter(conversation_id=ConversationId(id=conversation_id))
-                return list(qs.order_by("-datetime_received")[:limit])
+                return list(
+                    qs.only(*_THREAD_CANDIDATE_FIELDS).order_by("-datetime_received")[:limit]
+                )
             except _UNSUPPORTED_RESTRICTION as exc:
                 if subject is None:
                     # Nothing to fall back to. Reporting an empty conversation for a
@@ -481,7 +536,11 @@ class EmailOperationsMixin(BaseEWSBackend):
         if not normalized:
             return []
         try:
-            qs = folder.filter(subject__icontains=normalized).order_by("-datetime_received")
+            qs = (
+                folder.filter(subject__icontains=normalized)
+                .only(*_THREAD_CANDIDATE_FIELDS)
+                .order_by("-datetime_received")
+            )
             items = list(qs[:limit])
         except Exception as exc:  # noqa: BLE001
             raise self._map_exception(exc) from exc
@@ -625,7 +684,9 @@ class EmailOperationsMixin(BaseEWSBackend):
             raise self._map_exception(exc, item_id=request.id) from exc
 
     def delete_email(self, request: DeleteEmailRequest) -> ActionResult:
-        item = self._fetch_item(request.id, expected_type=Message)
+        item = self._fetch_item(
+            request.id, expected_type=Message, only_fields=("parent_folder_id",)
+        )
         try:
             if request.hard_delete:
                 item.delete()
@@ -975,7 +1036,12 @@ class EmailOperationsMixin(BaseEWSBackend):
             raise self._map_exception(exc, item_id=request.id) from exc
 
     def send_draft(self, request: SendDraftRequest) -> SendResult:
-        item = self._fetch_item(request.id, folder=self.account.drafts, expected_type=Message)
+        item = self._fetch_item(
+            request.id,
+            folder=self.account.drafts,
+            expected_type=Message,
+            only_fields=("parent_folder_id",),
+        )
         try:
             item.send_and_save()
             # The draft's own id stops being valid the moment it's sent (it moves out

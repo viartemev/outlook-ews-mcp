@@ -406,12 +406,25 @@ class BaseEWSBackend:
         folder: Folder | None = None,
         expected_type: type[Item] | tuple[type[Item], ...] | None = None,
         account: Account | None = None,
+        only_fields: tuple[str, ...] | None = None,
     ) -> Any:
+        """Fetch one item by id.
+
+        ``only_fields`` projects the fetch down to those fields (id and changekey
+        always come along). Callers that only invoke a method on the item --
+        delete, send, accept -- have no use for the full body and attachment
+        metadata a bare GetItem downloads; they pass ("parent_folder_id",), the
+        one field the folder re-check below actually reads.
+        """
         target_account = account if account is not None else self.account
+        fetch_kwargs: dict[str, Any] = {
+            "ids": [ItemId(id=item_id, changekey=None)],
+            "folder": folder,
+        }
+        if only_fields is not None:
+            fetch_kwargs["only_fields"] = list(only_fields)
         try:
-            item = next(
-                target_account.fetch(ids=[ItemId(id=item_id, changekey=None)], folder=folder)
-            )
+            item = next(target_account.fetch(**fetch_kwargs))
         except StopIteration as exc:
             raise NotFoundError(item_id) from exc
         except Exception as exc:  # noqa: BLE001

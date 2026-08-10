@@ -76,12 +76,19 @@ def test_create_event_without_recurrence_leaves_it_unset(settings, monkeypatch) 
     assert saved.kwargs["recurrence"] is None
 
 
+class _EventQuery(list):
+    """folder.view() result: list-like, accepting the .only() projection."""
+
+    def only(self, *fields):
+        return self
+
+
 class FakeCalendarFolder:
     def __init__(self, items: list) -> None:
         self._items = items
 
     def view(self, start, end):
-        return self._items
+        return _EventQuery(self._items)
 
 
 def test_calendar_id_must_reference_calendar_folder(settings, monkeypatch) -> None:
