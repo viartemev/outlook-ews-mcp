@@ -11,6 +11,12 @@ from outlook_mcp.models import (
     ActionResult,
     AttachmentResult,
     AvailabilityResult,
+    BulkCategorizeEmailsRequest,
+    BulkDeleteEmailsRequest,
+    BulkDeleteEventsRequest,
+    BulkMarkEmailsRequest,
+    BulkMoveEmailsRequest,
+    BulkRespondToInvitesRequest,
     CalendarInfo,
     CalendarEvent,
     ContactFull,
@@ -20,13 +26,16 @@ from outlook_mcp.models import (
     CategoryUsage,
     CreateEventRequest,
     CreateEventResult,
+    CreateRuleRequest,
     DeleteContactRequest,
     DeleteEmailRequest,
     DeleteEventRequest,
     DeleteFolderRequest,
+    DeleteRuleRequest,
     DraftEmailRequest,
     EmailAddress,
     EmailFull,
+    EmailMimeResult,
     EmailSummary,
     FolderActionRequest,
     FolderInfo,
@@ -35,6 +44,7 @@ from outlook_mcp.models import (
     FreeSlot,
     GetAttachmentRequest,
     GetContactRequest,
+    GetEmailMimeRequest,
     GetEmailRequest,
     GetEventRequest,
     GetThreadRequest,
@@ -42,20 +52,28 @@ from outlook_mcp.models import (
     ListEmailsRequest,
     ListEventsRequest,
     ListFoldersRequest,
+    ListRoomsRequest,
     MailboxInfo,
+    MailRule,
     MarkEmailRequest,
+    OofSettingsModel,
     PingResult,
     RenameFolderRequest,
     ReplyEmailRequest,
     RespondToInviteRequest,
+    RoomInfo,
+    RoomListInfo,
     SearchContactsRequest,
     SearchEmailsRequest,
     SendDraftRequest,
     SendEmailRequest,
     SendResult,
+    SetOofSettingsRequest,
     Thread,
     UpdateContactRequest,
+    UpdateDraftRequest,
     UpdateEventRequest,
+    UpdateRuleRequest,
 )
 
 
@@ -105,6 +123,14 @@ class FakeExchangeBackend:
             body_text="Body",
             conversation_id="conv-1",
             headers={"X-Test": "1"},
+        )
+
+    def get_email_mime(self, request: GetEmailMimeRequest) -> EmailMimeResult:
+        return EmailMimeResult(
+            id=request.id,
+            filename="message.eml",
+            size=5,
+            mime_base64="aGVsbG8=",
         )
 
     def get_thread(self, request: GetThreadRequest) -> Thread:
@@ -175,6 +201,67 @@ class FakeExchangeBackend:
             categories=categories,
         )
 
+    def bulk_move_emails(self, request: BulkMoveEmailsRequest) -> list[ActionResult]:
+        return [
+            self.move_email(FolderActionRequest(id=item_id, folder=request.folder))
+            for item_id in request.ids
+        ]
+
+    def bulk_delete_emails(self, request: BulkDeleteEmailsRequest) -> list[ActionResult]:
+        return [
+            self.delete_email(DeleteEmailRequest(id=item_id, hard_delete=request.hard_delete))
+            for item_id in request.ids
+        ]
+
+    def bulk_mark_emails(self, request: BulkMarkEmailsRequest) -> list[ActionResult]:
+        return [
+            self.mark_email(
+                MarkEmailRequest(
+                    id=item_id,
+                    read=request.read,
+                    flag=request.flag,
+                    importance=request.importance,
+                    flag_start_date=request.flag_start_date,
+                    flag_due_date=request.flag_due_date,
+                )
+            )
+            for item_id in request.ids
+        ]
+
+    def bulk_categorize_emails(self, request: BulkCategorizeEmailsRequest) -> list[ActionResult]:
+        return [
+            self.categorize_email(
+                CategorizeEmailRequest(id=item_id, categories=request.categories, mode=request.mode)
+            )
+            for item_id in request.ids
+        ]
+
+    def list_rules(self) -> list[MailRule]:
+        return [
+            MailRule(
+                id="rule-1",
+                display_name="Move newsletters",
+                priority=1,
+                from_addresses=["news@example.com"],
+                move_to_folder="folder-newsletters",
+            )
+        ]
+
+    def create_rule(self, request: CreateRuleRequest) -> ActionResult:
+        return ActionResult(id="rule-new", status="created")
+
+    def update_rule(self, request: UpdateRuleRequest) -> ActionResult:
+        return ActionResult(id=request.id, status="updated")
+
+    def delete_rule(self, request: DeleteRuleRequest) -> ActionResult:
+        return ActionResult(id=request.id, status="deleted")
+
+    def get_oof_settings(self) -> OofSettingsModel:
+        return OofSettingsModel(state="disabled", external_audience="all")
+
+    def set_oof_settings(self, request: SetOofSettingsRequest) -> ActionResult:
+        return ActionResult(id="oof", status="updated")
+
     def list_categories(self, request: ListCategoriesRequest) -> list[CategoryUsage]:
         return [
             CategoryUsage(name="Important", count=7),
@@ -206,6 +293,15 @@ class FakeExchangeBackend:
 
     def create_draft(self, request: DraftEmailRequest) -> ActionResult:
         return ActionResult(id="draft-1", status="draft")
+
+    def update_draft(self, request: UpdateDraftRequest) -> ActionResult:
+        fields_set = request.model_fields_set
+        updated_fields = [
+            field
+            for field in ["to", "subject", "body", "cc", "bcc", "attachments"]
+            if field in fields_set
+        ]
+        return ActionResult(id=request.id, status="updated", updated_fields=updated_fields)
 
     def send_draft(self, request: SendDraftRequest) -> SendResult:
         return SendResult(id=request.id, status="sent")
@@ -265,6 +361,32 @@ class FakeExchangeBackend:
     def respond_to_invite(self, request: RespondToInviteRequest) -> ActionResult:
         return ActionResult(id=request.id, status=request.response)
 
+    def bulk_delete_events(self, request: BulkDeleteEventsRequest) -> list[ActionResult]:
+        return [
+            self.delete_event(
+                DeleteEventRequest(
+                    id=item_id,
+                    calendar_id=request.calendar_id,
+                    notify_attendees=request.notify_attendees,
+                    cancel_message=request.cancel_message,
+                )
+            )
+            for item_id in request.ids
+        ]
+
+    def bulk_respond_to_invites(self, request: BulkRespondToInvitesRequest) -> list[ActionResult]:
+        return [
+            self.respond_to_invite(
+                RespondToInviteRequest(
+                    id=item_id,
+                    calendar_id=request.calendar_id,
+                    response=request.response,
+                    message=request.message,
+                )
+            )
+            for item_id in request.ids
+        ]
+
     def find_free_slots(self, request: FindFreeSlotsRequest) -> list[FreeSlot]:
         return [
             FreeSlot(
@@ -288,6 +410,12 @@ class FakeExchangeBackend:
                 id="cal-1", name="Calendar", is_default=True, owner_email="user@example.com"
             )
         ]
+
+    def list_room_lists(self) -> list[RoomListInfo]:
+        return [RoomListInfo(name="Building A", email="buildinga@example.com")]
+
+    def list_rooms(self, request: ListRoomsRequest) -> list[RoomInfo]:
+        return [RoomInfo(name="Room 101", email="room101@example.com")]
 
     def search_contacts(self, request: SearchContactsRequest) -> list[ContactSummary]:
         return [

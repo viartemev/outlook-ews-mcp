@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import base64
 import errno
 import logging
 import os
@@ -12,6 +13,7 @@ from pathlib import Path
 from typing import Any
 
 from exchangelib import FileAttachment, Folder, HTMLBody, ItemAttachment, Message, Q
+from exchangelib.settings import OofSettings
 from exchangelib.errors import (
     ErrorInvalidRestriction,
     ErrorUnsupportedPathForQuery,
@@ -21,38 +23,59 @@ from exchangelib.extended_properties import ExtendedProperty, Flag
 from exchangelib.fields import InvalidField, InvalidFieldForVersion
 from exchangelib.folders import FolderCollection
 from exchangelib.items import HARD_DELETE, MOVE_TO_DELETED_ITEMS
-from exchangelib.properties import ConversationId
+from exchangelib.properties import (
+    Actions,
+    Address,
+    Conditions,
+    ConversationId,
+    FolderId,
+    MoveToFolder,
+    Rule,
+)
 
 from ..errors import APIError, NotFoundError
 from ..models import (
     ActionResult,
     Attachment,
     AttachmentResult,
+    BulkCategorizeEmailsRequest,
+    BulkDeleteEmailsRequest,
+    BulkMarkEmailsRequest,
+    BulkMoveEmailsRequest,
     CategorizeEmailRequest,
     CategoryUsage,
     CreateFolderRequest,
+    CreateRuleRequest,
     DeleteEmailRequest,
     DeleteFolderRequest,
+    DeleteRuleRequest,
     DraftEmailRequest,
     EmailFull,
+    EmailMimeResult,
     EmailSummary,
     FolderActionRequest,
     FolderInfo,
     ForwardEmailRequest,
     GetAttachmentRequest,
+    GetEmailMimeRequest,
     GetEmailRequest,
     GetThreadRequest,
     ListCategoriesRequest,
     ListEmailsRequest,
     ListFoldersRequest,
+    MailRule,
     MarkEmailRequest,
+    OofSettingsModel,
     RenameFolderRequest,
     ReplyEmailRequest,
     SearchEmailsRequest,
     SendDraftRequest,
     SendEmailRequest,
     SendResult,
+    SetOofSettingsRequest,
     Thread,
+    UpdateDraftRequest,
+    UpdateRuleRequest,
 )
 from .base import BaseEWSBackend
 
@@ -654,6 +677,43 @@ class EmailOperationsMixin(BaseEWSBackend):
             categories=updated,
         )
 
+    def bulk_move_emails(self, request: BulkMoveEmailsRequest) -> list[ActionResult]:
+        return self._bulk(
+            request.ids,
+            lambda item_id: self.move_email(FolderActionRequest(id=item_id, folder=request.folder)),
+        )
+
+    def bulk_delete_emails(self, request: BulkDeleteEmailsRequest) -> list[ActionResult]:
+        return self._bulk(
+            request.ids,
+            lambda item_id: self.delete_email(
+                DeleteEmailRequest(id=item_id, hard_delete=request.hard_delete)
+            ),
+        )
+
+    def bulk_mark_emails(self, request: BulkMarkEmailsRequest) -> list[ActionResult]:
+        return self._bulk(
+            request.ids,
+            lambda item_id: self.mark_email(
+                MarkEmailRequest(
+                    id=item_id,
+                    read=request.read,
+                    flag=request.flag,
+                    importance=request.importance,
+                    flag_start_date=request.flag_start_date,
+                    flag_due_date=request.flag_due_date,
+                )
+            ),
+        )
+
+    def bulk_categorize_emails(self, request: BulkCategorizeEmailsRequest) -> list[ActionResult]:
+        return self._bulk(
+            request.ids,
+            lambda item_id: self.categorize_email(
+                CategorizeEmailRequest(id=item_id, categories=request.categories, mode=request.mode)
+            ),
+        )
+
     def list_categories(self, request: ListCategoriesRequest) -> list[CategoryUsage]:
         counts: Counter[str] = Counter()
         labels: dict[str, str] = {}
@@ -737,6 +797,43 @@ class EmailOperationsMixin(BaseEWSBackend):
         except Exception as exc:  # noqa: BLE001
             raise self._map_exception(exc) from exc
 
+    def update_draft(self, request: UpdateDraftRequest) -> ActionResult:
+        item = self._fetch_item(request.id, folder=self.account.drafts, expected_type=Message)
+        updated_fields: list[str] = []
+        save_fields: list[str] = []
+        # A field name in `fields_set` means the caller explicitly included it in the
+        # request (even as an empty list) -- an omitted field is left untouched. Mirrors
+        # the fields_set handling in update_contact/update_event.
+        fields_set = request.model_fields_set
+        field_map = {
+            "to": "to_recipients",
+            "subject": "subject",
+            "body": "body",
+            "cc": "cc_recipients",
+            "bcc": "bcc_recipients",
+        }
+        for request_field, item_field in field_map.items():
+            if request_field not in fields_set:
+                continue
+            value = getattr(request, request_field)
+            if request_field == "body" and value is not None:
+                value = HTMLBody(value) if request.body_type == "html" else value
+            elif request_field in ("to", "cc", "bcc"):
+                value = [self._mailbox(address) for address in value or []]
+            setattr(item, item_field, value)
+            updated_fields.append(request_field)
+            save_fields.append(item_field)
+        try:
+            if "attachments" in fields_set:
+                item.detach(list(item.attachments))
+                self._attach_files(item, request.attachments or [])
+                updated_fields.append("attachments")
+            if save_fields:
+                item.save(update_fields=save_fields)
+            return ActionResult(id=request.id, status="updated", updated_fields=updated_fields)
+        except Exception as exc:  # noqa: BLE001
+            raise self._map_exception(exc, item_id=request.id) from exc
+
     def send_draft(self, request: SendDraftRequest) -> SendResult:
         item = self._fetch_item(request.id, folder=self.account.drafts, expected_type=Message)
         try:
@@ -786,6 +883,159 @@ class EmailOperationsMixin(BaseEWSBackend):
                     content_type=getattr(attachment, "content_type", None),
                 )
         raise NotFoundError(request.attachment_id)
+
+    def get_email_mime(self, request: GetEmailMimeRequest) -> EmailMimeResult:
+        item = self._fetch_item(request.id, expected_type=Message)
+        try:
+            raw = item.mime_content
+        except Exception as exc:  # noqa: BLE001
+            raise self._map_exception(exc, item_id=request.id) from exc
+        if raw is None:
+            raise APIError(
+                "exchange_error", "exchange did not return MIME content for this message"
+            )
+        if isinstance(raw, str):
+            raw = raw.encode("utf-8")
+        filename = self._sanitize_attachment_filename(f"{item.subject or 'message'}.eml")
+        return EmailMimeResult(
+            id=request.id,
+            filename=filename,
+            size=len(raw),
+            mime_base64=base64.b64encode(raw).decode("ascii"),
+        )
+
+    def _rule_folder_id(self, folder_action: Any) -> str | None:
+        # A rule's move-to-folder action only round-trips as a raw EWS folder id --
+        # resolving it back to a friendly path would need an extra GetFolder call
+        # per rule, so list_rules reports the id, not the path the caller passed in.
+        if folder_action is None:
+            return None
+        folder_id = getattr(folder_action, "folder_id", None)
+        if folder_id is not None:
+            return getattr(folder_id, "id", None)
+        distinguished = getattr(folder_action, "distinguished_folder_id", None)
+        return getattr(distinguished, "id", None) if distinguished is not None else None
+
+    def _to_mail_rule(self, rule: Any) -> MailRule:
+        conditions = rule.conditions
+        actions = rule.actions
+        return MailRule(
+            id=rule.id,
+            display_name=rule.display_name,
+            priority=rule.priority,
+            is_enabled=bool(rule.is_enabled),
+            from_addresses=[
+                self._email_address(address).email
+                for address in (getattr(conditions, "from_addresses", None) or [])
+            ],
+            contains_subject_strings=list(
+                getattr(conditions, "contains_subject_strings", None) or []
+            ),
+            has_attachments=getattr(conditions, "has_attachments", None),
+            move_to_folder=self._rule_folder_id(getattr(actions, "move_to_folder", None)),
+            mark_as_read=getattr(actions, "mark_as_read", None),
+            assign_categories=list(getattr(actions, "assign_categories", None) or []),
+            delete=bool(getattr(actions, "delete", False)),
+            stop_processing_rules=bool(getattr(actions, "stop_processing_rules", False)),
+        )
+
+    def list_rules(self) -> list[MailRule]:
+        try:
+            rules = list(self.account.rules)
+        except Exception as exc:  # noqa: BLE001
+            raise self._map_exception(exc) from exc
+        return [self._to_mail_rule(rule) for rule in rules]
+
+    def _build_rule_conditions(self, request: Any) -> Conditions | None:
+        kwargs: dict[str, Any] = {}
+        if request.from_addresses:
+            kwargs["from_addresses"] = [
+                Address(email_address=address) for address in request.from_addresses
+            ]
+        if request.contains_subject_strings:
+            kwargs["contains_subject_strings"] = list(request.contains_subject_strings)
+        if request.has_attachments is not None:
+            kwargs["has_attachments"] = request.has_attachments
+        return Conditions(**kwargs) if kwargs else None
+
+    def _build_rule_actions(self, request: Any) -> Actions:
+        kwargs: dict[str, Any] = {"stop_processing_rules": request.stop_processing_rules}
+        if request.move_to_folder is not None:
+            folder = self._resolve_folder(request.move_to_folder)
+            kwargs["move_to_folder"] = MoveToFolder(folder_id=FolderId(id=folder.id))
+        if request.mark_as_read is not None:
+            kwargs["mark_as_read"] = request.mark_as_read
+        if request.assign_categories:
+            kwargs["assign_categories"] = list(request.assign_categories)
+        if request.delete:
+            kwargs["delete"] = True
+        return Actions(**kwargs)
+
+    def create_rule(self, request: CreateRuleRequest) -> ActionResult:
+        rule = Rule(
+            display_name=request.display_name,
+            priority=request.priority,
+            is_enabled=request.is_enabled,
+            conditions=self._build_rule_conditions(request),
+            actions=self._build_rule_actions(request),
+        )
+        try:
+            self.account.create_rule(rule)
+            return ActionResult(id=rule.id or "", status="created")
+        except Exception as exc:  # noqa: BLE001
+            raise self._map_exception(exc) from exc
+
+    def update_rule(self, request: UpdateRuleRequest) -> ActionResult:
+        rule = Rule(
+            id=request.id,
+            display_name=request.display_name,
+            priority=request.priority,
+            is_enabled=request.is_enabled,
+            conditions=self._build_rule_conditions(request),
+            actions=self._build_rule_actions(request),
+        )
+        try:
+            self.account.set_rule(rule)
+            return ActionResult(id=request.id, status="updated")
+        except Exception as exc:  # noqa: BLE001
+            raise self._map_exception(exc, item_id=request.id) from exc
+
+    def delete_rule(self, request: DeleteRuleRequest) -> ActionResult:
+        rule = Rule(id=request.id)
+        try:
+            self.account.delete_rule(rule)
+            return ActionResult(id=request.id, status="deleted")
+        except Exception as exc:  # noqa: BLE001
+            raise self._map_exception(exc, item_id=request.id) from exc
+
+    def get_oof_settings(self) -> OofSettingsModel:
+        try:
+            settings = self.account.oof_settings
+        except Exception as exc:  # noqa: BLE001
+            raise self._map_exception(exc) from exc
+        return OofSettingsModel(
+            state=settings.state.lower(),
+            external_audience=(settings.external_audience or "all").lower(),  # type: ignore[arg-type]
+            start=settings.start,
+            end=settings.end,
+            internal_reply=settings.internal_reply or None,
+            external_reply=settings.external_reply or None,
+        )
+
+    def set_oof_settings(self, request: SetOofSettingsRequest) -> ActionResult:
+        ews_settings = OofSettings(
+            state=request.state.capitalize(),
+            external_audience=request.external_audience.capitalize(),
+            start=self._to_ews_datetime(request.start) if request.start else None,
+            end=self._to_ews_datetime(request.end) if request.end else None,
+            internal_reply=request.internal_reply or "",
+            external_reply=request.external_reply or "",
+        )
+        try:
+            self.account.oof_settings = ews_settings
+        except Exception as exc:  # noqa: BLE001
+            raise self._map_exception(exc) from exc
+        return ActionResult(id="oof", status="updated")
 
     def _save_attachment(self, attachment: Any, fd: int, max_size_bytes: int) -> int:
         with os.fdopen(fd, "wb") as dest:

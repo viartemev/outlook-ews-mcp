@@ -10,6 +10,12 @@ from ..models import (
     ActionResult,
     AttachmentResult,
     AvailabilityResult,
+    BulkCategorizeEmailsRequest,
+    BulkDeleteEmailsRequest,
+    BulkDeleteEventsRequest,
+    BulkMarkEmailsRequest,
+    BulkMoveEmailsRequest,
+    BulkRespondToInvitesRequest,
     CalendarInfo,
     CalendarEvent,
     ContactFull,
@@ -20,12 +26,15 @@ from ..models import (
     CreateEventResult,
     CreateContactRequest,
     CreateFolderRequest,
+    CreateRuleRequest,
     DeleteContactRequest,
     DeleteEmailRequest,
     DeleteEventRequest,
     DeleteFolderRequest,
+    DeleteRuleRequest,
     DraftEmailRequest,
     EmailFull,
+    EmailMimeResult,
     EmailSummary,
     FolderActionRequest,
     FolderInfo,
@@ -34,6 +43,7 @@ from ..models import (
     FreeSlot,
     GetAttachmentRequest,
     GetContactRequest,
+    GetEmailMimeRequest,
     GetEmailRequest,
     GetEventRequest,
     GetThreadRequest,
@@ -41,20 +51,28 @@ from ..models import (
     ListEmailsRequest,
     ListEventsRequest,
     ListFoldersRequest,
+    ListRoomsRequest,
     MailboxInfo,
+    MailRule,
     MarkEmailRequest,
+    OofSettingsModel,
     PingResult,
     RenameFolderRequest,
     ReplyEmailRequest,
     RespondToInviteRequest,
+    RoomInfo,
+    RoomListInfo,
     SearchContactsRequest,
     SearchEmailsRequest,
     SendDraftRequest,
     SendEmailRequest,
     SendResult,
+    SetOofSettingsRequest,
     Thread,
     UpdateContactRequest,
+    UpdateDraftRequest,
     UpdateEventRequest,
+    UpdateRuleRequest,
 )
 from .protocol import ExchangeBackend
 from .unconfigured import UnconfiguredExchangeBackend
@@ -141,6 +159,18 @@ class ExchangeClient:
     def categorize_email(self, request: CategorizeEmailRequest) -> ActionResult:
         return self.backend.categorize_email(request)
 
+    def bulk_move_emails(self, request: BulkMoveEmailsRequest) -> list[ActionResult]:
+        return self.backend.bulk_move_emails(request)
+
+    def bulk_delete_emails(self, request: BulkDeleteEmailsRequest) -> list[ActionResult]:
+        return self.backend.bulk_delete_emails(request)
+
+    def bulk_mark_emails(self, request: BulkMarkEmailsRequest) -> list[ActionResult]:
+        return self.backend.bulk_mark_emails(request)
+
+    def bulk_categorize_emails(self, request: BulkCategorizeEmailsRequest) -> list[ActionResult]:
+        return self.backend.bulk_categorize_emails(request)
+
     def list_categories(self, request: ListCategoriesRequest) -> list[CategoryUsage]:
         return self._retry_read(lambda: self.backend.list_categories(request))
 
@@ -159,6 +189,9 @@ class ExchangeClient:
     def create_draft(self, request: DraftEmailRequest) -> ActionResult:
         return self.backend.create_draft(request)
 
+    def update_draft(self, request: UpdateDraftRequest) -> ActionResult:
+        return self.backend.update_draft(request)
+
     def send_draft(self, request: SendDraftRequest) -> SendResult:
         return self.backend.send_draft(request)
 
@@ -168,6 +201,27 @@ class ExchangeClient:
         # orphaned file behind (_create_new_file never overwrites, it picks a new
         # suffixed name each attempt).
         return self.backend.get_attachment(request)
+
+    def get_email_mime(self, request: GetEmailMimeRequest) -> EmailMimeResult:
+        return self.backend.get_email_mime(request)
+
+    def list_rules(self) -> list[MailRule]:
+        return self.backend.list_rules()
+
+    def create_rule(self, request: CreateRuleRequest) -> ActionResult:
+        return self.backend.create_rule(request)
+
+    def update_rule(self, request: UpdateRuleRequest) -> ActionResult:
+        return self.backend.update_rule(request)
+
+    def delete_rule(self, request: DeleteRuleRequest) -> ActionResult:
+        return self.backend.delete_rule(request)
+
+    def get_oof_settings(self) -> OofSettingsModel:
+        return self.backend.get_oof_settings()
+
+    def set_oof_settings(self, request: SetOofSettingsRequest) -> ActionResult:
+        return self.backend.set_oof_settings(request)
 
     def list_events(self, request: ListEventsRequest) -> list[CalendarEvent]:
         return self._retry_read(lambda: self.backend.list_events(request))
@@ -190,11 +244,23 @@ class ExchangeClient:
     def find_free_slots(self, request: FindFreeSlotsRequest) -> list[FreeSlot]:
         return self._retry_read(lambda: self.backend.find_free_slots(request))
 
+    def bulk_delete_events(self, request: BulkDeleteEventsRequest) -> list[ActionResult]:
+        return self.backend.bulk_delete_events(request)
+
+    def bulk_respond_to_invites(self, request: BulkRespondToInvitesRequest) -> list[ActionResult]:
+        return self.backend.bulk_respond_to_invites(request)
+
     def get_my_availability(self, request: ListEventsRequest) -> AvailabilityResult:
         return self._retry_read(lambda: self.backend.get_my_availability(request))
 
     def list_calendars(self) -> list[CalendarInfo]:
         return self._retry_read(self.backend.list_calendars)
+
+    def list_room_lists(self) -> list[RoomListInfo]:
+        return self.backend.list_room_lists()
+
+    def list_rooms(self, request: ListRoomsRequest) -> list[RoomInfo]:
+        return self.backend.list_rooms(request)
 
     def search_contacts(self, request: SearchContactsRequest) -> list[ContactSummary]:
         return self._retry_read(lambda: self.backend.search_contacts(request))

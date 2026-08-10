@@ -7,13 +7,20 @@ from ..config import Settings
 from ..errors import APIError
 from ..exchange_client import ExchangeClient
 from ..models import (
+    BulkCategorizeEmailsRequest,
+    BulkDeleteEmailsRequest,
+    BulkMarkEmailsRequest,
+    BulkMoveEmailsRequest,
     CategorizeEmailRequest,
     CreateFolderRequest,
+    CreateRuleRequest,
     DeleteEmailRequest,
     DeleteFolderRequest,
+    DeleteRuleRequest,
     DraftEmailRequest,
     FolderActionRequest,
     GetAttachmentRequest,
+    GetEmailMimeRequest,
     GetEmailRequest,
     GetThreadRequest,
     ListCategoriesRequest,
@@ -25,7 +32,10 @@ from ..models import (
     SearchEmailsRequest,
     SendDraftRequest,
     SendEmailRequest,
+    SetOofSettingsRequest,
     ForwardEmailRequest,
+    UpdateDraftRequest,
+    UpdateRuleRequest,
 )
 from .common import tool_handler
 
@@ -38,6 +48,13 @@ def _validate_outgoing_attachments(client: ExchangeClient, request: Any) -> None
     _validate_attachments(request.attachments, client.settings)
 
 
+def _validate_outgoing_attachments_if_set(client: ExchangeClient, request: Any) -> None:
+    # UpdateDraftRequest.attachments is None when the caller didn't touch attachments
+    # at all, vs. a (possibly empty) list when they want to replace the whole set.
+    if request.attachments is not None:
+        _validate_attachments(request.attachments, client.settings)
+
+
 def _validate_attachment_destination(client: ExchangeClient, request: Any) -> None:
     if request.save_path is not None:
         _validate_within_root([request.save_path], client.settings.attachment_root, "save_path")
@@ -45,6 +62,7 @@ def _validate_attachment_destination(client: ExchangeClient, request: Any) -> No
 
 list_emails = tool_handler("list_emails", ListEmailsRequest)
 get_email = tool_handler("get_email", GetEmailRequest)
+get_email_mime = tool_handler("get_email_mime", GetEmailMimeRequest)
 get_thread = tool_handler("get_thread", GetThreadRequest)
 search_emails = tool_handler("search_emails", SearchEmailsRequest)
 send_email = tool_handler("send_email", SendEmailRequest, before=_validate_outgoing_attachments)
@@ -57,6 +75,16 @@ copy_email = tool_handler("copy_email", FolderActionRequest)
 delete_email = tool_handler("delete_email", DeleteEmailRequest)
 mark_email = tool_handler("mark_email", MarkEmailRequest)
 categorize_email = tool_handler("categorize_email", CategorizeEmailRequest)
+bulk_move_emails = tool_handler("bulk_move_emails", BulkMoveEmailsRequest)
+bulk_delete_emails = tool_handler("bulk_delete_emails", BulkDeleteEmailsRequest)
+bulk_mark_emails = tool_handler("bulk_mark_emails", BulkMarkEmailsRequest)
+bulk_categorize_emails = tool_handler("bulk_categorize_emails", BulkCategorizeEmailsRequest)
+list_rules = tool_handler("list_rules")
+create_rule = tool_handler("create_rule", CreateRuleRequest)
+update_rule = tool_handler("update_rule", UpdateRuleRequest)
+delete_rule = tool_handler("delete_rule", DeleteRuleRequest)
+get_oof_settings = tool_handler("get_oof_settings")
+set_oof_settings = tool_handler("set_oof_settings", SetOofSettingsRequest)
 list_categories = tool_handler("list_categories", ListCategoriesRequest)
 list_folders = tool_handler("list_folders", ListFoldersRequest)
 create_folder = tool_handler("create_folder", CreateFolderRequest)
@@ -64,6 +92,9 @@ rename_folder = tool_handler("rename_folder", RenameFolderRequest)
 delete_folder = tool_handler("delete_folder", DeleteFolderRequest)
 create_draft = tool_handler(
     "create_draft", DraftEmailRequest, before=_validate_outgoing_attachments
+)
+update_draft = tool_handler(
+    "update_draft", UpdateDraftRequest, before=_validate_outgoing_attachments_if_set
 )
 send_draft = tool_handler("send_draft", SendDraftRequest)
 get_attachment = tool_handler(

@@ -21,8 +21,9 @@ Secure MCP server for on-prem Microsoft Exchange (EWS) with tools for email, cal
 
 ## Highlights
 
-- email operations: list, search, read, send, reply, forward, move, copy, delete, mark
-- calendar operations: list, create, update, delete, respond to invites, find free slots
+- email operations: list, search, read, send, reply, forward, move, copy, delete, mark, bulk actions, raw MIME export
+- Inbox Rules and Out-of-Office (automatic replies) management
+- calendar operations: list, create, update, delete, respond to invites, find free slots, view a shared/delegate mailbox's calendar, Room Finder
 - contacts operations: search, read, create, update, delete
 - folder operations and attachment download
 - Exchange auth via `NTLM` and `Basic`
@@ -40,6 +41,8 @@ Secure MCP server for on-prem Microsoft Exchange (EWS) with tools for email, cal
 ### Email
 - `list_emails`
 - `get_email`
+- `get_email_mime`
+- `get_thread`
 - `search_emails`
 - `send_email`
 - `reply_email`
@@ -48,13 +51,26 @@ Secure MCP server for on-prem Microsoft Exchange (EWS) with tools for email, cal
 - `copy_email`
 - `delete_email`
 - `mark_email`
+- `categorize_email`
+- `list_categories`
+- `bulk_move_emails`
+- `bulk_delete_emails`
+- `bulk_mark_emails`
+- `bulk_categorize_emails`
 - `list_folders`
 - `create_folder`
 - `rename_folder`
 - `delete_folder`
 - `create_draft`
+- `update_draft`
 - `send_draft`
 - `get_attachment`
+- `list_rules`
+- `create_rule`
+- `update_rule`
+- `delete_rule`
+- `get_oof_settings`
+- `set_oof_settings`
 
 ### Calendar
 - `list_events`
@@ -66,6 +82,10 @@ Secure MCP server for on-prem Microsoft Exchange (EWS) with tools for email, cal
 - `find_free_slots`
 - `get_my_availability`
 - `list_calendars`
+- `list_room_lists`
+- `list_rooms`
+- `bulk_delete_events`
+- `bulk_respond_to_invites`
 
 ### Contacts
 - `search_contacts`

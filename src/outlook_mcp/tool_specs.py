@@ -3,6 +3,8 @@ from __future__ import annotations
 from . import models
 from .mcp_tools import ToolSpec
 from .tools.calendar import (
+    bulk_delete_events,
+    bulk_respond_to_invites,
     create_event,
     delete_event,
     find_free_slots,
@@ -10,6 +12,8 @@ from .tools.calendar import (
     get_my_availability,
     list_calendars,
     list_events,
+    list_room_lists,
+    list_rooms,
     respond_to_invite,
     update_event,
 )
@@ -21,19 +25,28 @@ from .tools.contacts import (
     update_contact,
 )
 from .tools.email import (
+    bulk_categorize_emails,
+    bulk_delete_emails,
+    bulk_mark_emails,
+    bulk_move_emails,
     categorize_email,
     copy_email,
     create_draft,
     create_folder,
+    create_rule,
     delete_email,
     delete_folder,
+    delete_rule,
     forward_email,
     get_attachment,
     get_email,
+    get_email_mime,
+    get_oof_settings,
     get_thread,
     list_categories,
     list_emails,
     list_folders,
+    list_rules,
     mark_email,
     move_email,
     rename_folder,
@@ -41,6 +54,9 @@ from .tools.email import (
     search_emails,
     send_draft,
     send_email,
+    set_oof_settings,
+    update_draft,
+    update_rule,
 )
 from .tools.system import get_mailbox_info, ping_exchange
 
@@ -76,6 +92,14 @@ TOOL_SPECS: list[ToolSpec] = [
         get_email,
         request_model=models.GetEmailRequest,
         response_model=models.EmailFull,
+        read_only=True,
+    ),
+    ToolSpec(
+        "get_email_mime",
+        "Export a message's raw RFC 822 MIME content, base64-encoded",
+        get_email_mime,
+        request_model=models.GetEmailMimeRequest,
+        response_model=models.EmailMimeResult,
         read_only=True,
     ),
     ToolSpec(
@@ -161,6 +185,93 @@ TOOL_SPECS: list[ToolSpec] = [
         destructive=True,
     ),
     ToolSpec(
+        "bulk_move_emails",
+        "Move multiple emails to another folder in one call. A failure on one id is "
+        "reported in that id's own result instead of aborting the rest",
+        bulk_move_emails,
+        request_model=models.BulkMoveEmailsRequest,
+        response_model=list[models.ActionResult],
+        destructive=True,
+    ),
+    ToolSpec(
+        "bulk_delete_emails",
+        "Delete multiple emails in one call. A failure on one id is reported in "
+        "that id's own result instead of aborting the rest",
+        bulk_delete_emails,
+        request_model=models.BulkDeleteEmailsRequest,
+        response_model=list[models.ActionResult],
+        destructive=True,
+    ),
+    ToolSpec(
+        "bulk_mark_emails",
+        "Update read state, importance, or the follow-up flag on multiple emails in "
+        "one call. A failure on one id is reported in that id's own result instead "
+        "of aborting the rest",
+        bulk_mark_emails,
+        request_model=models.BulkMarkEmailsRequest,
+        response_model=list[models.ActionResult],
+        destructive=True,
+    ),
+    ToolSpec(
+        "bulk_categorize_emails",
+        "Set, add, or remove Outlook categories on multiple emails in one call. A "
+        "failure on one id is reported in that id's own result instead of aborting "
+        "the rest",
+        bulk_categorize_emails,
+        request_model=models.BulkCategorizeEmailsRequest,
+        response_model=list[models.ActionResult],
+        destructive=True,
+    ),
+    ToolSpec(
+        "list_rules",
+        "List Inbox rules",
+        list_rules,
+        response_model=list[models.MailRule],
+        read_only=True,
+    ),
+    ToolSpec(
+        "create_rule",
+        "Create an Inbox rule. At least one action (move_to_folder, mark_as_read, "
+        "assign_categories, delete) must be set",
+        create_rule,
+        request_model=models.CreateRuleRequest,
+        response_model=models.ActionResult,
+    ),
+    ToolSpec(
+        "update_rule",
+        "Replace an existing Inbox rule. This is a full replace, not a partial "
+        "patch -- every field must reflect the rule's desired end state",
+        update_rule,
+        request_model=models.UpdateRuleRequest,
+        response_model=models.ActionResult,
+        destructive=True,
+    ),
+    ToolSpec(
+        "delete_rule",
+        "Delete an Inbox rule",
+        delete_rule,
+        request_model=models.DeleteRuleRequest,
+        response_model=models.ActionResult,
+        destructive=True,
+    ),
+    ToolSpec(
+        "get_oof_settings",
+        "Get the automatic-reply (Out-of-Office) settings",
+        get_oof_settings,
+        response_model=models.OofSettingsModel,
+        read_only=True,
+    ),
+    ToolSpec(
+        "set_oof_settings",
+        "Set the automatic-reply (Out-of-Office) settings. internal_reply and "
+        "external_reply are required unless state='disabled'; start and end are "
+        "required when state='scheduled'",
+        set_oof_settings,
+        request_model=models.SetOofSettingsRequest,
+        response_model=models.ActionResult,
+        destructive=True,
+    ),
+    ToolSpec(
         "list_categories",
         "List the categories in use, with counts. Collected from the most recent "
         "messages of the given folders, not from the mailbox master category list.",
@@ -211,6 +322,15 @@ TOOL_SPECS: list[ToolSpec] = [
         response_model=models.ActionResult,
     ),
     ToolSpec(
+        "update_draft",
+        "Update an existing email draft. Omitted fields are left unchanged; "
+        "'attachments', if given, replaces the draft's entire attachment set",
+        update_draft,
+        request_model=models.UpdateDraftRequest,
+        response_model=models.ActionResult,
+        destructive=True,
+    ),
+    ToolSpec(
         "send_draft",
         "Send a draft email",
         send_draft,
@@ -227,7 +347,9 @@ TOOL_SPECS: list[ToolSpec] = [
     ),
     ToolSpec(
         "list_events",
-        "List calendar events in a time range",
+        "List calendar events in a time range. Set mailbox to view a colleague's "
+        "default calendar instead of your own (requires delegate/impersonation "
+        "access already granted on the server; not combinable with calendar_id)",
         list_events,
         request_model=models.ListEventsRequest,
         response_model=list[models.CalendarEvent],
@@ -235,7 +357,8 @@ TOOL_SPECS: list[ToolSpec] = [
     ),
     ToolSpec(
         "get_event",
-        "Get a calendar event by ID",
+        "Get a calendar event by ID. Set mailbox to read from a colleague's "
+        "default calendar instead of your own",
         get_event,
         request_model=models.GetEventRequest,
         response_model=models.CalendarEvent,
@@ -282,8 +405,26 @@ TOOL_SPECS: list[ToolSpec] = [
         read_only=True,
     ),
     ToolSpec(
+        "bulk_delete_events",
+        "Delete multiple calendar events in one call. A failure on one id is "
+        "reported in that id's own result instead of aborting the rest",
+        bulk_delete_events,
+        request_model=models.BulkDeleteEventsRequest,
+        response_model=list[models.ActionResult],
+        destructive=True,
+    ),
+    ToolSpec(
+        "bulk_respond_to_invites",
+        "Respond to multiple calendar invites in one call. A failure on one id is "
+        "reported in that id's own result instead of aborting the rest",
+        bulk_respond_to_invites,
+        request_model=models.BulkRespondToInvitesRequest,
+        response_model=list[models.ActionResult],
+        destructive=True,
+    ),
+    ToolSpec(
         "get_my_availability",
-        "Get free and busy slots",
+        "Get free and busy slots. Set mailbox to check a colleague's calendar instead of your own",
         get_my_availability,
         request_model=models.ListEventsRequest,
         response_model=models.AvailabilityResult,
@@ -294,6 +435,21 @@ TOOL_SPECS: list[ToolSpec] = [
         "List calendars",
         list_calendars,
         response_model=list[models.CalendarInfo],
+        read_only=True,
+    ),
+    ToolSpec(
+        "list_room_lists",
+        "List Room Finder room lists (groups of meeting rooms)",
+        list_room_lists,
+        response_model=list[models.RoomListInfo],
+        read_only=True,
+    ),
+    ToolSpec(
+        "list_rooms",
+        "List the meeting rooms in a Room Finder room list",
+        list_rooms,
+        request_model=models.ListRoomsRequest,
+        response_model=list[models.RoomInfo],
         read_only=True,
     ),
     ToolSpec(
