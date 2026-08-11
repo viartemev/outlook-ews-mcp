@@ -728,6 +728,59 @@ def _fake_account_for_folder_resolution(root) -> SimpleNamespace:
     )
 
 
+def test_resolve_archive_keyword_prefers_named_folder_under_tois(settings) -> None:
+    # "archive" should resolve to the user's named Archive folder under Top of
+    # Information Store, not the separate personal-archive mailbox.
+    archive_folder = SimpleNamespace(id="archive-1", name="Archive", children=[])
+    tois = SimpleNamespace(children=[archive_folder])
+    root = SimpleNamespace(children=[tois], tois=tois)
+
+    class Account(SimpleNamespace):
+        @property
+        def archive_root(self):
+            raise AssertionError("must not touch personal-archive mailbox when named folder exists")
+
+    backend = EWSExchangeBackend(settings)
+    backend._account = Account(
+        root=root,
+        tois=tois,
+        inbox=object(),
+        sent=object(),
+        drafts=object(),
+        trash=object(),
+        junk=object(),
+        calendar=object(),
+        contacts=object(),
+    )
+
+    assert backend._resolve_folder("archive") is archive_folder
+
+
+def test_resolve_archive_keyword_falls_back_to_archive_mailbox_when_no_named_folder(
+    settings,
+) -> None:
+    # When no named "Archive" folder exists, fall back to the personal-archive mailbox.
+    archive_mailbox = SimpleNamespace(id="archive-mailbox", name="Archive")
+    root = SimpleNamespace(children=[])
+
+    class Account(SimpleNamespace):
+        archive_root = archive_mailbox
+
+    backend = EWSExchangeBackend(settings)
+    backend._account = Account(
+        root=root,
+        inbox=object(),
+        sent=object(),
+        drafts=object(),
+        trash=object(),
+        junk=object(),
+        calendar=object(),
+        contacts=object(),
+    )
+
+    assert backend._resolve_folder("archive") is archive_mailbox
+
+
 def test_resolve_folder_by_id_uses_targeted_lookup_not_full_walk(settings, monkeypatch) -> None:
     backend = EWSExchangeBackend(settings)
     resolved_folder = SimpleNamespace(id="AAA=", name="Projects")

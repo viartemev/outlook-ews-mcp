@@ -302,18 +302,6 @@ class BaseEWSBackend:
         if not value or value == "root":
             return account.root
         normalized = value.strip("/").lower()
-        archive_root = account.root
-        if normalized == "archive":
-            try:
-                archive_root = account.archive_root
-            except ResponseMessageError:
-                # A scoped EWS response fault (e.g. no archive mailbox configured
-                # for this account) -- safe to fall back to root.
-                archive_root = account.root
-            except Exception as exc:  # noqa: BLE001
-                # Auth/network/throttling failures must propagate instead of
-                # silently pretending the archive folder is root.
-                raise self._map_exception(exc) from exc
         builtin = {
             "inbox": account.inbox,
             "sent": account.sent,
@@ -322,12 +310,26 @@ class BaseEWSBackend:
             "deleted": account.trash,
             "trash": account.trash,
             "junk": account.junk,
-            "archive": archive_root,
             "calendar": account.calendar,
             "contacts": account.contacts,
         }
         if normalized in builtin:
             return builtin[normalized]
+        if normalized == "archive":
+            # "Archive" most commonly means the user's named Archive folder under
+            # Top of Information Store, not the separate personal-archive mailbox
+            # (``account.archive_root``). Prefer the named folder, fall back to the
+            # archive mailbox only when no such folder exists.
+            named = self._find_named_folder("Archive")
+            if named is not None:
+                return named
+            try:
+                return account.archive_root
+            except ResponseMessageError:
+                # No archive mailbox configured for this account.
+                return account.root
+            except Exception as exc:  # noqa: BLE001
+                raise self._map_exception(exc) from exc
 
         by_id = self._get_folder_by_id(value)
         if by_id is not None:
@@ -344,6 +346,10 @@ class BaseEWSBackend:
         candidates: list[tuple[Folder, list[str]]] = []
         if parts[0].lower() in builtin:
             candidates.append((builtin[parts[0].lower()], parts[1:]))
+        if parts[0].lower() == "archive":
+            named = self._find_named_folder(parts[0])
+            if named is not None:
+                candidates.append((named, parts[1:]))
         try:
             candidates.append((account.root.tois, parts))
         except Exception:  # noqa: BLE001
@@ -372,6 +378,25 @@ class BaseEWSBackend:
                 return None
             current = next_folder
         return current if current is not start else None
+
+    def _find_named_folder(self, name: str) -> Folder | None:
+        # Look for a user folder by name under Top of Information Store, then root.
+        # Returns None if no such folder exists or TOIS is unavailable.
+        for start in self._tois_candidates():
+            found = self._walk_child_folders(start, [name])
+            if found is not None:
+                return found
+        return None
+
+    def _tois_candidates(self) -> list[Folder]:
+        account = self.account
+        candidates: list[Folder] = []
+        try:
+            candidates.append(account.root.tois)
+        except Exception:  # noqa: BLE001
+            logger.debug("Top of Information Store is unavailable; falling back to root")
+        candidates.append(account.root)
+        return candidates
 
     def _get_folder_by_id(self, folder_id: str) -> Folder | None:
         """Resolve a folder by EWS id with a single targeted GetFolder call.
