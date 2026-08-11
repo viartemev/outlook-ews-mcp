@@ -4,7 +4,7 @@ from datetime import UTC, datetime
 from types import SimpleNamespace
 
 import pytest
-from exchangelib.errors import ErrorAccessDenied, UnauthorizedError
+from exchangelib.errors import ErrorAccessDenied, ErrorItemNotFound, UnauthorizedError
 
 from outlook_mcp.errors import APIError, NotFoundError
 from outlook_mcp.exchange_client import EWSExchangeBackend
@@ -265,6 +265,16 @@ def test_bulk_copy_and_delete_partition_successes_and_failures(settings) -> None
     deleted = backend.delete_emails(BulkDeleteEmailsRequest(ids=["a", "b"]))
     assert [r.id for r in deleted.succeeded] == ["a"]
     assert [f.id for f in deleted.failed] == ["b"]
+
+
+def test_bulk_delete_treats_not_found_as_idempotent_success(settings) -> None:
+    backend = _backend(settings)
+    backend._account.bulk_delete = lambda ids, delete_type: [ErrorItemNotFound("gone")]
+
+    result = backend.delete_emails(BulkDeleteEmailsRequest(ids=["meeting-response-id"]))
+
+    assert [r.id for r in result.succeeded] == ["meeting-response-id"]
+    assert result.failed == []
 
 
 def test_bulk_operations_map_a_wholesale_failure(settings) -> None:

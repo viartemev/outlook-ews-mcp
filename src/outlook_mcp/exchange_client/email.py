@@ -736,7 +736,13 @@ class EmailOperationsMixin(BaseEWSBackend):
         except Exception as exc:  # noqa: BLE001
             raise self._map_exception(exc, item_id=request.id) from exc
 
-    def _bulk_result(self, ids: list[str], results: list[Any]) -> BulkResult:
+    def _bulk_result(
+        self,
+        ids: list[str],
+        results: list[Any],
+        *,
+        not_found_is_success: bool = False,
+    ) -> BulkResult:
         if len(results) != len(ids):
             # Moving/copying into a public folder or another mailbox returns no
             # per-item ids at all; pad so every input id still gets a verdict.
@@ -744,6 +750,12 @@ class EmailOperationsMixin(BaseEWSBackend):
         succeeded: list[BulkItemResult] = []
         failed: list[BulkItemFailure] = []
         for item_id, result in zip(ids, results):
+            # Some Exchange versions successfully delete meeting-response items
+            # but still return ErrorItemNotFound for them. Delete is idempotent,
+            # so an already-absent item has reached the requested final state.
+            if not_found_is_success and isinstance(result, ErrorItemNotFound):
+                succeeded.append(BulkItemResult(id=item_id))
+                continue
             if isinstance(result, Exception):
                 mapped = self._map_exception(result, item_id=item_id)
                 failed.append(
@@ -779,7 +791,7 @@ class EmailOperationsMixin(BaseEWSBackend):
             results = self.account.bulk_delete(ids=ids, delete_type=delete_type)
         except Exception as exc:  # noqa: BLE001
             raise self._map_exception(exc) from exc
-        return self._bulk_result(request.ids, results)
+        return self._bulk_result(request.ids, results, not_found_is_success=True)
 
     def mark_emails(self, request: BulkMarkEmailsRequest) -> BulkResult:
         # Not a native EWS batch operation the way move/copy/delete are, so this
