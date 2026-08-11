@@ -155,6 +155,10 @@ class BaseEWSBackend:
             auth_type=auth_type,
             retry_policy=retry_policy,
             version=self._resolve_configured_version(),
+            # One session per concurrent reader plus one for the exclusive
+            # writer; without this, exchangelib's default pool size becomes the
+            # real concurrency cap and get_session() waits instead of the gate.
+            max_connections=self.settings.mcp_max_concurrency + 1,
         )
         access_type = IMPERSONATION if auth.impersonate_as else DELEGATE
         try:

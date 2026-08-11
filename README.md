@@ -158,14 +158,14 @@ EXCHANGE_SIGNATURE_HTML=
 MCP_TRANSPORT=stdio
 MCP_SSE_HOST=127.0.0.1
 MCP_SSE_PORT=8080
-MCP_MAX_CONCURRENCY=1
+MCP_MAX_CONCURRENCY=4
 MCP_MAX_QUEUE_SIZE=20
 LOG_LEVEL=INFO
 LOG_FILE=
 ```
 
 Notes:
-- `MCP_MAX_CONCURRENCY` is how many tool calls execute at once; more calls than this queue to wait their turn, up to `MCP_MAX_QUEUE_SIZE`. See [Request queue](#request-queue).
+- `MCP_MAX_CONCURRENCY` is how many read-only tool calls execute at once; mutating calls always run exclusively. More calls than fit queue to wait their turn, up to `MCP_MAX_QUEUE_SIZE`. See [Request queue](#request-queue).
 - `MCP_MAX_QUEUE_SIZE` caps how many tool calls can be admitted at once (running + waiting); once full, further calls are rejected immediately with a `server_busy` error
 - `EXCHANGE_SIGNATURE_TEXT`/`EXCHANGE_SIGNATURE_HTML` are appended to outgoing bodies (text signature for text bodies and replies/forwards, html for html bodies; no cross-conversion). Per-call opt-out via `include_signature: false`. EWS has no server-side signature API, so this is configuration, not the mailbox's Outlook signature.
 - set `EXCHANGE_EMAIL_ADDRESS` when `EXCHANGE_USERNAME` is not an SMTP address
@@ -186,9 +186,13 @@ Notes:
 Clients issue several tool calls in parallel. Exchange work is blocking, so the
 server runs it in worker threads and admits calls through one shared FIFO queue.
 
-- **`MCP_MAX_CONCURRENCY`** (default `1`) sets how many run at once. One mailbox,
-  one conversation with Exchange, predictable load -- raise it deliberately.
-  Callers beyond that wait their turn, served in the order they arrived.
+- **`MCP_MAX_CONCURRENCY`** (default `4`) sets how many *read-only* calls run at
+  once, so an agent asking for an email, the folder list and the calendar pays
+  the slowest round trip instead of the sum. Mutating calls always run
+  exclusively -- one at a time, never overlapping a read -- so read/write races
+  on shared account state cannot happen. Callers beyond the limit wait their
+  turn, served in the order they arrived; a waiting mutation blocks later reads
+  from overtaking it.
 - **`MCP_MAX_QUEUE_SIZE`** (default `20`) caps how many calls can be admitted at
   once, running or waiting. Once that many are already in, further calls get an
   immediate `server_busy` error instead of joining an unbounded queue.

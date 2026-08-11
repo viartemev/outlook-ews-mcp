@@ -35,11 +35,25 @@ class ToolGateway:
     alive.
 
     *Pile-up.* The MCP server dispatches every request concurrently, so a client
-    that fires ten tool calls starts ten of them at once. One shared semaphore
-    turns that into a queue, and anyio hands waiters their turn in arrival order.
-    MCP_MAX_QUEUE_SIZE bounds how many calls can be admitted at once (running plus
-    waiting); once that many are already in, further calls are rejected
-    immediately with a structured server_busy error instead of queuing forever.
+    that fires ten tool calls starts ten of them at once. One shared gate turns
+    that into a bounded queue, and anyio hands waiters their turn in arrival
+    order. MCP_MAX_QUEUE_SIZE bounds how many calls can be admitted at once
+    (running plus waiting); once that many are already in, further calls are
+    rejected immediately with a structured server_busy error instead of queuing
+    forever.
+
+    *Reads run in parallel, writes run alone.* Read-only tools (spec.read_only,
+    the same flag published to clients as readOnlyHint) each take one of
+    MCP_MAX_CONCURRENCY permits, so an agent asking for "the email, the folder
+    list and the calendar" pays the slowest round trip, not the sum. A mutating
+    tool first takes the writer lock (mutations never overlap each other), then
+    collects every permit, so it also never overlaps a read: exchangelib's
+    Protocol is thread-safe behind its session pool, but Account state (folder
+    hierarchy, item caches) is not something this codebase audits for
+    write-vs-read races -- exclusive writes make that audit unnecessary. A
+    writer cannot be starved: readers pass through the writer lock as a
+    turnstile first, so once a writer is waiting, later reads line up behind it
+    instead of overtaking it at the semaphore.
 
     *Workers are never abandoned, and there is no per-call timeout.* Those are
     the same decision. Cancelling the wait on a worker does not stop it -- the
@@ -67,11 +81,18 @@ class ToolGateway:
         self.max_queue_size = settings.mcp_max_queue_size
         self.expected_call_seconds = settings.exchange_timeout + settings.exchange_max_retry_wait
         # Safe to build outside a running event loop; anyio binds lazily.
-        self._queue = anyio.Semaphore(self.max_workers)
+        self._permits = anyio.Semaphore(self.max_workers)
+        self._writer_turn = anyio.Lock()
         self._threads = anyio.CapacityLimiter(self.max_workers)
         self._admitted = 0
 
-    async def run(self, name: str, call: Callable[[], tuple[Any, bool]]) -> tuple[Any, bool]:
+    async def run(
+        self,
+        name: str,
+        call: Callable[[], tuple[Any, bool]],
+        *,
+        read_only: bool = False,
+    ) -> tuple[Any, bool]:
         if self._admitted >= self.max_queue_size:
             logger.warning(
                 "tool=%s rejected: %s calls already queued (MCP_MAX_QUEUE_SIZE=%s)",
@@ -87,25 +108,49 @@ class ToolGateway:
             return error.to_dict(), True
         self._admitted += 1
         try:
-            async with self._queue:
-                started = time.monotonic()
+            if read_only:
+                # Turnstile: while a writer holds the lock -- collecting permits
+                # or running -- later readers line up here instead of slipping
+                # past it to the semaphore. Without this, a steady stream of
+                # reads starves the writer forever: it re-queues for each permit
+                # and new readers keep overtaking it.
+                async with self._writer_turn:
+                    pass
+                async with self._permits:
+                    return await self._execute(name, call)
+            async with self._writer_turn:
+                acquired = 0
                 try:
-                    return await anyio.to_thread.run_sync(
-                        call, abandon_on_cancel=False, limiter=self._threads
-                    )
+                    # Collect every permit so the write overlaps neither reads
+                    # nor other writes. Readers already past the turnstile drain
+                    # on their own; new ones wait at it.
+                    for _ in range(self.max_workers):
+                        await self._permits.acquire()
+                        acquired += 1
+                    return await self._execute(name, call)
                 finally:
-                    elapsed = time.monotonic() - started
-                    if elapsed > self.expected_call_seconds:
-                        logger.warning(
-                            "tool=%s ran %.1fs, past the %.0fs Exchange budget; lower "
-                            "EXCHANGE_TIMEOUT/EXCHANGE_MAX_RETRY_WAIT_SECONDS if calls "
-                            "should give up sooner",
-                            name,
-                            elapsed,
-                            self.expected_call_seconds,
-                        )
+                    for _ in range(acquired):
+                        self._permits.release()
         finally:
             self._admitted -= 1
+
+    async def _execute(self, name: str, call: Callable[[], tuple[Any, bool]]) -> tuple[Any, bool]:
+        started = time.monotonic()
+        try:
+            return await anyio.to_thread.run_sync(
+                call, abandon_on_cancel=False, limiter=self._threads
+            )
+        finally:
+            elapsed = time.monotonic() - started
+            if elapsed > self.expected_call_seconds:
+                logger.warning(
+                    "tool=%s ran %.1fs, past the %.0fs Exchange budget; lower "
+                    "EXCHANGE_TIMEOUT/EXCHANGE_MAX_RETRY_WAIT_SECONDS if calls "
+                    "should give up sooner",
+                    name,
+                    elapsed,
+                    self.expected_call_seconds,
+                )
 
 
 def _field_default(field: FieldInfo) -> Any:
@@ -158,7 +203,9 @@ def bind_mcp_tool(
             payload, is_error = registry_call(spec.name, arguments)
         else:
             payload, is_error = await gateway.run(
-                spec.name, lambda: registry_call(spec.name, arguments)
+                spec.name,
+                lambda: registry_call(spec.name, arguments),
+                read_only=spec.read_only,
             )
         structured = payload if isinstance(payload, dict) else {"result": payload}
         return CallToolResult(

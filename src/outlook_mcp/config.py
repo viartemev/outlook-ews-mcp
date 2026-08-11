@@ -67,10 +67,11 @@ class Settings(BaseSettings):
     mcp_transport: Literal["stdio", "sse"] = Field(default="stdio", alias="MCP_TRANSPORT")
     mcp_sse_host: str = Field(default="127.0.0.1", alias="MCP_SSE_HOST")
     mcp_sse_port: int = Field(default=8080, alias="MCP_SSE_PORT", ge=1, le=65535)
-    #: How many tool calls execute at once; more calls than this queue up to wait
-    #: their turn. There is deliberately no per-call timeout -- see ToolGateway for
-    #: why.
-    mcp_max_concurrency: int = Field(default=1, alias="MCP_MAX_CONCURRENCY", ge=1, le=8)
+    #: How many read-only tool calls execute at once. Mutating calls always run
+    #: exclusively -- one at a time, never overlapping a read -- regardless of
+    #: this value; see ToolGateway. There is deliberately no per-call timeout --
+    #: also see ToolGateway for why.
+    mcp_max_concurrency: int = Field(default=4, alias="MCP_MAX_CONCURRENCY", ge=1, le=8)
     #: Hard cap on tool calls admitted at once (running + waiting for a worker).
     #: Once this many are already admitted, further calls are rejected immediately
     #: with a structured server_busy error instead of queuing indefinitely.
