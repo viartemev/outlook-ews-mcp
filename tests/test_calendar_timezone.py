@@ -37,7 +37,7 @@ def _backend_with_events(settings, items) -> EWSExchangeBackend:
     backend = EWSExchangeBackend(settings)
     backend._account = SimpleNamespace(
         default_timezone=EWSTimeZone("Europe/Moscow"),
-        calendar=SimpleNamespace(view=lambda start, end: list(items)),
+        calendar=SimpleNamespace(view=lambda start, end: _EventQuery(items)),
     )
     return backend
 
@@ -93,6 +93,13 @@ def test_availability_survives_an_all_day_event(settings) -> None:
     assert result.busy_slots
 
 
+class _EventQuery(list):
+    """folder.view() result: list-like, accepting the .only() projection."""
+
+    def only(self, *fields):
+        return self
+
+
 class FakeCalendarFolder:
     def __init__(self) -> None:
         self.start = None
@@ -101,7 +108,7 @@ class FakeCalendarFolder:
     def view(self, start, end):
         self.start = start
         self.end = end
-        return []
+        return _EventQuery()
 
 
 def test_list_events_normalizes_pydantic_tzinfo(settings) -> None:

@@ -40,6 +40,31 @@ from ..models import (
 )
 from .base import BaseEWSBackend
 
+#: What _to_calendar_event reads, minus the body. A CalendarView returns every
+#: field by default -- full meeting bodies, Teams boilerplate, attachments
+#: metadata -- which makes a week of a busy calendar the heaviest response in
+#: the server. Listings project down to these; the body stays get_event-only.
+_EVENT_SUMMARY_FIELDS = (
+    "subject",
+    "start",
+    "end",
+    "location",
+    "organizer",
+    "required_attendees",
+    "optional_attendees",
+    "is_all_day",
+    "is_recurring",
+    "my_response_type",
+    "meeting_workspace_url",
+    "net_show_url",
+    "recurrence",
+    "reminder_minutes_before_start",
+    "reminder_is_set",
+    "categories",
+    "importance",
+    "legacy_free_busy_status",
+)
+
 
 class CalendarOperationsMixin(BaseEWSBackend):
     def _event_moment(self, value: Any) -> Any:
@@ -56,14 +81,14 @@ class CalendarOperationsMixin(BaseEWSBackend):
             return datetime.combine(value, time.min, tzinfo=self.account.default_timezone)
         return value
 
-    def _to_calendar_event(self, item: Any) -> CalendarEvent:
+    def _to_calendar_event(self, item: Any, include_body: bool = True) -> CalendarEvent:
         attendees = [
             self._to_attendee(attendee)
             for attendee in (getattr(item, "required_attendees", None) or [])
             + (getattr(item, "optional_attendees", None) or [])
         ]
         organizer = self._email_address(getattr(item, "organizer", None))
-        body_text, _ = self._extract_message_body(item)
+        body_text = self._extract_message_body(item)[0] if include_body else ""
         online_url = getattr(item, "meeting_workspace_url", None) or getattr(
             item, "net_show_url", None
         )
@@ -167,14 +192,14 @@ class CalendarOperationsMixin(BaseEWSBackend):
         # mailbox's own timezone would need an extra round trip this doesn't make.
         start = self._to_ews_datetime(request.start)
         end = self._to_ews_datetime(request.end)
-        qs = folder.view(start=start, end=end)
+        qs = folder.view(start=start, end=end).only(*_EVENT_SUMMARY_FIELDS)
         try:
             items = list(qs)
         except Exception as exc:  # noqa: BLE001
             raise self._map_exception(exc) from exc
         if not request.include_recurring:
             items = [item for item in items if not getattr(item, "is_recurring", False)]
-        return [self._to_calendar_event(item) for item in items]
+        return [self._to_calendar_event(item, include_body=False) for item in items]
 
     def get_event(self, request: GetEventRequest) -> CalendarEvent:
         item = self._fetch_item(
@@ -392,6 +417,7 @@ class CalendarOperationsMixin(BaseEWSBackend):
             request.id,
             folder=self._calendar_folder(request.calendar_id),
             expected_type=CalendarItem,
+            only_fields=("parent_folder_id",),
         )
         try:
             if request.response == "accept":

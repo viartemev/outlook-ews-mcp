@@ -139,7 +139,6 @@ class FakeExchangeBackend:
                 id="email-1",
                 subject=request.subject or "Hello",
                 **{"from": {"email": "sender@example.com", "name": "Sender"}},
-                to=[EmailAddress(email="user@example.com", name="User")],
                 date=datetime(2026, 4, 7, 10, 0, tzinfo=UTC),
                 is_read=not request.unread_only,
                 has_attachments=bool(request.has_attachments),
@@ -159,7 +158,7 @@ class FakeExchangeBackend:
             preview="preview",
             body_text="Body",
             conversation_id="conv-1",
-            headers={"X-Test": "1"},
+            headers={"X-Test": "1"} if request.include_headers else {},
         )
 
     def get_email_mime(self, request: GetEmailMimeRequest) -> EmailMimeResult:

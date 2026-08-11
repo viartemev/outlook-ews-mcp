@@ -265,6 +265,9 @@ def test_attendees_map_both_shapes(settings) -> None:
 
 def test_list_events_maps_a_view_failure(settings) -> None:
     class _ExplodingIter:
+        def only(self, *fields):
+            return self
+
         def __iter__(self):
             raise UnauthorizedError("bad creds")
 
@@ -377,6 +380,9 @@ def test_respond_to_invite_maps_a_failure(settings) -> None:
 
 def test_get_my_availability_maps_a_listing_failure(settings) -> None:
     class _ExplodingIter:
+        def only(self, *fields):
+            return self
+
         def __iter__(self):
             raise UnauthorizedError("bad creds")
 

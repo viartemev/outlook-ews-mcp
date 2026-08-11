@@ -408,6 +408,9 @@ def test_thread_items_returns_conversation_matches(settings) -> None:
         def filter(self, *args, **kwargs):
             return self
 
+        def only(self, *fields):
+            return self
+
         def order_by(self, *fields):
             return self
 

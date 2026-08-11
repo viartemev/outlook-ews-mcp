@@ -27,12 +27,19 @@ def _item(start: datetime, end: datetime, item_id: str = "event-1") -> SimpleNam
     )
 
 
+class _EventQuery(list):
+    """folder.view() result: list-like, accepting the .only() projection."""
+
+    def only(self, *fields):
+        return self
+
+
 class FakeCalendarFolder:
     def __init__(self, items: list) -> None:
         self.items = items
 
     def view(self, start, end):
-        return self.items
+        return _EventQuery(self.items)
 
 
 def _backend_over(settings, items: list) -> EWSExchangeBackend:

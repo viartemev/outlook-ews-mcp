@@ -74,7 +74,6 @@ class EmailSummary(ExchangeModel):
     id: str
     subject: str
     from_: EmailAddress = Field(alias="from")
-    to: list[EmailAddress] = Field(default_factory=list)
     date: datetime
     is_read: bool
     has_attachments: bool = False
@@ -87,11 +86,16 @@ class EmailSummary(ExchangeModel):
 
 
 class EmailFull(EmailSummary):
+    #: Recipient lists live here, not on EmailSummary: a 50-row listing of a
+    #: mailing-list folder would otherwise carry hundreds of {name, email}
+    #: objects nobody asked for.
+    to: list[EmailAddress] = Field(default_factory=list)
     cc: list[EmailAddress] = Field(default_factory=list)
     bcc: list[EmailAddress] = Field(default_factory=list)
     body_text: str = ""
     body_html: str | None = None
     attachments: list[Attachment] = Field(default_factory=list)
+    #: Populated only when GetEmailRequest.include_headers is set.
     headers: dict[str, str] = Field(default_factory=dict)
     truncated: bool = False
 
@@ -136,6 +140,8 @@ class CalendarEvent(ExchangeModel):
     is_recurring: bool = False
     my_response: Literal["accept", "tentative", "decline", "unknown"] = "unknown"
     online_meeting_url: str | None = None
+    #: Populated by get_event only; listings return None so a week of meetings
+    #: does not carry every meeting's full body.
     body: str | None = None
     reminder_minutes: int | None = None
     categories: list[str] = Field(default_factory=list)
@@ -180,6 +186,9 @@ class ListEmailsRequest(ExchangeModel):
 
 class GetEmailRequest(ExchangeModel):
     id: str
+    #: Full RFC-822 headers (Received chains, DKIM, X-*) are routinely larger
+    #: than the body itself; they are returned only on explicit request.
+    include_headers: bool = False
 
 
 class GetThreadRequest(ExchangeModel):
