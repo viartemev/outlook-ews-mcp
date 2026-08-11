@@ -47,6 +47,7 @@ from exchangelib.properties import ItemId
 from exchangelib.protocol import BaseProtocol, FailFast
 from exchangelib.version import Build, Version
 
+from .. import telemetry
 from ..auth import build_auth_context
 from ..config import Settings
 from ..errors import (
@@ -68,6 +69,29 @@ from ..models import (
 )
 
 logger = logging.getLogger(__name__)
+
+
+def _ews_response_hook(response: Any, **kwargs: Any) -> None:
+    """Time and count one EWS HTTP request.
+
+    requests measures `elapsed` itself (send to headers-complete), so no clock
+    handling here. Only the URL *path* is logged -- never the query string,
+    which is where anything sensitive would live. The body is deliberately not
+    touched: reading response.content on a streamed download would pull the
+    whole attachment into memory. A request that raises before a response
+    exists (connection refused, TLS, timeout) never reaches a response hook;
+    those failures are already logged when _map_exception surfaces them.
+    """
+    elapsed_ms = response.elapsed.total_seconds() * 1000
+    telemetry.record_request(elapsed_ms)
+    logger.debug(
+        "ews request path=%s status=%s elapsed_ms=%.0f",
+        urlparse(response.url).path,
+        response.status_code,
+        elapsed_ms,
+    )
+
+
 _TIMEZONE_FALLBACK_PATCHED = False
 #: Guards _TIMEZONE_FALLBACK_PATCHED: the patch itself is idempotent, but without a
 #: lock, concurrent first calls (ToolGateway runs tool bodies in a thread pool once
@@ -234,6 +258,10 @@ class BaseEWSBackend:
                 oauth2_token_endpoint=oauth2_token_endpoint,
             )
             session.verify = verify_ssl
+            # Every session the pool ever creates -- including renewals and
+            # credential refreshes -- passes through raw_session, so this one
+            # hook covers the protocol's whole lifetime.
+            session.hooks["response"].append(_ews_response_hook)
             return session
 
         protocol.raw_session = raw_session_with_verify

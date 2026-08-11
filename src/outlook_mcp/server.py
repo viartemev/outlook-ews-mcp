@@ -7,6 +7,7 @@ from typing import Any
 
 from pydantic import TypeAdapter
 
+from . import telemetry
 from .config import Settings, get_settings
 from .errors import APIError, normalize_exception
 from .exchange_client import ExchangeClient, build_default_backend
@@ -60,21 +61,34 @@ class ToolRegistry:
             return error.to_dict(), True
 
         started = time.perf_counter()
+        # The hook in exchange_client/base.py reports each EWS HTTP request into
+        # this accumulator; duration_ms minus ews_ms is the time spent in this
+        # codebase rather than on the wire.
+        ews = telemetry.start_collecting()
         try:
             result = spec.handler(self.client, arguments)
             adapter = self._response_adapters.get(name)
             if adapter is not None:
                 result = dump_model(adapter.validate_python(result))
             duration_ms = round((time.perf_counter() - started) * 1000)
-            logger.info("tool=%s status=ok duration_ms=%s", name, duration_ms)
+            logger.info(
+                "tool=%s status=ok duration_ms=%s ews_requests=%s ews_ms=%s",
+                name,
+                duration_ms,
+                ews.requests,
+                round(ews.total_ms),
+            )
             return result, False
         except Exception as exc:  # noqa: BLE001
             api_error = normalize_exception(exc)
             duration_ms = round((time.perf_counter() - started) * 1000)
             logger.warning(
-                "tool=%s status=error duration_ms=%s error=%s exception_type=%s",
+                "tool=%s status=error duration_ms=%s ews_requests=%s ews_ms=%s error=%s "
+                "exception_type=%s",
                 name,
                 duration_ms,
+                ews.requests,
+                round(ews.total_ms),
                 api_error.code,
                 type(exc).__name__,
             )
