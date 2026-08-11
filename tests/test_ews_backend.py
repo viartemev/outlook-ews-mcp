@@ -8,6 +8,7 @@ from types import SimpleNamespace
 import pytest
 from exchangelib.errors import (
     ErrorAccessDenied,
+    ErrorUnsupportedPathForQuery,
     ErrorInvalidIdMalformed,
     ErrorIrresolvableConflict,
     ErrorItemNotFound,
@@ -826,6 +827,77 @@ def test_resolve_folder_falls_back_to_name_lookup_when_id_lookup_errors(
     assert result is child
 
 
+class _EmptyIdLookup:
+    def __init__(self, account, folders) -> None:
+        pass
+
+    def resolve(self):
+        return iter(())
+
+
+def test_resolve_folder_finds_user_folders_under_top_of_information_store(
+    settings, monkeypatch
+) -> None:
+    """A real mailbox keeps user folders under Top of Information Store; root's
+    own children are TOIS plus dozens of hidden system folders. Verified against
+    a live Exchange 2019 mailbox where every user folder failed to resolve."""
+    backend = EWSExchangeBackend(settings)
+    projects = SimpleNamespace(name="Help Заявки", children=[])
+    tois = SimpleNamespace(name="Top of Information Store", children=[projects])
+    root = SimpleNamespace(name="root", children=[tois], tois=tois)
+
+    monkeypatch.setattr(exchange_client_base, "FolderCollection", _EmptyIdLookup)
+    backend._account = _fake_account_for_folder_resolution(root)
+
+    assert backend._resolve_folder("Help Заявки") is projects
+    # Case-insensitive, like every other name comparison in this resolver.
+    assert backend._resolve_folder("help заявки") is projects
+
+
+def test_resolve_folder_walks_a_path_rooted_at_a_wellknown_folder(settings, monkeypatch) -> None:
+    backend = EWSExchangeBackend(settings)
+    clients = SimpleNamespace(name="Clients", children=[])
+    projects = SimpleNamespace(name="Projects", children=[clients])
+    inbox = SimpleNamespace(name="Входящие", children=[projects])
+    tois = SimpleNamespace(name="Top of Information Store", children=[inbox])
+    root = SimpleNamespace(name="root", children=[tois], tois=tois)
+
+    monkeypatch.setattr(exchange_client_base, "FolderCollection", _EmptyIdLookup)
+    account = _fake_account_for_folder_resolution(root)
+    account.inbox = inbox
+    backend._account = account
+
+    assert backend._resolve_folder("Inbox/Projects/Clients") is clients
+
+
+def test_resolve_folder_survives_a_mailbox_without_tois(settings, monkeypatch) -> None:
+    backend = EWSExchangeBackend(settings)
+    child = SimpleNamespace(name="Projects", children=[])
+
+    class RootWithoutTois(SimpleNamespace):
+        @property
+        def tois(self):
+            raise ErrorItemNotFound("no TOIS on this mailbox")
+
+    root = RootWithoutTois(name="root", children=[child])
+    monkeypatch.setattr(exchange_client_base, "FolderCollection", _EmptyIdLookup)
+    backend._account = _fake_account_for_folder_resolution(root)
+
+    assert backend._resolve_folder("Projects") is child
+
+
+def test_resolve_folder_raises_not_found_for_an_unknown_path(settings, monkeypatch) -> None:
+    backend = EWSExchangeBackend(settings)
+    tois = SimpleNamespace(name="Top of Information Store", children=[])
+    root = SimpleNamespace(name="root", children=[tois], tois=tois)
+
+    monkeypatch.setattr(exchange_client_base, "FolderCollection", _EmptyIdLookup)
+    backend._account = _fake_account_for_folder_resolution(root)
+
+    with pytest.raises(NotFoundError):
+        backend._resolve_folder("Nope/Nowhere")
+
+
 def test_resolve_folder_by_id_propagates_auth_failure_instead_of_swallowing_it(
     settings, monkeypatch
 ) -> None:
@@ -1452,6 +1524,219 @@ def test_search_emails_matches_subject_or_body_or_sender_in_one_pass(settings) -
     assert "subject" in restriction_text
     assert "text_body" in restriction_text
     assert "author" in restriction_text
+
+
+def test_add_attachment_attaches_through_the_validated_read_path(settings, tmp_path) -> None:
+    backend = EWSExchangeBackend(settings)
+    attachment_path = tmp_path / "note.txt"
+    attachment_path.write_text("hi")
+    attached: list[str] = []
+
+    class FakeItem(Message):
+        def attach(self, attachment):
+            attached.append(attachment.name)
+
+    item = FakeItem()
+
+    def fetch(ids, folder=None):
+        yield item
+
+    backend._account = SimpleNamespace(fetch=fetch)
+
+    from outlook_mcp.models import AddAttachmentRequest
+
+    result = backend.add_attachment(AddAttachmentRequest(email_id="msg-1", path=attachment_path))
+
+    assert attached == ["note.txt"]
+    assert result.updated_fields == ["attachments"]
+
+
+def test_delete_attachment_detaches_the_matching_attachment_only(settings) -> None:
+    backend = EWSExchangeBackend(settings)
+    detached: list[str] = []
+
+    def make_attachment(att_id):
+        return SimpleNamespace(attachment_id=SimpleNamespace(id=att_id), name=att_id)
+
+    class FakeItem(Message):
+        pass
+
+    item = FakeItem()
+    item.attachments = [make_attachment("att-1"), make_attachment("att-2")]
+    item.detach = lambda attachment: detached.append(attachment.name)
+
+    def fetch(ids, folder=None):
+        yield item
+
+    backend._account = SimpleNamespace(fetch=fetch)
+
+    from outlook_mcp.models import DeleteAttachmentRequest
+
+    backend.delete_attachment(DeleteAttachmentRequest(email_id="msg-1", attachment_id="att-2"))
+
+    assert detached == ["att-2"]
+
+
+def test_delete_attachment_reports_an_unknown_id_as_not_found(settings) -> None:
+    backend = EWSExchangeBackend(settings)
+
+    class FakeItem(Message):
+        pass
+
+    item = FakeItem()
+    item.attachments = []
+
+    def fetch(ids, folder=None):
+        yield item
+
+    backend._account = SimpleNamespace(fetch=fetch)
+
+    from outlook_mcp.models import DeleteAttachmentRequest
+
+    with pytest.raises(NotFoundError):
+        backend.delete_attachment(DeleteAttachmentRequest(email_id="msg-1", attachment_id="nope"))
+
+
+def test_bulk_move_reports_per_item_results_without_failing_the_batch(settings) -> None:
+    """One bad id out of a batch must not undo or hide the moves that worked."""
+    backend = EWSExchangeBackend(settings)
+
+    def bulk_move(ids, to_folder):
+        return [("new-1", "ck"), ErrorItemNotFound("gone"), ("new-3", "ck")]
+
+    account = _fake_account_for_folder_resolution(object())
+    account.inbox = object()
+    account.bulk_move = bulk_move
+    backend._account = account
+
+    from outlook_mcp.models import BulkMoveEmailsRequest
+
+    result = backend.move_emails(BulkMoveEmailsRequest(ids=["a", "b", "c"], folder="inbox"))
+
+    assert [(r.id, r.new_id) for r in result.succeeded] == [("a", "new-1"), ("c", "new-3")]
+    assert [(f.id, f.error) for f in result.failed] == [("b", "not_found")]
+
+
+def test_bulk_delete_maps_soft_and_hard_delete_types(settings) -> None:
+    backend = EWSExchangeBackend(settings)
+    captured: list[str] = []
+
+    def bulk_delete(ids, delete_type):
+        captured.append(delete_type)
+        return [True for _ in ids]
+
+    backend._account = SimpleNamespace(bulk_delete=bulk_delete)
+
+    from outlook_mcp.models import BulkDeleteEmailsRequest
+
+    backend.delete_emails(BulkDeleteEmailsRequest(ids=["a"]))
+    backend.delete_emails(BulkDeleteEmailsRequest(ids=["a"], hard_delete=True))
+
+    assert captured == [MOVE_TO_DELETED_ITEMS, HARD_DELETE]
+
+
+def test_bulk_move_to_a_public_folder_still_gives_every_id_a_verdict(settings) -> None:
+    """Moving into a public folder returns no per-item ids at all; every input
+    id must still come back as succeeded rather than the call crashing."""
+    backend = EWSExchangeBackend(settings)
+    account = _fake_account_for_folder_resolution(object())
+    account.inbox = object()
+    account.bulk_move = lambda ids, to_folder: []
+    backend._account = account
+
+    from outlook_mcp.models import BulkMoveEmailsRequest
+
+    result = backend.move_emails(BulkMoveEmailsRequest(ids=["a", "b"], folder="inbox"))
+
+    assert [r.id for r in result.succeeded] == ["a", "b"]
+    assert result.failed == []
+
+
+def test_search_emails_retries_without_the_body_leg_when_the_server_rejects_it(
+    settings,
+) -> None:
+    """Live Exchange 2019 rejects a substring restriction on item:TextBody with
+    ErrorUnsupportedPathForQuery, which used to kill the whole search."""
+    backend = EWSExchangeBackend(settings)
+    attempts: list[str] = []
+
+    class FakeQuerySet:
+        def __init__(self, fail_on_body):
+            self.fail_on_body = fail_on_body
+
+        def filter(self, restriction):
+            attempts.append(str(restriction))
+            if self.fail_on_body and "text_body" in str(restriction):
+                self.explode = True
+            else:
+                self.explode = False
+            return self
+
+        def only(self, *fields):
+            return self
+
+        def order_by(self, *args):
+            return self
+
+        def __getitem__(self, item):
+            if self.explode:
+                raise ErrorUnsupportedPathForQuery(
+                    "The property can not be used with this type of restriction."
+                )
+            return []
+
+    account = _fake_account_for_folder_resolution(object())
+    account.inbox = FakeQuerySet(fail_on_body=True)
+    backend._account = account
+
+    result = backend.search_emails(SearchEmailsRequest(query="заявка", folder="inbox"))
+
+    assert result == []
+    assert len(attempts) == 2
+    assert "text_body" in attempts[0]
+    assert "text_body" not in attempts[1]
+    assert "subject" in attempts[1]
+
+
+def test_search_emails_aqs_sends_a_query_string_not_a_restriction(settings) -> None:
+    """AQS goes to EWS as its own FindItem QueryString element and cannot be
+    combined with a Restriction, so the substring filters must not be added."""
+    backend = EWSExchangeBackend(settings)
+    captured: dict = {}
+
+    class FakeQuerySet:
+        def filter(self, restriction):
+            captured["restriction"] = restriction
+            return self
+
+        def only(self, *fields):
+            return self
+
+        def order_by(self, *args):
+            return self
+
+        def __getitem__(self, item):
+            return []
+
+    account = _fake_account_for_folder_resolution(object())
+    account.inbox = FakeQuerySet()
+    backend._account = account
+
+    backend.search_emails(
+        SearchEmailsRequest(aqs="from:ivan AND hasattachments:true", folder="inbox")
+    )
+
+    q = captured["restriction"]
+    assert q.query_string == "from:ivan AND hasattachments:true"
+    assert "icontains" not in str(q)
+
+
+def test_search_emails_requires_exactly_one_of_query_or_aqs() -> None:
+    with pytest.raises(ValueError, match="exactly one of query or aqs"):
+        SearchEmailsRequest(query="hello", aqs="from:ivan")
+
+    with pytest.raises(ValueError, match="exactly one of query or aqs"):
+        SearchEmailsRequest(folder="inbox")
 
 
 def test_search_emails_defaults_to_mail_folders_only(settings, monkeypatch) -> None:

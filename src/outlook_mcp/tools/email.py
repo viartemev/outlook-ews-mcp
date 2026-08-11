@@ -7,16 +7,16 @@ from ..config import Settings
 from ..errors import APIError
 from ..exchange_client import ExchangeClient
 from ..models import (
+    AddAttachmentRequest,
     BulkCategorizeEmailsRequest,
-    BulkDeleteEmailsRequest,
     BulkMarkEmailsRequest,
+    DeleteAttachmentRequest,
+    BulkDeleteEmailsRequest,
     BulkMoveEmailsRequest,
     CategorizeEmailRequest,
     CreateFolderRequest,
-    CreateRuleRequest,
     DeleteEmailRequest,
     DeleteFolderRequest,
-    DeleteRuleRequest,
     DraftEmailRequest,
     FolderActionRequest,
     GetAttachmentRequest,
@@ -32,10 +32,8 @@ from ..models import (
     SearchEmailsRequest,
     SendDraftRequest,
     SendEmailRequest,
-    SetOofSettingsRequest,
     ForwardEmailRequest,
     UpdateDraftRequest,
-    UpdateRuleRequest,
 )
 from .common import tool_handler
 
@@ -71,20 +69,15 @@ forward_email = tool_handler(
     "forward_email", ForwardEmailRequest, before=_validate_outgoing_attachments
 )
 move_email = tool_handler("move_email", FolderActionRequest)
+move_emails = tool_handler("move_emails", BulkMoveEmailsRequest)
+copy_emails = tool_handler("copy_emails", BulkMoveEmailsRequest)
+delete_emails = tool_handler("delete_emails", BulkDeleteEmailsRequest)
 copy_email = tool_handler("copy_email", FolderActionRequest)
 delete_email = tool_handler("delete_email", DeleteEmailRequest)
 mark_email = tool_handler("mark_email", MarkEmailRequest)
+mark_emails = tool_handler("mark_emails", BulkMarkEmailsRequest)
 categorize_email = tool_handler("categorize_email", CategorizeEmailRequest)
-bulk_move_emails = tool_handler("bulk_move_emails", BulkMoveEmailsRequest)
-bulk_delete_emails = tool_handler("bulk_delete_emails", BulkDeleteEmailsRequest)
-bulk_mark_emails = tool_handler("bulk_mark_emails", BulkMarkEmailsRequest)
-bulk_categorize_emails = tool_handler("bulk_categorize_emails", BulkCategorizeEmailsRequest)
-list_rules = tool_handler("list_rules")
-create_rule = tool_handler("create_rule", CreateRuleRequest)
-update_rule = tool_handler("update_rule", UpdateRuleRequest)
-delete_rule = tool_handler("delete_rule", DeleteRuleRequest)
-get_oof_settings = tool_handler("get_oof_settings")
-set_oof_settings = tool_handler("set_oof_settings", SetOofSettingsRequest)
+categorize_emails = tool_handler("categorize_emails", BulkCategorizeEmailsRequest)
 list_categories = tool_handler("list_categories", ListCategoriesRequest)
 list_folders = tool_handler("list_folders", ListFoldersRequest)
 create_folder = tool_handler("create_folder", CreateFolderRequest)
@@ -100,6 +93,22 @@ send_draft = tool_handler("send_draft", SendDraftRequest)
 get_attachment = tool_handler(
     "get_attachment", GetAttachmentRequest, before=_validate_attachment_destination
 )
+
+
+def _validate_added_attachment(client: ExchangeClient, request: Any) -> None:
+    path = request.path
+    root = client.settings.attachment_root
+    if not path.is_absolute() and root is not None:
+        # Mirrors the backend: a relative path means "relative to the root",
+        # never relative to the server's own working directory.
+        path = root / path
+    _validate_attachments([path], client.settings)
+
+
+add_attachment = tool_handler(
+    "add_attachment", AddAttachmentRequest, before=_validate_added_attachment
+)
+delete_attachment = tool_handler("delete_attachment", DeleteAttachmentRequest)
 
 
 def _validate_within_root(paths: list[Path], root: Path | None, field: str) -> None:

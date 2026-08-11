@@ -20,6 +20,7 @@ from ..models import (
     AvailabilityResult,
     BulkDeleteEventsRequest,
     BulkRespondToInvitesRequest,
+    BulkResult,
     CalendarEvent,
     CalendarInfo,
     CreateEventRequest,
@@ -527,7 +528,7 @@ class CalendarOperationsMixin(BaseEWSBackend):
             raise self._map_exception(exc) from exc
         return [RoomInfo(name=room.name, email=room.email_address) for room in rooms]
 
-    def bulk_delete_events(self, request: BulkDeleteEventsRequest) -> list[ActionResult]:
+    def delete_events(self, request: BulkDeleteEventsRequest) -> BulkResult:
         return self._bulk(
             request.ids,
             lambda item_id: self.delete_event(
@@ -540,7 +541,7 @@ class CalendarOperationsMixin(BaseEWSBackend):
             ),
         )
 
-    def bulk_respond_to_invites(self, request: BulkRespondToInvitesRequest) -> list[ActionResult]:
+    def respond_to_invites(self, request: BulkRespondToInvitesRequest) -> BulkResult:
         return self._bulk(
             request.ids,
             lambda item_id: self.respond_to_invite(

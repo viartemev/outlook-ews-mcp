@@ -5,11 +5,13 @@ from .base import BaseEWSBackend
 from .calendar import CalendarOperationsMixin
 from .contacts import ContactOperationsMixin
 from .email import EmailOperationsMixin
+from .mailbox import MailboxSettingsMixin
 from .protocol import ExchangeBackend
 
 
 class EWSExchangeBackend(
     EmailOperationsMixin,
+    MailboxSettingsMixin,
     CalendarOperationsMixin,
     ContactOperationsMixin,
     BaseEWSBackend,

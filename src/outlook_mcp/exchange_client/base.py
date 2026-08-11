@@ -58,7 +58,14 @@ from ..errors import (
     PermissionDeniedError,
     TimeoutAPIError,
 )
-from ..models import ActionResult, EmailAddress, MailboxInfo, PingResult
+from ..models import (
+    BulkItemFailure,
+    BulkItemResult,
+    BulkResult,
+    EmailAddress,
+    MailboxInfo,
+    PingResult,
+)
 
 logger = logging.getLogger(__name__)
 _TIMEZONE_FALLBACK_PATCHED = False
@@ -298,16 +305,45 @@ class BaseEWSBackend:
         if by_id is not None:
             return by_id
 
-        current = account.root
-        for part in [segment for segment in value.strip("/").split("/") if segment]:
+        parts = [segment for segment in value.strip("/").split("/") if segment]
+        if not parts:
+            return account.root
+
+        # A name or path may start at a well-known folder ("Inbox/Projects") or at
+        # the mailbox top level ("Projects"). Neither lives under account.root,
+        # whose children are Top of Information Store plus dozens of hidden system
+        # folders -- user folders hang off TOIS itself.
+        candidates: list[tuple[Folder, list[str]]] = []
+        if parts[0].lower() in builtin:
+            candidates.append((builtin[parts[0].lower()], parts[1:]))
+        try:
+            candidates.append((account.root.tois, parts))
+        except Exception:  # noqa: BLE001
+            # Not every mailbox exposes TOIS, or grants access to it.
+            logger.debug("Top of Information Store is unavailable; falling back to root")
+        candidates.append((account.root, parts))
+
+        for start, remainder in candidates:
+            found = self._walk_child_folders(start, remainder)
+            if found is not None:
+                return found
+        raise NotFoundError(value)
+
+    def _walk_child_folders(self, start: Folder, parts: list[str]) -> Folder | None:
+        current = start
+        for part in parts:
+            try:
+                children = current.children
+            except Exception:  # noqa: BLE001
+                return None
             next_folder = next(
-                (child for child in current.children if child.name.lower() == part.lower()),
+                (child for child in children if child.name.lower() == part.lower()),
                 None,
             )
             if next_folder is None:
-                raise NotFoundError(value)
+                return None
             current = next_folder
-        return current
+        return current if current is not start else None
 
     def _get_folder_by_id(self, folder_id: str) -> Folder | None:
         """Resolve a folder by EWS id with a single targeted GetFolder call.
@@ -515,23 +551,23 @@ class BaseEWSBackend:
         logger.warning("Unmapped Exchange exception: %s", type(exc).__name__)
         return ExchangeUnavailableError("exchange is unavailable")
 
-    def _bulk(
-        self, ids: Iterable[str], action: Callable[[str], ActionResult]
-    ) -> list[ActionResult]:
+    def _bulk(self, ids: Iterable[str], action: Callable[[str], Any]) -> BulkResult:
         """Run a single-item action over every id, capturing per-item failures.
 
-        Exchange has no transactional multi-item guarantee for these operations, so a
-        failure on one id (not found, permission denied, ...) is reported back as that
-        id's own ActionResult instead of aborting ids that would otherwise have
-        succeeded.
+        For operations with no native EWS batch equivalent (marking, categorizing,
+        responding to invites, ...): Exchange has no transactional multi-item
+        guarantee for these anyway, so a failure on one id is reported in `failed`
+        instead of aborting ids that would otherwise have succeeded.
         """
-        results: list[ActionResult] = []
+        succeeded: list[BulkItemResult] = []
+        failed: list[BulkItemFailure] = []
         for item_id in ids:
             try:
-                results.append(action(item_id))
+                action(item_id)
+                succeeded.append(BulkItemResult(id=item_id))
             except APIError as exc:
-                results.append(ActionResult(id=item_id, status="error", warning=exc.message))
-        return results
+                failed.append(BulkItemFailure(id=item_id, error=exc.code, message=exc.message))
+        return BulkResult(succeeded=succeeded, failed=failed)
 
     def ping(self) -> PingResult:
         started = datetime.now(UTC)

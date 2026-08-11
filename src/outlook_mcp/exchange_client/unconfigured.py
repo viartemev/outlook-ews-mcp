@@ -6,6 +6,7 @@ from ..config import Settings
 from ..errors import ExchangeUnavailableError
 from ..models import (
     ActionResult,
+    AddAttachmentRequest,
     AttachmentResult,
     AvailabilityResult,
     BulkCategorizeEmailsRequest,
@@ -14,6 +15,7 @@ from ..models import (
     BulkMarkEmailsRequest,
     BulkMoveEmailsRequest,
     BulkRespondToInvitesRequest,
+    BulkResult,
     CalendarInfo,
     CalendarEvent,
     ContactFull,
@@ -24,12 +26,14 @@ from ..models import (
     CreateEventResult,
     CreateContactRequest,
     CreateFolderRequest,
-    CreateRuleRequest,
+    CreateInboxRuleRequest,
+    DelegateInfo,
+    DeleteAttachmentRequest,
     DeleteContactRequest,
     DeleteEmailRequest,
     DeleteEventRequest,
     DeleteFolderRequest,
-    DeleteRuleRequest,
+    DeleteInboxRuleRequest,
     DraftEmailRequest,
     EmailFull,
     EmailMimeResult,
@@ -45,15 +49,15 @@ from ..models import (
     GetEmailRequest,
     GetEventRequest,
     GetThreadRequest,
+    InboxRule,
     ListCategoriesRequest,
     ListEmailsRequest,
     ListEventsRequest,
     ListFoldersRequest,
     ListRoomsRequest,
     MailboxInfo,
-    MailRule,
     MarkEmailRequest,
-    OofSettingsModel,
+    OutOfOfficeSettings,
     PingResult,
     RenameFolderRequest,
     ReplyEmailRequest,
@@ -65,12 +69,11 @@ from ..models import (
     SendDraftRequest,
     SendEmailRequest,
     SendResult,
-    SetOofSettingsRequest,
     Thread,
     UpdateContactRequest,
     UpdateDraftRequest,
     UpdateEventRequest,
-    UpdateRuleRequest,
+    UpdateInboxRuleRequest,
 )
 
 
@@ -87,6 +90,27 @@ class UnconfiguredExchangeBackend:
         self._raise()
 
     def get_mailbox_info(self) -> MailboxInfo:
+        self._raise()
+
+    def get_out_of_office(self) -> OutOfOfficeSettings:
+        self._raise()
+
+    def list_delegates(self) -> list[DelegateInfo]:
+        self._raise()
+
+    def list_inbox_rules(self) -> list[InboxRule]:
+        self._raise()
+
+    def create_inbox_rule(self, request: CreateInboxRuleRequest) -> InboxRule:
+        self._raise()
+
+    def update_inbox_rule(self, request: UpdateInboxRuleRequest) -> InboxRule:
+        self._raise()
+
+    def delete_inbox_rule(self, request: DeleteInboxRuleRequest) -> ActionResult:
+        self._raise()
+
+    def set_out_of_office(self, request: OutOfOfficeSettings) -> OutOfOfficeSettings:
         self._raise()
 
     def list_emails(self, request: ListEmailsRequest) -> list[EmailSummary]:
@@ -122,19 +146,22 @@ class UnconfiguredExchangeBackend:
     def mark_email(self, request: MarkEmailRequest) -> ActionResult:
         self._raise()
 
+    def move_emails(self, request: BulkMoveEmailsRequest) -> BulkResult:
+        self._raise()
+
+    def copy_emails(self, request: BulkMoveEmailsRequest) -> BulkResult:
+        self._raise()
+
+    def delete_emails(self, request: BulkDeleteEmailsRequest) -> BulkResult:
+        self._raise()
+
+    def mark_emails(self, request: BulkMarkEmailsRequest) -> BulkResult:
+        self._raise()
+
+    def categorize_emails(self, request: BulkCategorizeEmailsRequest) -> BulkResult:
+        self._raise()
+
     def categorize_email(self, request: CategorizeEmailRequest) -> ActionResult:
-        self._raise()
-
-    def bulk_move_emails(self, request: BulkMoveEmailsRequest) -> list[ActionResult]:
-        self._raise()
-
-    def bulk_delete_emails(self, request: BulkDeleteEmailsRequest) -> list[ActionResult]:
-        self._raise()
-
-    def bulk_mark_emails(self, request: BulkMarkEmailsRequest) -> list[ActionResult]:
-        self._raise()
-
-    def bulk_categorize_emails(self, request: BulkCategorizeEmailsRequest) -> list[ActionResult]:
         self._raise()
 
     def list_categories(self, request: ListCategoriesRequest) -> list[CategoryUsage]:
@@ -161,28 +188,16 @@ class UnconfiguredExchangeBackend:
     def send_draft(self, request: SendDraftRequest) -> SendResult:
         self._raise()
 
+    def add_attachment(self, request: AddAttachmentRequest) -> ActionResult:
+        self._raise()
+
+    def delete_attachment(self, request: DeleteAttachmentRequest) -> ActionResult:
+        self._raise()
+
     def get_attachment(self, request: GetAttachmentRequest) -> AttachmentResult:
         self._raise()
 
     def get_email_mime(self, request: GetEmailMimeRequest) -> EmailMimeResult:
-        self._raise()
-
-    def list_rules(self) -> list[MailRule]:
-        self._raise()
-
-    def create_rule(self, request: CreateRuleRequest) -> ActionResult:
-        self._raise()
-
-    def update_rule(self, request: UpdateRuleRequest) -> ActionResult:
-        self._raise()
-
-    def delete_rule(self, request: DeleteRuleRequest) -> ActionResult:
-        self._raise()
-
-    def get_oof_settings(self) -> OofSettingsModel:
-        self._raise()
-
-    def set_oof_settings(self, request: SetOofSettingsRequest) -> ActionResult:
         self._raise()
 
     def list_events(self, request: ListEventsRequest) -> list[CalendarEvent]:
@@ -206,10 +221,10 @@ class UnconfiguredExchangeBackend:
     def find_free_slots(self, request: FindFreeSlotsRequest) -> list[FreeSlot]:
         self._raise()
 
-    def bulk_delete_events(self, request: BulkDeleteEventsRequest) -> list[ActionResult]:
+    def delete_events(self, request: BulkDeleteEventsRequest) -> BulkResult:
         self._raise()
 
-    def bulk_respond_to_invites(self, request: BulkRespondToInvitesRequest) -> list[ActionResult]:
+    def respond_to_invites(self, request: BulkRespondToInvitesRequest) -> BulkResult:
         self._raise()
 
     def get_my_availability(self, request: ListEventsRequest) -> AvailabilityResult:

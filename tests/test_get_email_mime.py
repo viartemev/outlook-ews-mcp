@@ -49,3 +49,26 @@ def test_get_email_mime_raises_when_exchange_returns_no_content() -> None:
 
     with pytest.raises(APIError):
         backend.get_email_mime(GetEmailMimeRequest(id="email-1"))
+
+
+def test_get_email_mime_encodes_str_content_as_utf8() -> None:
+    item = SimpleNamespace(subject="Hello", mime_content="From: a@b.com\r\n\r\nhi")
+    backend = _backend_with_item(item)
+
+    result = backend.get_email_mime(GetEmailMimeRequest(id="email-1"))
+
+    assert base64.b64decode(result.mime_base64) == item.mime_content.encode("utf-8")
+
+
+def test_get_email_mime_maps_exceptions_from_mime_content() -> None:
+    class RaisingItem:
+        subject = "Hello"
+
+        @property
+        def mime_content(self):
+            raise RuntimeError("boom")
+
+    backend = _backend_with_item(RaisingItem())
+
+    with pytest.raises(APIError):
+        backend.get_email_mime(GetEmailMimeRequest(id="email-1"))

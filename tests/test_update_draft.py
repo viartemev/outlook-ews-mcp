@@ -148,3 +148,41 @@ def test_update_draft_rejects_wrong_folder() -> None:
 
     with pytest.raises(Exception):
         backend.update_draft(UpdateDraftRequest(id="draft-1", subject="New subject"))
+
+
+def test_update_draft_maps_exceptions_from_save() -> None:
+    events: list[tuple] = []
+    draft = _fake_draft(events)
+
+    def failing_save(update_fields=None):
+        raise RuntimeError("boom")
+
+    draft.save = failing_save
+    backend = _backend_with_draft(draft)
+
+    with pytest.raises(Exception):
+        backend.update_draft(UpdateDraftRequest(id="draft-1", subject="New subject"))
+
+
+def test_validate_outgoing_attachments_if_set_skips_when_attachments_omitted() -> None:
+    from types import SimpleNamespace as NS
+
+    from outlook_mcp.tools.email import _validate_outgoing_attachments_if_set
+
+    client = NS(settings=NS(attachment_root=None))
+    # attachments is None (field omitted) -- must not raise even without
+    # EXCHANGE_ATTACHMENT_ROOT configured.
+    _validate_outgoing_attachments_if_set(client, UpdateDraftRequest(id="draft-1"))
+
+
+def test_validate_outgoing_attachments_if_set_validates_when_attachments_given() -> None:
+    from types import SimpleNamespace as NS
+
+    from outlook_mcp.errors import APIError
+    from outlook_mcp.tools.email import _validate_outgoing_attachments_if_set
+
+    client = NS(settings=NS(attachment_root=None))
+    request = UpdateDraftRequest(id="draft-1", attachments=["note.txt"])
+
+    with pytest.raises(APIError):
+        _validate_outgoing_attachments_if_set(client, request)

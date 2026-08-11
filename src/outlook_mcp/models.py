@@ -207,6 +207,7 @@ class SendEmailRequest(ExchangeModel):
     reply_to: EmailStr | None = None
     attachments: list[Path] = Field(default_factory=list)
     importance: Literal["low", "normal", "high"] = "normal"
+    include_signature: bool = True
 
 
 class ReplyEmailRequest(ExchangeModel):
@@ -214,6 +215,7 @@ class ReplyEmailRequest(ExchangeModel):
     body: str
     reply_all: bool = False
     attachments: list[Path] = Field(default_factory=list)
+    include_signature: bool = True
 
 
 class ForwardEmailRequest(ExchangeModel):
@@ -221,6 +223,7 @@ class ForwardEmailRequest(ExchangeModel):
     to: list[EmailStr] = Field(min_length=1)
     comment: str | None = None
     attachments: list[Path] = Field(default_factory=list)
+    include_signature: bool = True
 
 
 class FolderActionRequest(ExchangeModel):
@@ -256,6 +259,180 @@ class MarkEmailRequest(ExchangeModel):
         return self
 
 
+class InboxRuleConditions(ExchangeModel):
+    #: Lenient on purpose: the server reports whatever a rule was created with,
+    #: including X.500 distinguished names for internal senders. Read paths must
+    #: survive that; outgoing rules use CreateInboxRuleConditions below.
+    from_addresses: list[ServerAddress] = Field(default_factory=list)
+    contains_sender_strings: list[str] = Field(default_factory=list)
+    contains_subject_strings: list[str] = Field(default_factory=list)
+    contains_subject_or_body_strings: list[str] = Field(default_factory=list)
+    has_attachments: bool | None = None
+    importance: Literal["low", "normal", "high"] | None = None
+
+    def is_empty(self) -> bool:
+        return not (
+            self.from_addresses
+            or self.contains_sender_strings
+            or self.contains_subject_strings
+            or self.contains_subject_or_body_strings
+            or self.has_attachments is not None
+            or self.importance is not None
+        )
+
+
+class InboxRuleActions(ExchangeModel):
+    #: Folder name, path or id, resolved the same way move_email resolves it.
+    move_to_folder: str | None = None
+    assign_categories: list[str] = Field(default_factory=list)
+    mark_as_read: bool | None = None
+    delete: bool | None = None
+    forward_to: list[ServerAddress] = Field(default_factory=list)
+
+    def is_empty(self) -> bool:
+        return not (
+            self.move_to_folder
+            or self.assign_categories
+            or self.mark_as_read is not None
+            or self.delete is not None
+            or self.forward_to
+        )
+
+
+class CreateInboxRuleConditions(InboxRuleConditions):
+    #: Strict where the base is lenient: a new rule must not be created against
+    #: a garbage address, only read back with one.
+    from_addresses: list[EmailStr] = Field(default_factory=list)
+
+
+class CreateInboxRuleActions(InboxRuleActions):
+    forward_to: list[EmailStr] = Field(default_factory=list)
+
+
+class InboxRule(ExchangeModel):
+    id: str | None = None
+    display_name: str
+    priority: int = 1
+    is_enabled: bool = True
+    #: Set by the server for rules it cannot fully express over EWS.
+    is_not_supported: bool = False
+    conditions: InboxRuleConditions = Field(default_factory=InboxRuleConditions)
+    actions: InboxRuleActions = Field(default_factory=InboxRuleActions)
+
+
+class CreateInboxRuleRequest(ExchangeModel):
+    display_name: str = Field(min_length=1)
+    priority: int = Field(default=1, ge=1)
+    is_enabled: bool = True
+    conditions: CreateInboxRuleConditions
+    actions: CreateInboxRuleActions
+    #: EWS documented behaviour: managing rules over EWS removes the client-side
+    #: rule blob that desktop Outlook keeps, which can wipe rules created there.
+    remove_outlook_rule_blob: bool = True
+
+    @model_validator(mode="after")
+    def validate_rule(self) -> "CreateInboxRuleRequest":
+        if self.conditions.is_empty():
+            raise ValueError("at least one condition is required")
+        if self.actions.is_empty():
+            raise ValueError("at least one action is required")
+        return self
+
+
+class UpdateInboxRuleRequest(ExchangeModel):
+    id: str
+    #: Only these two are updatable: a full update would have to round-trip the
+    #: rule through this API's curated subset and silently drop any condition or
+    #: action the subset does not model.
+    is_enabled: bool | None = None
+    priority: int | None = Field(default=None, ge=1)
+    remove_outlook_rule_blob: bool = True
+
+    @model_validator(mode="after")
+    def validate_update(self) -> "UpdateInboxRuleRequest":
+        if self.is_enabled is None and self.priority is None:
+            raise ValueError("nothing to update: set is_enabled and/or priority")
+        return self
+
+
+class DeleteInboxRuleRequest(ExchangeModel):
+    id: str
+    remove_outlook_rule_blob: bool = True
+
+
+class DelegatePermissionLevels(ExchangeModel):
+    calendar: str = "None"
+    inbox: str = "None"
+    tasks: str = "None"
+    contacts: str = "None"
+
+
+class DelegateInfo(ExchangeModel):
+    email: ServerAddress | None = None
+    display_name: str | None = None
+    permissions: DelegatePermissionLevels = Field(default_factory=DelegatePermissionLevels)
+    receives_copies_of_meeting_messages: bool = False
+    can_view_private_items: bool = False
+
+
+class OutOfOfficeSettings(ExchangeModel):
+    state: Literal["disabled", "enabled", "scheduled"]
+    #: Who outside the organisation gets the external reply.
+    external_audience: Literal["none", "known", "all"] = "all"
+    internal_reply: str | None = None
+    external_reply: str | None = None
+    #: Only meaningful (and required) when state is "scheduled".
+    start: datetime | None = None
+    end: datetime | None = None
+
+    @model_validator(mode="after")
+    def validate_schedule(self) -> "OutOfOfficeSettings":
+        if self.state == "scheduled":
+            if self.start is None or self.end is None:
+                raise ValueError("state='scheduled' requires both start and end")
+            if self.end <= self.start:
+                raise ValueError("end must be greater than start")
+        return self
+
+
+class AddAttachmentRequest(ExchangeModel):
+    email_id: str
+    #: Local file to attach; must live under EXCHANGE_ATTACHMENT_ROOT.
+    path: Path
+
+
+class DeleteAttachmentRequest(ExchangeModel):
+    email_id: str
+    attachment_id: str
+
+
+class BulkMoveEmailsRequest(ExchangeModel):
+    ids: list[str] = Field(min_length=1, max_length=500)
+    folder: str = Field(min_length=1)
+
+
+class BulkDeleteEmailsRequest(ExchangeModel):
+    ids: list[str] = Field(min_length=1, max_length=500)
+    hard_delete: bool = False
+
+
+class BulkItemResult(ExchangeModel):
+    id: str
+    #: Move/copy give the item a new id; the old one is dead after the operation.
+    new_id: str | None = None
+
+
+class BulkItemFailure(ExchangeModel):
+    id: str
+    error: str
+    message: str
+
+
+class BulkResult(ExchangeModel):
+    succeeded: list[BulkItemResult] = Field(default_factory=list)
+    failed: list[BulkItemFailure] = Field(default_factory=list)
+
+
 class CategorizeEmailRequest(ExchangeModel):
     id: str
     categories: list[str] = Field(default_factory=list)
@@ -271,53 +448,6 @@ class CategorizeEmailRequest(ExchangeModel):
         return self
 
 
-class BulkMoveEmailsRequest(ExchangeModel):
-    ids: list[str] = Field(min_length=1, max_length=50)
-    folder: str = Field(min_length=1)
-
-
-class BulkDeleteEmailsRequest(ExchangeModel):
-    ids: list[str] = Field(min_length=1, max_length=50)
-    hard_delete: bool = False
-
-
-class BulkMarkEmailsRequest(ExchangeModel):
-    ids: list[str] = Field(min_length=1, max_length=50)
-    read: bool | None = None
-    flag: Literal["flagged", "complete", "none"] | None = None
-    importance: Literal["low", "normal", "high"] | None = None
-    flag_start_date: datetime | None = None
-    flag_due_date: datetime | None = None
-
-    @model_validator(mode="after")
-    def validate_flag_dates(self) -> "BulkMarkEmailsRequest":
-        if (
-            self.flag_start_date is not None
-            and self.flag_due_date is not None
-            and self.flag_due_date < self.flag_start_date
-        ):
-            raise ValueError("flag_due_date must not be earlier than flag_start_date")
-        if self.flag == "none" and (
-            self.flag_start_date is not None or self.flag_due_date is not None
-        ):
-            raise ValueError("flag dates cannot be combined with flag='none'")
-        return self
-
-
-class BulkCategorizeEmailsRequest(ExchangeModel):
-    ids: list[str] = Field(min_length=1, max_length=50)
-    categories: list[str] = Field(default_factory=list)
-    mode: Literal["set", "add", "remove"] = "set"
-
-    @model_validator(mode="after")
-    def validate_categories(self) -> "BulkCategorizeEmailsRequest":
-        if self.mode in {"add", "remove"} and not self.categories:
-            raise ValueError(f"categories must not be empty when mode is '{self.mode}'")
-        if any(not name.strip() for name in self.categories):
-            raise ValueError("category names must not be blank")
-        return self
-
-
 class ListCategoriesRequest(ExchangeModel):
     folders: list[str] = Field(default_factory=lambda: ["inbox"], min_length=1)
     limit: int = Field(default=200, ge=1, le=1000)
@@ -326,6 +456,9 @@ class ListCategoriesRequest(ExchangeModel):
 class CategoryUsage(ExchangeModel):
     name: str
     count: int
+    #: Outlook preset colour name; None when the mailbox master list is
+    #: unavailable and counts were collected from recent messages instead.
+    color: str | None = None
 
 
 class ListFoldersRequest(ExchangeModel):
@@ -356,6 +489,7 @@ class DraftEmailRequest(ExchangeModel):
     cc: list[EmailStr] = Field(default_factory=list)
     bcc: list[EmailStr] = Field(default_factory=list)
     attachments: list[Path] = Field(default_factory=list)
+    include_signature: bool = True
 
 
 class UpdateDraftRequest(ExchangeModel):
@@ -379,9 +513,19 @@ class SendDraftRequest(ExchangeModel):
 
 
 class SearchEmailsRequest(ExchangeModel):
-    query: str = Field(min_length=1)
+    #: Substring match over subject, body and sender.
+    query: str | None = Field(default=None, min_length=1)
+    #: EWS Advanced Query Syntax, e.g. 'from:ivan AND hasattachments:true'.
+    #: Server-side full-text search; needs content indexing enabled on the server.
+    aqs: str | None = Field(default=None, min_length=1)
     folder: str | None = None
     limit: int = Field(default=20, ge=1, le=100)
+
+    @model_validator(mode="after")
+    def validate_selector(self) -> "SearchEmailsRequest":
+        if bool(self.query) == bool(self.aqs):
+            raise ValueError("exactly one of query or aqs must be provided")
+        return self
 
 
 class GetAttachmentRequest(ExchangeModel):
@@ -405,127 +549,40 @@ class EmailMimeResult(ExchangeModel):
     mime_base64: str
 
 
-def _validate_rule_has_action(rule: Any) -> None:
-    if not any(
-        [
-            rule.move_to_folder is not None,
-            rule.mark_as_read is not None,
-            rule.assign_categories,
-            rule.delete,
-        ]
-    ):
-        raise ValueError(
-            "at least one action (move_to_folder, mark_as_read, assign_categories, "
-            "delete) must be set"
-        )
-
-
-class MailRule(ExchangeModel):
-    """An Inbox rule as the server holds it.
-
-    Only a focused subset of EWS's condition/action vocabulary is exposed --
-    the fields most tool callers actually need (sender/subject/attachment
-    conditions; move/mark/categorize/delete actions) -- rather than the full
-    Conditions/Actions surface exchangelib exposes.
-    """
-
-    id: str
-    display_name: str
-    priority: int
-    is_enabled: bool = True
-    from_addresses: list[str] = Field(default_factory=list)
-    contains_subject_strings: list[str] = Field(default_factory=list)
-    has_attachments: bool | None = None
-    move_to_folder: str | None = None
-    mark_as_read: bool | None = None
-    assign_categories: list[str] = Field(default_factory=list)
-    delete: bool = False
-    stop_processing_rules: bool = True
-
-
-class CreateRuleRequest(ExchangeModel):
-    display_name: str = Field(min_length=1)
-    priority: int = Field(default=1, ge=1)
-    is_enabled: bool = True
-    #: Conditions -- a rule with none of these set matches every message.
-    from_addresses: list[EmailStr] = Field(default_factory=list)
-    contains_subject_strings: list[str] = Field(default_factory=list)
-    has_attachments: bool | None = None
-    #: Actions -- at least one must be set (see validate_has_action below).
-    move_to_folder: str | None = None
-    mark_as_read: bool | None = None
-    assign_categories: list[str] = Field(default_factory=list)
-    delete: bool = False
-    stop_processing_rules: bool = True
+class BulkMarkEmailsRequest(ExchangeModel):
+    ids: list[str] = Field(min_length=1, max_length=500)
+    read: bool | None = None
+    flag: Literal["flagged", "complete", "none"] | None = None
+    importance: Literal["low", "normal", "high"] | None = None
+    flag_start_date: datetime | None = None
+    flag_due_date: datetime | None = None
 
     @model_validator(mode="after")
-    def validate_has_action(self) -> "CreateRuleRequest":
-        _validate_rule_has_action(self)
+    def validate_flag_dates(self) -> "BulkMarkEmailsRequest":
+        if (
+            self.flag_start_date is not None
+            and self.flag_due_date is not None
+            and self.flag_due_date < self.flag_start_date
+        ):
+            raise ValueError("flag_due_date must not be earlier than flag_start_date")
+        if self.flag == "none" and (
+            self.flag_start_date is not None or self.flag_due_date is not None
+        ):
+            raise ValueError("flag dates cannot be combined with flag='none'")
         return self
 
 
-class UpdateRuleRequest(ExchangeModel):
-    """A full replace, not a partial patch: EWS's SetInboxRule replaces the whole
-    rule server-side, so every field here -- not just the ones being changed --
-    must reflect the rule's desired end state."""
-
-    id: str = Field(min_length=1)
-    display_name: str = Field(min_length=1)
-    priority: int = Field(default=1, ge=1)
-    is_enabled: bool = True
-    from_addresses: list[EmailStr] = Field(default_factory=list)
-    contains_subject_strings: list[str] = Field(default_factory=list)
-    has_attachments: bool | None = None
-    move_to_folder: str | None = None
-    mark_as_read: bool | None = None
-    assign_categories: list[str] = Field(default_factory=list)
-    delete: bool = False
-    stop_processing_rules: bool = True
+class BulkCategorizeEmailsRequest(ExchangeModel):
+    ids: list[str] = Field(min_length=1, max_length=500)
+    categories: list[str] = Field(default_factory=list)
+    mode: Literal["set", "add", "remove"] = "set"
 
     @model_validator(mode="after")
-    def validate_has_action(self) -> "UpdateRuleRequest":
-        _validate_rule_has_action(self)
-        return self
-
-
-class DeleteRuleRequest(ExchangeModel):
-    id: str = Field(min_length=1)
-
-
-OofState = Literal["disabled", "enabled", "scheduled"]
-OofExternalAudience = Literal["none", "known", "all"]
-
-
-class OofSettingsModel(ExchangeModel):
-    state: OofState
-    external_audience: OofExternalAudience = "all"
-    start: datetime | None = None
-    end: datetime | None = None
-    internal_reply: str | None = None
-    external_reply: str | None = None
-
-
-class SetOofSettingsRequest(ExchangeModel):
-    state: OofState
-    external_audience: OofExternalAudience = "all"
-    start: datetime | None = None
-    end: datetime | None = None
-    internal_reply: str | None = None
-    external_reply: str | None = None
-
-    @model_validator(mode="after")
-    def validate_state(self) -> "SetOofSettingsRequest":
-        # Mirrors the validation exchangelib's OofSettings.clean() applies
-        # server-side, surfaced here instead of as an opaque Exchange error.
-        if self.state == "scheduled":
-            if self.start is None or self.end is None:
-                raise ValueError("start and end are required when state='scheduled'")
-            if self.end <= self.start:
-                raise ValueError("end must be greater than start")
-        if self.state != "disabled" and (not self.internal_reply or not self.external_reply):
-            raise ValueError(
-                "internal_reply and external_reply are required unless state='disabled'"
-            )
+    def validate_categories(self) -> "BulkCategorizeEmailsRequest":
+        if self.mode in {"add", "remove"} and not self.categories:
+            raise ValueError(f"categories must not be empty when mode is '{self.mode}'")
+        if any(not name.strip() for name in self.categories):
+            raise ValueError("category names must not be blank")
         return self
 
 

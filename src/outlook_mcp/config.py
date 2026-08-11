@@ -59,6 +59,11 @@ class Settings(BaseSettings):
         default=200_000, alias="EXCHANGE_EMAIL_BODY_MAX_CHARS", ge=1_000, le=5_000_000
     )
 
+    #: Appended to outgoing bodies (send/draft in html mode, or replies/forwards).
+    #: There is no EWS API for server-side signatures, so this is configuration.
+    signature_html: str | None = Field(default=None, alias="EXCHANGE_SIGNATURE_HTML")
+    signature_text: str | None = Field(default=None, alias="EXCHANGE_SIGNATURE_TEXT")
+
     mcp_transport: Literal["stdio", "sse"] = Field(default="stdio", alias="MCP_TRANSPORT")
     mcp_sse_host: str = Field(default="127.0.0.1", alias="MCP_SSE_HOST")
     mcp_sse_port: int = Field(default=8080, alias="MCP_SSE_PORT", ge=1, le=65535)

@@ -21,9 +21,11 @@ Secure MCP server for on-prem Microsoft Exchange (EWS) with tools for email, cal
 
 ## Highlights
 
-- email operations: list, search, read, send, reply, forward, move, copy, delete, mark, bulk actions, raw MIME export
-- Inbox Rules and Out-of-Office (automatic replies) management
-- calendar operations: list, create, update, delete, respond to invites, find free slots, view a shared/delegate mailbox's calendar, Room Finder
+- email operations: list, search (substring or AQS), read, send, reply, forward, move,
+  copy, delete, mark, categorize, bulk actions, raw MIME export, attachment add/delete
+- Inbox Rules, Out-of-Office (automatic replies), and read-only delegate listing
+- calendar operations: list, create, update, delete, respond to invites, find free
+  slots, view a shared/delegate mailbox's calendar, Room Finder, bulk actions
 - contacts operations: search, read, create, update, delete
 - folder operations and attachment download
 - Exchange auth via `NTLM` and `Basic`
@@ -37,11 +39,14 @@ Secure MCP server for on-prem Microsoft Exchange (EWS) with tools for email, cal
 ### System
 - `ping_exchange`
 - `get_mailbox_info`
+- `get_out_of_office` / `set_out_of_office`
+- `list_delegates` (read-only)
+- `list_inbox_rules` / `create_inbox_rule` / `update_inbox_rule` / `delete_inbox_rule` — **managing rules over EWS can wipe client-side rules created in desktop Outlook** (documented EWS behaviour; see tool descriptions)
 
 ### Email
 - `list_emails`
 - `get_email`
-- `get_email_mime`
+- `get_email_mime` — raw RFC 822 message content, base64-encoded
 - `get_thread`
 - `search_emails`
 - `send_email`
@@ -50,42 +55,33 @@ Secure MCP server for on-prem Microsoft Exchange (EWS) with tools for email, cal
 - `move_email`
 - `copy_email`
 - `delete_email`
+- `move_emails` / `copy_emails` / `delete_emails` — bulk variants with per-item results
 - `mark_email`
 - `categorize_email`
+- `mark_emails` / `categorize_emails` — bulk variants with per-item results
 - `list_categories`
-- `bulk_move_emails`
-- `bulk_delete_emails`
-- `bulk_mark_emails`
-- `bulk_categorize_emails`
 - `list_folders`
 - `create_folder`
 - `rename_folder`
 - `delete_folder`
 - `create_draft`
-- `update_draft`
+- `update_draft` — partial update; `attachments`, if given, replaces the whole set
 - `send_draft`
 - `get_attachment`
-- `list_rules`
-- `create_rule`
-- `update_rule`
-- `delete_rule`
-- `get_oof_settings`
-- `set_oof_settings`
+- `add_attachment` / `delete_attachment`
 
 ### Calendar
-- `list_events`
-- `get_event`
+- `list_events` / `get_event` / `get_my_availability` — pass `mailbox` to view a
+  colleague's default calendar instead of your own (requires delegate/impersonation
+  access already granted on the server; not combinable with `calendar_id`)
 - `create_event`
 - `update_event`
 - `delete_event`
 - `respond_to_invite`
+- `delete_events` / `respond_to_invites` — bulk variants with per-item results
 - `find_free_slots`
-- `get_my_availability`
 - `list_calendars`
-- `list_room_lists`
-- `list_rooms`
-- `bulk_delete_events`
-- `bulk_respond_to_invites`
+- `list_room_lists` / `list_rooms` — Room Finder
 
 ### Contacts
 - `search_contacts`
@@ -157,6 +153,8 @@ EXCHANGE_ATTACHMENT_MAX_COUNT=10
 EXCHANGE_ATTACHMENT_MAX_TOTAL_SIZE_MB=25
 EXCHANGE_ATTACHMENT_ROOT=
 EXCHANGE_EMAIL_BODY_MAX_CHARS=200000
+EXCHANGE_SIGNATURE_TEXT=
+EXCHANGE_SIGNATURE_HTML=
 MCP_TRANSPORT=stdio
 MCP_SSE_HOST=127.0.0.1
 MCP_SSE_PORT=8080
@@ -169,6 +167,7 @@ LOG_FILE=
 Notes:
 - `MCP_MAX_CONCURRENCY` is how many tool calls execute at once; more calls than this queue to wait their turn, up to `MCP_MAX_QUEUE_SIZE`. See [Request queue](#request-queue).
 - `MCP_MAX_QUEUE_SIZE` caps how many tool calls can be admitted at once (running + waiting); once full, further calls are rejected immediately with a `server_busy` error
+- `EXCHANGE_SIGNATURE_TEXT`/`EXCHANGE_SIGNATURE_HTML` are appended to outgoing bodies (text signature for text bodies and replies/forwards, html for html bodies; no cross-conversion). Per-call opt-out via `include_signature: false`. EWS has no server-side signature API, so this is configuration, not the mailbox's Outlook signature.
 - set `EXCHANGE_EMAIL_ADDRESS` when `EXCHANGE_USERNAME` is not an SMTP address
 - `EXCHANGE_ALLOW_INSECURE_BASIC_AUTH` only matters with `EXCHANGE_AUTH_TYPE=Basic` and an `http://` `EXCHANGE_SERVER`; startup fails otherwise unless it's set `true`
 - `EXCHANGE_IMPERSONATE_AS` enables mailbox impersonation when Exchange permissions are configured accordingly

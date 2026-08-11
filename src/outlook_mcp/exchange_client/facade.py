@@ -8,6 +8,7 @@ from ..config import Settings
 from ..errors import APIError
 from ..models import (
     ActionResult,
+    AddAttachmentRequest,
     AttachmentResult,
     AvailabilityResult,
     BulkCategorizeEmailsRequest,
@@ -16,6 +17,7 @@ from ..models import (
     BulkMarkEmailsRequest,
     BulkMoveEmailsRequest,
     BulkRespondToInvitesRequest,
+    BulkResult,
     CalendarInfo,
     CalendarEvent,
     ContactFull,
@@ -26,12 +28,14 @@ from ..models import (
     CreateEventResult,
     CreateContactRequest,
     CreateFolderRequest,
-    CreateRuleRequest,
+    CreateInboxRuleRequest,
+    DelegateInfo,
+    DeleteAttachmentRequest,
     DeleteContactRequest,
     DeleteEmailRequest,
     DeleteEventRequest,
     DeleteFolderRequest,
-    DeleteRuleRequest,
+    DeleteInboxRuleRequest,
     DraftEmailRequest,
     EmailFull,
     EmailMimeResult,
@@ -47,15 +51,15 @@ from ..models import (
     GetEmailRequest,
     GetEventRequest,
     GetThreadRequest,
+    InboxRule,
     ListCategoriesRequest,
     ListEmailsRequest,
     ListEventsRequest,
     ListFoldersRequest,
     ListRoomsRequest,
     MailboxInfo,
-    MailRule,
     MarkEmailRequest,
-    OofSettingsModel,
+    OutOfOfficeSettings,
     PingResult,
     RenameFolderRequest,
     ReplyEmailRequest,
@@ -67,12 +71,11 @@ from ..models import (
     SendDraftRequest,
     SendEmailRequest,
     SendResult,
-    SetOofSettingsRequest,
     Thread,
     UpdateContactRequest,
     UpdateDraftRequest,
     UpdateEventRequest,
-    UpdateRuleRequest,
+    UpdateInboxRuleRequest,
 )
 from .protocol import ExchangeBackend
 from .unconfigured import UnconfiguredExchangeBackend
@@ -123,6 +126,28 @@ class ExchangeClient:
     def get_mailbox_info(self) -> MailboxInfo:
         return self._retry_read(self.backend.get_mailbox_info)
 
+    def list_delegates(self) -> list[DelegateInfo]:
+        return self._retry_read(self.backend.list_delegates)
+
+    def list_inbox_rules(self) -> list[InboxRule]:
+        return self._retry_read(self.backend.list_inbox_rules)
+
+    def create_inbox_rule(self, request: CreateInboxRuleRequest) -> InboxRule:
+        return self.backend.create_inbox_rule(request)
+
+    def update_inbox_rule(self, request: UpdateInboxRuleRequest) -> InboxRule:
+        return self.backend.update_inbox_rule(request)
+
+    def delete_inbox_rule(self, request: DeleteInboxRuleRequest) -> ActionResult:
+        return self.backend.delete_inbox_rule(request)
+
+    def get_out_of_office(self) -> OutOfOfficeSettings:
+        return self._retry_read(self.backend.get_out_of_office)
+
+    def set_out_of_office(self, request: OutOfOfficeSettings) -> OutOfOfficeSettings:
+        # A write: never retried, same as every other mutation here.
+        return self.backend.set_out_of_office(request)
+
     def list_emails(self, request: ListEmailsRequest) -> list[EmailSummary]:
         return self._retry_read(lambda: self.backend.list_emails(request))
 
@@ -156,20 +181,23 @@ class ExchangeClient:
     def mark_email(self, request: MarkEmailRequest) -> ActionResult:
         return self.backend.mark_email(request)
 
+    def move_emails(self, request: BulkMoveEmailsRequest) -> BulkResult:
+        return self.backend.move_emails(request)
+
+    def copy_emails(self, request: BulkMoveEmailsRequest) -> BulkResult:
+        return self.backend.copy_emails(request)
+
+    def delete_emails(self, request: BulkDeleteEmailsRequest) -> BulkResult:
+        return self.backend.delete_emails(request)
+
+    def mark_emails(self, request: BulkMarkEmailsRequest) -> BulkResult:
+        return self.backend.mark_emails(request)
+
+    def categorize_emails(self, request: BulkCategorizeEmailsRequest) -> BulkResult:
+        return self.backend.categorize_emails(request)
+
     def categorize_email(self, request: CategorizeEmailRequest) -> ActionResult:
         return self.backend.categorize_email(request)
-
-    def bulk_move_emails(self, request: BulkMoveEmailsRequest) -> list[ActionResult]:
-        return self.backend.bulk_move_emails(request)
-
-    def bulk_delete_emails(self, request: BulkDeleteEmailsRequest) -> list[ActionResult]:
-        return self.backend.bulk_delete_emails(request)
-
-    def bulk_mark_emails(self, request: BulkMarkEmailsRequest) -> list[ActionResult]:
-        return self.backend.bulk_mark_emails(request)
-
-    def bulk_categorize_emails(self, request: BulkCategorizeEmailsRequest) -> list[ActionResult]:
-        return self.backend.bulk_categorize_emails(request)
 
     def list_categories(self, request: ListCategoriesRequest) -> list[CategoryUsage]:
         return self._retry_read(lambda: self.backend.list_categories(request))
@@ -195,6 +223,12 @@ class ExchangeClient:
     def send_draft(self, request: SendDraftRequest) -> SendResult:
         return self.backend.send_draft(request)
 
+    def add_attachment(self, request: AddAttachmentRequest) -> ActionResult:
+        return self.backend.add_attachment(request)
+
+    def delete_attachment(self, request: DeleteAttachmentRequest) -> ActionResult:
+        return self.backend.delete_attachment(request)
+
     def get_attachment(self, request: GetAttachmentRequest) -> AttachmentResult:
         # Not retried despite being read-only: it writes the downloaded content to
         # local disk, so a retried call after a partial download risks leaving an
@@ -203,25 +237,7 @@ class ExchangeClient:
         return self.backend.get_attachment(request)
 
     def get_email_mime(self, request: GetEmailMimeRequest) -> EmailMimeResult:
-        return self.backend.get_email_mime(request)
-
-    def list_rules(self) -> list[MailRule]:
-        return self.backend.list_rules()
-
-    def create_rule(self, request: CreateRuleRequest) -> ActionResult:
-        return self.backend.create_rule(request)
-
-    def update_rule(self, request: UpdateRuleRequest) -> ActionResult:
-        return self.backend.update_rule(request)
-
-    def delete_rule(self, request: DeleteRuleRequest) -> ActionResult:
-        return self.backend.delete_rule(request)
-
-    def get_oof_settings(self) -> OofSettingsModel:
-        return self.backend.get_oof_settings()
-
-    def set_oof_settings(self, request: SetOofSettingsRequest) -> ActionResult:
-        return self.backend.set_oof_settings(request)
+        return self._retry_read(lambda: self.backend.get_email_mime(request))
 
     def list_events(self, request: ListEventsRequest) -> list[CalendarEvent]:
         return self._retry_read(lambda: self.backend.list_events(request))
@@ -244,11 +260,11 @@ class ExchangeClient:
     def find_free_slots(self, request: FindFreeSlotsRequest) -> list[FreeSlot]:
         return self._retry_read(lambda: self.backend.find_free_slots(request))
 
-    def bulk_delete_events(self, request: BulkDeleteEventsRequest) -> list[ActionResult]:
-        return self.backend.bulk_delete_events(request)
+    def delete_events(self, request: BulkDeleteEventsRequest) -> BulkResult:
+        return self.backend.delete_events(request)
 
-    def bulk_respond_to_invites(self, request: BulkRespondToInvitesRequest) -> list[ActionResult]:
-        return self.backend.bulk_respond_to_invites(request)
+    def respond_to_invites(self, request: BulkRespondToInvitesRequest) -> BulkResult:
+        return self.backend.respond_to_invites(request)
 
     def get_my_availability(self, request: ListEventsRequest) -> AvailabilityResult:
         return self._retry_read(lambda: self.backend.get_my_availability(request))
@@ -257,10 +273,10 @@ class ExchangeClient:
         return self._retry_read(self.backend.list_calendars)
 
     def list_room_lists(self) -> list[RoomListInfo]:
-        return self.backend.list_room_lists()
+        return self._retry_read(self.backend.list_room_lists)
 
     def list_rooms(self, request: ListRoomsRequest) -> list[RoomInfo]:
-        return self.backend.list_rooms(request)
+        return self._retry_read(lambda: self.backend.list_rooms(request))
 
     def search_contacts(self, request: SearchContactsRequest) -> list[ContactSummary]:
         return self._retry_read(lambda: self.backend.search_contacts(request))

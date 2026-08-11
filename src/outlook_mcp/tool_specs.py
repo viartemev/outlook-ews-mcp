@@ -3,10 +3,9 @@ from __future__ import annotations
 from . import models
 from .mcp_tools import ToolSpec
 from .tools.calendar import (
-    bulk_delete_events,
-    bulk_respond_to_invites,
     create_event,
     delete_event,
+    delete_events,
     find_free_slots,
     get_event,
     get_my_availability,
@@ -15,6 +14,7 @@ from .tools.calendar import (
     list_room_lists,
     list_rooms,
     respond_to_invite,
+    respond_to_invites,
     update_event,
 )
 from .tools.contacts import (
@@ -25,40 +25,47 @@ from .tools.contacts import (
     update_contact,
 )
 from .tools.email import (
-    bulk_categorize_emails,
-    bulk_delete_emails,
-    bulk_mark_emails,
-    bulk_move_emails,
     categorize_email,
+    categorize_emails,
     copy_email,
     create_draft,
     create_folder,
-    create_rule,
     delete_email,
+    delete_emails,
     delete_folder,
-    delete_rule,
+    delete_attachment,
     forward_email,
     get_attachment,
     get_email,
     get_email_mime,
-    get_oof_settings,
     get_thread,
+    add_attachment,
     list_categories,
     list_emails,
     list_folders,
-    list_rules,
     mark_email,
+    mark_emails,
     move_email,
+    move_emails,
+    copy_emails,
     rename_folder,
     reply_email,
     search_emails,
     send_draft,
     send_email,
-    set_oof_settings,
     update_draft,
-    update_rule,
 )
-from .tools.system import get_mailbox_info, ping_exchange
+from .tools.system import (
+    create_inbox_rule,
+    delete_inbox_rule,
+    get_mailbox_info,
+    get_out_of_office,
+    list_delegates,
+    list_inbox_rules,
+    ping_exchange,
+    update_inbox_rule,
+    set_out_of_office,
+)
 
 #: The single source of truth for every Outlook MCP tool: name, description,
 #: handler, request/response schema, and MCP annotations all live together so
@@ -77,6 +84,64 @@ TOOL_SPECS: list[ToolSpec] = [
         get_mailbox_info,
         response_model=models.MailboxInfo,
         read_only=True,
+    ),
+    ToolSpec(
+        "list_delegates",
+        "List mailbox delegates and their folder permission levels. Read-only: "
+        "managing delegates is not supported by exchangelib.",
+        list_delegates,
+        response_model=list[models.DelegateInfo],
+        read_only=True,
+    ),
+    ToolSpec(
+        "list_inbox_rules",
+        "List server-side inbox rules (the curated subset of conditions and "
+        "actions this API models)",
+        list_inbox_rules,
+        response_model=list[models.InboxRule],
+        read_only=True,
+    ),
+    ToolSpec(
+        "create_inbox_rule",
+        "Create a server-side inbox rule, e.g. 'from this sender -> move to "
+        "folder'. WARNING: managing rules over EWS removes the client-side rule blob desktop Outlook keeps, which can wipe rules created in Outlook itself.",
+        create_inbox_rule,
+        request_model=models.CreateInboxRuleRequest,
+        response_model=models.InboxRule,
+        destructive=True,
+    ),
+    ToolSpec(
+        "update_inbox_rule",
+        "Enable/disable an inbox rule or change its priority. Other fields are "
+        "deliberately not updatable here. WARNING: managing rules over EWS removes the client-side rule blob desktop Outlook keeps, which can wipe rules created in Outlook itself.",
+        update_inbox_rule,
+        request_model=models.UpdateInboxRuleRequest,
+        response_model=models.InboxRule,
+        destructive=True,
+    ),
+    ToolSpec(
+        "delete_inbox_rule",
+        "Delete a server-side inbox rule by id. WARNING: managing rules over EWS removes the client-side rule blob desktop Outlook keeps, which can wipe rules created in Outlook itself.",
+        delete_inbox_rule,
+        request_model=models.DeleteInboxRuleRequest,
+        response_model=models.ActionResult,
+        destructive=True,
+    ),
+    ToolSpec(
+        "get_out_of_office",
+        "Get the mailbox out-of-office (automatic reply) settings",
+        get_out_of_office,
+        response_model=models.OutOfOfficeSettings,
+        read_only=True,
+    ),
+    ToolSpec(
+        "set_out_of_office",
+        "Set the mailbox out-of-office (automatic reply): disabled, enabled, or "
+        "scheduled with a start/end window",
+        set_out_of_office,
+        request_model=models.OutOfOfficeSettings,
+        response_model=models.OutOfOfficeSettings,
+        destructive=True,
     ),
     ToolSpec(
         "list_emails",
@@ -114,7 +179,9 @@ TOOL_SPECS: list[ToolSpec] = [
     ),
     ToolSpec(
         "search_emails",
-        "Search emails",
+        "Search emails. Pass `query` for a substring match over subject/body/sender, "
+        "or `aqs` for server-side Advanced Query Syntax "
+        "(e.g. 'from:ivan AND hasattachments:true').",
         search_emails,
         request_model=models.SearchEmailsRequest,
         response_model=list[models.EmailSummary],
@@ -160,6 +227,31 @@ TOOL_SPECS: list[ToolSpec] = [
         response_model=models.ActionResult,
     ),
     ToolSpec(
+        "move_emails",
+        "Move many emails to another folder in one call. Per-item results: one "
+        "bad id does not fail the rest. Moved items get new ids.",
+        move_emails,
+        request_model=models.BulkMoveEmailsRequest,
+        response_model=models.BulkResult,
+        destructive=True,
+    ),
+    ToolSpec(
+        "copy_emails",
+        "Copy many emails to another folder in one call, with per-item results.",
+        copy_emails,
+        request_model=models.BulkMoveEmailsRequest,
+        response_model=models.BulkResult,
+    ),
+    ToolSpec(
+        "delete_emails",
+        "Delete many emails in one call, with per-item results. Soft-deletes to "
+        "Deleted Items unless hard_delete is set.",
+        delete_emails,
+        request_model=models.BulkDeleteEmailsRequest,
+        response_model=models.BulkResult,
+        destructive=True,
+    ),
+    ToolSpec(
         "delete_email",
         "Delete an email",
         delete_email,
@@ -185,90 +277,21 @@ TOOL_SPECS: list[ToolSpec] = [
         destructive=True,
     ),
     ToolSpec(
-        "bulk_move_emails",
-        "Move multiple emails to another folder in one call. A failure on one id is "
-        "reported in that id's own result instead of aborting the rest",
-        bulk_move_emails,
-        request_model=models.BulkMoveEmailsRequest,
-        response_model=list[models.ActionResult],
-        destructive=True,
-    ),
-    ToolSpec(
-        "bulk_delete_emails",
-        "Delete multiple emails in one call. A failure on one id is reported in "
-        "that id's own result instead of aborting the rest",
-        bulk_delete_emails,
-        request_model=models.BulkDeleteEmailsRequest,
-        response_model=list[models.ActionResult],
-        destructive=True,
-    ),
-    ToolSpec(
-        "bulk_mark_emails",
+        "mark_emails",
         "Update read state, importance, or the follow-up flag on multiple emails in "
-        "one call. A failure on one id is reported in that id's own result instead "
-        "of aborting the rest",
-        bulk_mark_emails,
+        "one call, with per-item results.",
+        mark_emails,
         request_model=models.BulkMarkEmailsRequest,
-        response_model=list[models.ActionResult],
+        response_model=models.BulkResult,
         destructive=True,
     ),
     ToolSpec(
-        "bulk_categorize_emails",
-        "Set, add, or remove Outlook categories on multiple emails in one call. A "
-        "failure on one id is reported in that id's own result instead of aborting "
-        "the rest",
-        bulk_categorize_emails,
+        "categorize_emails",
+        "Set, add, or remove Outlook categories on multiple emails in one call, "
+        "with per-item results.",
+        categorize_emails,
         request_model=models.BulkCategorizeEmailsRequest,
-        response_model=list[models.ActionResult],
-        destructive=True,
-    ),
-    ToolSpec(
-        "list_rules",
-        "List Inbox rules",
-        list_rules,
-        response_model=list[models.MailRule],
-        read_only=True,
-    ),
-    ToolSpec(
-        "create_rule",
-        "Create an Inbox rule. At least one action (move_to_folder, mark_as_read, "
-        "assign_categories, delete) must be set",
-        create_rule,
-        request_model=models.CreateRuleRequest,
-        response_model=models.ActionResult,
-    ),
-    ToolSpec(
-        "update_rule",
-        "Replace an existing Inbox rule. This is a full replace, not a partial "
-        "patch -- every field must reflect the rule's desired end state",
-        update_rule,
-        request_model=models.UpdateRuleRequest,
-        response_model=models.ActionResult,
-        destructive=True,
-    ),
-    ToolSpec(
-        "delete_rule",
-        "Delete an Inbox rule",
-        delete_rule,
-        request_model=models.DeleteRuleRequest,
-        response_model=models.ActionResult,
-        destructive=True,
-    ),
-    ToolSpec(
-        "get_oof_settings",
-        "Get the automatic-reply (Out-of-Office) settings",
-        get_oof_settings,
-        response_model=models.OofSettingsModel,
-        read_only=True,
-    ),
-    ToolSpec(
-        "set_oof_settings",
-        "Set the automatic-reply (Out-of-Office) settings. internal_reply and "
-        "external_reply are required unless state='disabled'; start and end are "
-        "required when state='scheduled'",
-        set_oof_settings,
-        request_model=models.SetOofSettingsRequest,
-        response_model=models.ActionResult,
+        response_model=models.BulkResult,
         destructive=True,
     ),
     ToolSpec(
@@ -339,6 +362,23 @@ TOOL_SPECS: list[ToolSpec] = [
         destructive=True,
     ),
     ToolSpec(
+        "add_attachment",
+        "Attach a local file to an existing message, typically a draft. The file "
+        "must live under EXCHANGE_ATTACHMENT_ROOT.",
+        add_attachment,
+        request_model=models.AddAttachmentRequest,
+        response_model=models.ActionResult,
+        destructive=True,
+    ),
+    ToolSpec(
+        "delete_attachment",
+        "Remove one attachment from a message by attachment id",
+        delete_attachment,
+        request_model=models.DeleteAttachmentRequest,
+        response_model=models.ActionResult,
+        destructive=True,
+    ),
+    ToolSpec(
         "get_attachment",
         "Save an attachment to disk",
         get_attachment,
@@ -405,21 +445,19 @@ TOOL_SPECS: list[ToolSpec] = [
         read_only=True,
     ),
     ToolSpec(
-        "bulk_delete_events",
-        "Delete multiple calendar events in one call. A failure on one id is "
-        "reported in that id's own result instead of aborting the rest",
-        bulk_delete_events,
+        "delete_events",
+        "Delete multiple calendar events in one call, with per-item results",
+        delete_events,
         request_model=models.BulkDeleteEventsRequest,
-        response_model=list[models.ActionResult],
+        response_model=models.BulkResult,
         destructive=True,
     ),
     ToolSpec(
-        "bulk_respond_to_invites",
-        "Respond to multiple calendar invites in one call. A failure on one id is "
-        "reported in that id's own result instead of aborting the rest",
-        bulk_respond_to_invites,
+        "respond_to_invites",
+        "Respond to multiple calendar invites in one call, with per-item results",
+        respond_to_invites,
         request_model=models.BulkRespondToInvitesRequest,
-        response_model=list[models.ActionResult],
+        response_model=models.BulkResult,
         destructive=True,
     ),
     ToolSpec(

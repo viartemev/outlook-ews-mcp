@@ -9,14 +9,18 @@ from outlook_mcp.config import Settings
 from outlook_mcp.exchange_client import ExchangeClient
 from outlook_mcp.models import (
     ActionResult,
+    AddAttachmentRequest,
     AttachmentResult,
-    AvailabilityResult,
     BulkCategorizeEmailsRequest,
-    BulkDeleteEmailsRequest,
     BulkDeleteEventsRequest,
     BulkMarkEmailsRequest,
-    BulkMoveEmailsRequest,
     BulkRespondToInvitesRequest,
+    DeleteAttachmentRequest,
+    BulkDeleteEmailsRequest,
+    BulkItemResult,
+    BulkMoveEmailsRequest,
+    BulkResult,
+    AvailabilityResult,
     CalendarInfo,
     CalendarEvent,
     ContactFull,
@@ -26,12 +30,13 @@ from outlook_mcp.models import (
     CategoryUsage,
     CreateEventRequest,
     CreateEventResult,
-    CreateRuleRequest,
+    CreateInboxRuleRequest,
+    DelegateInfo,
     DeleteContactRequest,
     DeleteEmailRequest,
     DeleteEventRequest,
     DeleteFolderRequest,
-    DeleteRuleRequest,
+    DeleteInboxRuleRequest,
     DraftEmailRequest,
     EmailAddress,
     EmailFull,
@@ -48,15 +53,15 @@ from outlook_mcp.models import (
     GetEmailRequest,
     GetEventRequest,
     GetThreadRequest,
+    InboxRule,
     ListCategoriesRequest,
     ListEmailsRequest,
     ListEventsRequest,
     ListFoldersRequest,
     ListRoomsRequest,
     MailboxInfo,
-    MailRule,
     MarkEmailRequest,
-    OofSettingsModel,
+    OutOfOfficeSettings,
     PingResult,
     RenameFolderRequest,
     ReplyEmailRequest,
@@ -68,12 +73,11 @@ from outlook_mcp.models import (
     SendDraftRequest,
     SendEmailRequest,
     SendResult,
-    SetOofSettingsRequest,
     Thread,
     UpdateContactRequest,
     UpdateDraftRequest,
     UpdateEventRequest,
-    UpdateRuleRequest,
+    UpdateInboxRuleRequest,
 )
 
 
@@ -95,6 +99,39 @@ class FakeExchangeBackend:
             quota_mb=1024,
             exchange_version="2019",
         )
+
+    def list_delegates(self) -> list[DelegateInfo]:
+        return [DelegateInfo(email="assistant@example.com", display_name="Assistant")]
+
+    def list_inbox_rules(self) -> list[InboxRule]:
+        return [InboxRule(id="rule-1", display_name="From boss", priority=1, is_enabled=True)]
+
+    def create_inbox_rule(self, request: CreateInboxRuleRequest) -> InboxRule:
+        return InboxRule(
+            id="rule-new",
+            display_name=request.display_name,
+            priority=request.priority,
+            is_enabled=request.is_enabled,
+            conditions=request.conditions,
+            actions=request.actions,
+        )
+
+    def update_inbox_rule(self, request: UpdateInboxRuleRequest) -> InboxRule:
+        return InboxRule(
+            id=request.id,
+            display_name="From boss",
+            priority=request.priority or 1,
+            is_enabled=request.is_enabled if request.is_enabled is not None else True,
+        )
+
+    def delete_inbox_rule(self, request: DeleteInboxRuleRequest) -> ActionResult:
+        return ActionResult(id=request.id, status="deleted")
+
+    def get_out_of_office(self) -> OutOfOfficeSettings:
+        return OutOfOfficeSettings(state="disabled")
+
+    def set_out_of_office(self, request: OutOfOfficeSettings) -> OutOfOfficeSettings:
+        return request
 
     def list_emails(self, request: ListEmailsRequest) -> list[EmailSummary]:
         return [
@@ -155,7 +192,9 @@ class FakeExchangeBackend:
         )
 
     def search_emails(self, request: SearchEmailsRequest) -> list[EmailSummary]:
-        return self.list_emails(ListEmailsRequest(subject=request.query, limit=request.limit))
+        return self.list_emails(
+            ListEmailsRequest(subject=request.query or request.aqs, limit=request.limit)
+        )
 
     def send_email(self, request: SendEmailRequest) -> SendResult:
         return SendResult(id="sent-1", status="sent")
@@ -186,6 +225,29 @@ class FakeExchangeBackend:
         ]
         return ActionResult(id=request.id, status="updated", updated_fields=updated_fields)
 
+    def move_emails(self, request: BulkMoveEmailsRequest) -> BulkResult:
+        return BulkResult(
+            succeeded=[
+                BulkItemResult(id=item_id, new_id=f"{item_id}-moved") for item_id in request.ids
+            ]
+        )
+
+    def copy_emails(self, request: BulkMoveEmailsRequest) -> BulkResult:
+        return BulkResult(
+            succeeded=[
+                BulkItemResult(id=item_id, new_id=f"{item_id}-copy") for item_id in request.ids
+            ]
+        )
+
+    def delete_emails(self, request: BulkDeleteEmailsRequest) -> BulkResult:
+        return BulkResult(succeeded=[BulkItemResult(id=item_id) for item_id in request.ids])
+
+    def mark_emails(self, request: BulkMarkEmailsRequest) -> BulkResult:
+        return BulkResult(succeeded=[BulkItemResult(id=item_id) for item_id in request.ids])
+
+    def categorize_emails(self, request: BulkCategorizeEmailsRequest) -> BulkResult:
+        return BulkResult(succeeded=[BulkItemResult(id=item_id) for item_id in request.ids])
+
     def categorize_email(self, request: CategorizeEmailRequest) -> ActionResult:
         existing = ["Existing"]
         if request.mode == "set":
@@ -200,67 +262,6 @@ class FakeExchangeBackend:
             updated_fields=["categories"],
             categories=categories,
         )
-
-    def bulk_move_emails(self, request: BulkMoveEmailsRequest) -> list[ActionResult]:
-        return [
-            self.move_email(FolderActionRequest(id=item_id, folder=request.folder))
-            for item_id in request.ids
-        ]
-
-    def bulk_delete_emails(self, request: BulkDeleteEmailsRequest) -> list[ActionResult]:
-        return [
-            self.delete_email(DeleteEmailRequest(id=item_id, hard_delete=request.hard_delete))
-            for item_id in request.ids
-        ]
-
-    def bulk_mark_emails(self, request: BulkMarkEmailsRequest) -> list[ActionResult]:
-        return [
-            self.mark_email(
-                MarkEmailRequest(
-                    id=item_id,
-                    read=request.read,
-                    flag=request.flag,
-                    importance=request.importance,
-                    flag_start_date=request.flag_start_date,
-                    flag_due_date=request.flag_due_date,
-                )
-            )
-            for item_id in request.ids
-        ]
-
-    def bulk_categorize_emails(self, request: BulkCategorizeEmailsRequest) -> list[ActionResult]:
-        return [
-            self.categorize_email(
-                CategorizeEmailRequest(id=item_id, categories=request.categories, mode=request.mode)
-            )
-            for item_id in request.ids
-        ]
-
-    def list_rules(self) -> list[MailRule]:
-        return [
-            MailRule(
-                id="rule-1",
-                display_name="Move newsletters",
-                priority=1,
-                from_addresses=["news@example.com"],
-                move_to_folder="folder-newsletters",
-            )
-        ]
-
-    def create_rule(self, request: CreateRuleRequest) -> ActionResult:
-        return ActionResult(id="rule-new", status="created")
-
-    def update_rule(self, request: UpdateRuleRequest) -> ActionResult:
-        return ActionResult(id=request.id, status="updated")
-
-    def delete_rule(self, request: DeleteRuleRequest) -> ActionResult:
-        return ActionResult(id=request.id, status="deleted")
-
-    def get_oof_settings(self) -> OofSettingsModel:
-        return OofSettingsModel(state="disabled", external_audience="all")
-
-    def set_oof_settings(self, request: SetOofSettingsRequest) -> ActionResult:
-        return ActionResult(id="oof", status="updated")
 
     def list_categories(self, request: ListCategoriesRequest) -> list[CategoryUsage]:
         return [
@@ -305,6 +306,12 @@ class FakeExchangeBackend:
 
     def send_draft(self, request: SendDraftRequest) -> SendResult:
         return SendResult(id=request.id, status="sent")
+
+    def add_attachment(self, request: AddAttachmentRequest) -> ActionResult:
+        return ActionResult(id=request.email_id, status="updated", updated_fields=["attachments"])
+
+    def delete_attachment(self, request: DeleteAttachmentRequest) -> ActionResult:
+        return ActionResult(id=request.email_id, status="updated", updated_fields=["attachments"])
 
     def get_attachment(self, request: GetAttachmentRequest) -> AttachmentResult:
         target = request.save_path or Path("/tmp/test.txt")
@@ -361,31 +368,11 @@ class FakeExchangeBackend:
     def respond_to_invite(self, request: RespondToInviteRequest) -> ActionResult:
         return ActionResult(id=request.id, status=request.response)
 
-    def bulk_delete_events(self, request: BulkDeleteEventsRequest) -> list[ActionResult]:
-        return [
-            self.delete_event(
-                DeleteEventRequest(
-                    id=item_id,
-                    calendar_id=request.calendar_id,
-                    notify_attendees=request.notify_attendees,
-                    cancel_message=request.cancel_message,
-                )
-            )
-            for item_id in request.ids
-        ]
+    def delete_events(self, request: BulkDeleteEventsRequest) -> BulkResult:
+        return BulkResult(succeeded=[BulkItemResult(id=item_id) for item_id in request.ids])
 
-    def bulk_respond_to_invites(self, request: BulkRespondToInvitesRequest) -> list[ActionResult]:
-        return [
-            self.respond_to_invite(
-                RespondToInviteRequest(
-                    id=item_id,
-                    calendar_id=request.calendar_id,
-                    response=request.response,
-                    message=request.message,
-                )
-            )
-            for item_id in request.ids
-        ]
+    def respond_to_invites(self, request: BulkRespondToInvitesRequest) -> BulkResult:
+        return BulkResult(succeeded=[BulkItemResult(id=item_id) for item_id in request.ids])
 
     def find_free_slots(self, request: FindFreeSlotsRequest) -> list[FreeSlot]:
         return [

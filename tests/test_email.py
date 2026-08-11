@@ -5,7 +5,13 @@ from pathlib import Path
 import pytest
 
 from outlook_mcp.errors import APIError
-from outlook_mcp.tools.email import get_attachment, get_email, list_emails, send_email
+from outlook_mcp.tools.email import (
+    add_attachment,
+    get_attachment,
+    get_email,
+    list_emails,
+    send_email,
+)
 
 
 def test_list_emails(client) -> None:
@@ -52,6 +58,17 @@ def test_send_email_rejects_missing_attachment(client, tmp_path: Path) -> None:
         )
 
     assert excinfo.value.code == "validation_error"
+
+
+def test_add_attachment_rejects_paths_when_root_not_configured(client, tmp_path: Path) -> None:
+    existing = tmp_path / "ok.txt"
+    existing.write_text("hello", encoding="utf-8")
+
+    with pytest.raises(APIError) as excinfo:
+        add_attachment(client, {"email_id": "email-1", "path": str(existing)})
+
+    assert excinfo.value.code == "validation_error"
+    assert "EXCHANGE_ATTACHMENT_ROOT" in excinfo.value.details[0]["reason"]
 
 
 def test_send_email_rejects_attachments_when_root_not_configured(client, tmp_path: Path) -> None:

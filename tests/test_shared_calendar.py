@@ -57,6 +57,19 @@ def test_account_for_builds_and_caches_per_mailbox(settings, monkeypatch) -> Non
     assert first.access_type == DELEGATE
 
 
+def test_account_for_maps_exceptions_from_account_construction(settings, monkeypatch) -> None:
+    class FailingAccount:
+        def __init__(self, *args, **kwargs) -> None:
+            raise RuntimeError("boom")
+
+    monkeypatch.setattr(exchange_client_base, "Account", FailingAccount)
+    backend = EWSExchangeBackend(settings)
+    backend._account = SimpleNamespace(protocol=SimpleNamespace(config=object()))
+
+    with pytest.raises(Exception):
+        backend._account_for("colleague@example.com")
+
+
 def test_calendar_folder_uses_mailbox_account_when_given(settings, monkeypatch) -> None:
     backend = EWSExchangeBackend(settings)
     other_calendar = SimpleNamespace(folder_class="IPF.Appointment")
