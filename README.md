@@ -114,6 +114,7 @@ What the current code does:
 What you should still be careful with:
 - `EXCHANGE_VERIFY_SSL=false` disables TLS certificate verification and should be used only for trusted internal/self-signed environments
 - `EXCHANGE_AUTH_TYPE=Basic` sends credentials in the clear, so the server refuses to start against an `http://` `EXCHANGE_SERVER`; only override with `EXCHANGE_ALLOW_INSECURE_BASIC_AUTH=true` for a local/test server you control
+- `MCP_TRANSPORT=sse` exposes full mailbox access (read/send/delete) to any network client that can reach the port; the server requires `MCP_SSE_AUTH_TOKEN` and rejects requests without a matching `Authorization: Bearer <token>` header — still put TLS termination (and ideally an IP allowlist) in front of it via a reverse proxy, since this token is a static shared secret, not per-user auth
 - `get_attachment` writes files to disk, and `send_email`/`reply_email`/`forward_email`/`create_draft` read local files (via `attachments`) and attach their contents to outgoing mail — combined with untrusted email content, this is a plausible path for a prompt-injected exfiltration of any file readable by the process; local file access is **refused by default** and only works once `EXCHANGE_ATTACHMENT_ROOT` is set to an absolute directory, which then confines both `attachments` paths and `get_attachment`'s `save_path` to that directory tree (an unset `save_path` still falls back to the system temp directory)
 - `outlook-ews-mcp-smoke` is privacy-safe by default and prints only masked mailbox info plus counts; set `OUTLOOK_MCP_SMOKE_INCLUDE_DATA=true` only if you explicitly want real inbox/event data in stdout
 - if you enable file logging with `LOG_FILE`, protect that file with OS permissions
@@ -158,6 +159,7 @@ EXCHANGE_SIGNATURE_HTML=
 MCP_TRANSPORT=stdio
 MCP_SSE_HOST=127.0.0.1
 MCP_SSE_PORT=8080
+MCP_SSE_AUTH_TOKEN=
 MCP_MAX_CONCURRENCY=1
 MCP_MAX_QUEUE_SIZE=20
 LOG_LEVEL=INFO
@@ -170,6 +172,7 @@ Notes:
 - `EXCHANGE_SIGNATURE_TEXT`/`EXCHANGE_SIGNATURE_HTML` are appended to outgoing bodies (text signature for text bodies and replies/forwards, html for html bodies; no cross-conversion). Per-call opt-out via `include_signature: false`. EWS has no server-side signature API, so this is configuration, not the mailbox's Outlook signature.
 - set `EXCHANGE_EMAIL_ADDRESS` when `EXCHANGE_USERNAME` is not an SMTP address
 - `EXCHANGE_ALLOW_INSECURE_BASIC_AUTH` only matters with `EXCHANGE_AUTH_TYPE=Basic` and an `http://` `EXCHANGE_SERVER`; startup fails otherwise unless it's set `true`
+- `MCP_SSE_AUTH_TOKEN` is required when `MCP_TRANSPORT=sse` (startup fails without it); generate a random value, e.g. `openssl rand -hex 32`, and configure MCP clients to send it as `Authorization: Bearer <token>`
 - `EXCHANGE_IMPERSONATE_AS` enables mailbox impersonation when Exchange permissions are configured accordingly
 - `EXCHANGE_TIMEZONE_FALLBACK` is only used when Exchange reports a timezone as an unresolvable GUID id; normal operations (naive datetimes, all-day event math) use the mailbox's own default timezone instead
 - `EXCHANGE_ATTACHMENT_MAX_SIZE_MB` is enforced both on local files attached to outgoing email and on attachments downloaded via `get_attachment`
