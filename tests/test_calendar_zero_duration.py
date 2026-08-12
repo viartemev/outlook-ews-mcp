@@ -63,7 +63,7 @@ def test_list_events_keeps_zero_duration_event(settings, monkeypatch) -> None:
     a single such appointment used to fail every event around it.
     """
     backend = _backend_over(settings, [_item(MOMENT, MOMENT)])
-    monkeypatch.setattr(backend, "_to_ews_datetime", lambda value: value)
+    monkeypatch.setattr(backend, "_to_ews_datetime", lambda value, account=None: value)
 
     events = backend.list_events(_window())
 
@@ -79,7 +79,7 @@ def test_list_events_keeps_neighbours_of_a_broken_event(settings, monkeypatch) -
             _item(MOMENT, datetime(2026, 4, 8, 11, 0, tzinfo=UTC), "normal"),
         ],
     )
-    monkeypatch.setattr(backend, "_to_ews_datetime", lambda value: value)
+    monkeypatch.setattr(backend, "_to_ews_datetime", lambda value, account=None: value)
 
     assert [event.id for event in backend.list_events(_window())] == ["zero", "normal"]
 

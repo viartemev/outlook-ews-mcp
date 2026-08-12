@@ -12,9 +12,9 @@ from outlook_mcp.models import GetEmailMimeRequest
 
 def _backend_with_item(item: SimpleNamespace) -> EWSExchangeBackend:
     backend = EWSExchangeBackend.__new__(EWSExchangeBackend)
-    backend.settings = SimpleNamespace(exchange_timezone_fallback=None)
+    backend.settings = SimpleNamespace(exchange_timezone_fallback=None, email_mime_max_size_mb=25)
 
-    def fetch(ids, folder=None):
+    def fetch(ids, folder=None, only_fields=None):
         yield item
 
     backend._account = SimpleNamespace(fetch=fetch)
@@ -72,3 +72,31 @@ def test_get_email_mime_maps_exceptions_from_mime_content() -> None:
 
     with pytest.raises(APIError):
         backend.get_email_mime(GetEmailMimeRequest(id="email-1"))
+
+
+def test_get_email_mime_rejects_content_above_response_limit() -> None:
+    backend = _backend_with_item(SimpleNamespace(subject="Huge", mime_content=b"xx"))
+    backend.settings.email_mime_max_size_mb = 0
+
+    with pytest.raises(APIError) as excinfo:
+        backend.get_email_mime(GetEmailMimeRequest(id="email-1"))
+
+    assert excinfo.value.code == "response_too_large"
+
+
+def test_get_email_mime_rejects_declared_size_before_loading_mime() -> None:
+    class Item:
+        subject = "Huge"
+        size = 2 * 1024 * 1024
+
+        @property
+        def mime_content(self):
+            raise AssertionError("oversized MIME must not be loaded")
+
+    backend = _backend_with_item(Item())
+    backend.settings.email_mime_max_size_mb = 1
+
+    with pytest.raises(APIError) as excinfo:
+        backend.get_email_mime(GetEmailMimeRequest(id="email-1"))
+
+    assert excinfo.value.code == "response_too_large"

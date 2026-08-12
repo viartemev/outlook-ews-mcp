@@ -153,6 +153,7 @@ EXCHANGE_ATTACHMENT_MAX_COUNT=10
 EXCHANGE_ATTACHMENT_MAX_TOTAL_SIZE_MB=25
 EXCHANGE_ATTACHMENT_ROOT=
 EXCHANGE_EMAIL_BODY_MAX_CHARS=200000
+EXCHANGE_EMAIL_MIME_MAX_SIZE_MB=25
 EXCHANGE_SIGNATURE_TEXT=
 EXCHANGE_SIGNATURE_HTML=
 MCP_TRANSPORT=stdio
@@ -177,6 +178,8 @@ Notes:
 - `EXCHANGE_ATTACHMENT_ROOT` is unset by default, which **refuses** rather than allows local file access: any non-empty `attachments` list (send/reply/forward/create_draft) or explicit `get_attachment` `save_path` is rejected until it's set to an absolute directory, which then confines those paths to that directory tree. `get_attachment` with no `save_path` still works unset, falling back to the system temp directory
 - `EXCHANGE_MAX_RETRY_WAIT_SECONDS` is a total wall-clock budget for retrying **read-only** calls when Exchange reports itself busy, not a retry count; set to `0` to disable retries and fail fast on the first error. Writes (`send_email`, `create_event`, `delete_contact`, ...) are never auto-retried, since an ambiguous failure could mean the operation already happened on the server before the error came back. See [Request queue](#request-queue).
 - `EXCHANGE_EMAIL_BODY_MAX_CHARS` caps `get_email`'s `body_text`/`body_html`; a message beyond the cap is truncated and `truncated: true` is set on the response instead of returning an unbounded MCP payload
+- `EXCHANGE_EMAIL_MIME_MAX_SIZE_MB` rejects oversized raw MIME exports before base64 expansion; use attachment download or a narrower server-side export path for larger messages
+- `list_events` and `find_free_slots` accept a bounded `limit` (default 200, maximum 1000); event ranges are capped at 366 days and free-slot ranges at 31 days so broad queries cannot produce unbounded EWS or MCP responses
 - listings stay lean by design: email summaries carry the sender but not the recipient lists (`get_email` has them), `list_events` returns events without bodies (`get_event` has them), and `get_email` returns RFC-822 headers only with `include_headers: true`
 - send operations return `id: null` when EWS does not provide a durable ID for the sent copy (notably replies, forwards, and sent drafts)
 - attachment metadata includes `downloadable`; embedded Exchange item attachments have `downloadable: false` and cannot be saved by `get_attachment`

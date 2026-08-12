@@ -102,6 +102,7 @@ def test_update_draft_replaces_attachments(tmp_path) -> None:
     old_attachment = object()
     draft.attachments = [old_attachment]
     backend = _backend_with_draft(draft)
+    backend.settings.attachment_root = tmp_path
 
     new_file = tmp_path / "note.txt"
     new_file.write_text("hi")

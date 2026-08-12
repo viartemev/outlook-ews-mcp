@@ -49,6 +49,11 @@ from outlook_mcp.models import (
 )
 
 
+@pytest.fixture(autouse=True)
+def _configure_attachment_root(settings, tmp_path) -> None:
+    settings.attachment_root = tmp_path
+
+
 def _free_slots_request() -> FindFreeSlotsRequest:
     return FindFreeSlotsRequest.model_validate(
         {
@@ -1246,6 +1251,7 @@ def test_attach_files_rejects_fifo_without_hanging(settings, tmp_path) -> None:
 
 @pytest.mark.skipif(os.name != "posix", reason="/dev/null device check is POSIX-specific")
 def test_attach_files_rejects_character_device(settings) -> None:
+    settings.attachment_root = Path("/")
     backend = EWSExchangeBackend(settings)
 
     class FakeMessage:

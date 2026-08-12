@@ -151,6 +151,37 @@ def test_list_events_includes_recurring_by_default(settings) -> None:
     assert {event.id for event in result} == {"single", "recurring"}
 
 
+def test_list_events_honors_response_limit(settings) -> None:
+    backend = EWSExchangeBackend(settings)
+    folder = FakeCalendarFolder([_fake_event(str(index), False) for index in range(5)])
+    backend._account = SimpleNamespace(calendar=folder, default_timezone=UTC)
+
+    result = backend.list_events(
+        ListEventsRequest(
+            start=datetime(2026, 4, 13, tzinfo=UTC),
+            end=datetime(2026, 4, 14, tzinfo=UTC),
+            limit=2,
+        )
+    )
+
+    assert len(result) == 2
+
+
+def test_availability_refuses_to_compute_from_a_truncated_event_page(settings) -> None:
+    backend = EWSExchangeBackend(settings)
+    folder = FakeCalendarFolder([_fake_event(str(index), False) for index in range(3)])
+    backend._account = SimpleNamespace(calendar=folder, default_timezone=UTC)
+
+    with pytest.raises(APIError, match="complete event set"):
+        backend.get_my_availability(
+            ListEventsRequest(
+                start=datetime(2026, 4, 13, tzinfo=UTC),
+                end=datetime(2026, 4, 14, tzinfo=UTC),
+                limit=2,
+            )
+        )
+
+
 class FakeDeletableItem:
     def __init__(self) -> None:
         self.deleted_with: dict | None = None
@@ -377,3 +408,44 @@ def test_find_free_slots_never_produces_a_slot_past_end(settings, monkeypatch) -
     assert slots[0].start == start
     assert slots[0].end == datetime(2026, 4, 8, 10, 0, tzinfo=UTC)
     assert slots[0].end <= end
+
+
+def test_find_free_slots_honors_response_limit(settings, monkeypatch) -> None:
+    backend = EWSExchangeBackend(settings)
+    start = datetime(2026, 4, 8, 9, 0, tzinfo=UTC)
+    end = datetime(2026, 4, 8, 12, 0, tzinfo=UTC)
+
+    class FakeProtocol:
+        def get_free_busy_info(self, **kwargs):
+            return [SimpleNamespace(merged="0" * 180)]
+
+    backend._account = SimpleNamespace(protocol=FakeProtocol(), default_timezone=UTC)
+    monkeypatch.setattr(backend, "_to_ews_datetime", lambda value: value)
+
+    slots = backend.find_free_slots(
+        FindFreeSlotsRequest(
+            attendees=["user@example.com"],
+            duration=30,
+            start=start,
+            end=end,
+            limit=2,
+        )
+    )
+
+    assert len(slots) == 2
+
+
+def test_calendar_queries_reject_unbounded_ranges() -> None:
+    with pytest.raises(ValueError, match="366 days"):
+        ListEventsRequest(
+            start=datetime(2025, 1, 1, tzinfo=UTC),
+            end=datetime(2027, 1, 1, tzinfo=UTC),
+        )
+
+    with pytest.raises(ValueError, match="31 days"):
+        FindFreeSlotsRequest(
+            attendees=["user@example.com"],
+            duration=30,
+            start=datetime(2026, 1, 1, tzinfo=UTC),
+            end=datetime(2026, 3, 1, tzinfo=UTC),
+        )

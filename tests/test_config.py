@@ -61,6 +61,12 @@ def test_email_body_limit_uses_exchange_prefixed_alias():
     assert settings.email_body_max_chars == 1234
 
 
+def test_email_mime_limit_uses_exchange_prefixed_alias():
+    settings = Settings(**_kwargs(EXCHANGE_EMAIL_MIME_MAX_SIZE_MB=12))
+
+    assert settings.email_mime_max_size_mb == 12
+
+
 def test_oauth2_is_rejected_until_implemented():
     with pytest.raises(ValidationError):
         Settings(**_kwargs(EXCHANGE_AUTH_TYPE="OAuth2"))
@@ -124,3 +130,8 @@ def test_blank_attachment_root_does_not_become_the_current_directory():
     settings = Settings(_env_file=None, **_kwargs(EXCHANGE_ATTACHMENT_ROOT=""))
 
     assert settings.attachment_root is None
+
+
+def test_attachment_root_must_be_absolute():
+    with pytest.raises(ValidationError, match="must be an absolute path"):
+        Settings(_env_file=None, **_kwargs(EXCHANGE_ATTACHMENT_ROOT="relative/path"))

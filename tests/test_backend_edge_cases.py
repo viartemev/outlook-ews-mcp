@@ -12,6 +12,11 @@ from outlook_mcp.exchange_client import EWSExchangeBackend
 from outlook_mcp.models import CalendarEvent, EmailAddress, GetAttachmentRequest, ListEventsRequest
 
 
+@pytest.fixture(autouse=True)
+def _configure_attachment_root(settings, tmp_path: Path) -> None:
+    settings.attachment_root = tmp_path
+
+
 class FakeAttachment:
     def __init__(
         self, attachment_id: str, name: str, content: bytes, size: int | None = None
@@ -24,7 +29,7 @@ class FakeAttachment:
 
 
 def test_get_attachment_sanitizes_relative_traversal(settings, tmp_path: Path, monkeypatch) -> None:
-    backend = EWSExchangeBackend(settings)
+    backend = EWSExchangeBackend(settings.model_copy(update={"attachment_root": tmp_path}))
     attachment = FakeAttachment("att-1", "../../evil.txt", b"payload")
     monkeypatch.setattr(
         backend, "_fetch_item", lambda *a, **k: SimpleNamespace(attachments=[attachment])
@@ -41,7 +46,7 @@ def test_get_attachment_sanitizes_relative_traversal(settings, tmp_path: Path, m
 
 
 def test_get_attachment_sanitizes_absolute_path(settings, tmp_path: Path, monkeypatch) -> None:
-    backend = EWSExchangeBackend(settings)
+    backend = EWSExchangeBackend(settings.model_copy(update={"attachment_root": tmp_path}))
     outside_target = tmp_path.parent / "outside-target.txt"
     attachment = FakeAttachment("att-1", str(outside_target), b"payload")
     monkeypatch.setattr(
@@ -66,7 +71,7 @@ def test_get_attachment_refuses_to_follow_dangling_symlink_at_target_name(
     doesn't exist yet, must not be followed: Path.exists() reports False for a
     dangling symlink, so a naive open("wb") would silently write through it and
     escape EXCHANGE_ATTACHMENT_ROOT."""
-    backend = EWSExchangeBackend(settings)
+    backend = EWSExchangeBackend(settings.model_copy(update={"attachment_root": tmp_path}))
     outside_target = tmp_path.parent / "outside-target.txt"
     assert not outside_target.exists()
     (tmp_path / "evil.txt").symlink_to(outside_target)
@@ -92,7 +97,7 @@ def test_get_attachment_rejects_declared_size_over_limit(
     settings, tmp_path: Path, monkeypatch
 ) -> None:
     settings.attachment_max_size_mb = 1
-    backend = EWSExchangeBackend(settings)
+    backend = EWSExchangeBackend(settings.model_copy(update={"attachment_root": tmp_path}))
     attachment = FakeAttachment("att-1", "big.bin", b"x", size=2 * 1024 * 1024)
     monkeypatch.setattr(
         backend, "_fetch_item", lambda *a, **k: SimpleNamespace(attachments=[attachment])
@@ -211,7 +216,7 @@ def test_get_my_availability_computes_free_slots(settings, monkeypatch) -> None:
         end=datetime(2026, 4, 8, 10, 30, tzinfo=UTC),
         organizer=EmailAddress(email="organizer@example.com"),
     )
-    monkeypatch.setattr(backend, "list_events", lambda request: [busy_event])
+    monkeypatch.setattr(backend, "_list_events_page", lambda request: ([busy_event], False))
 
     request = ListEventsRequest(
         start=datetime(2026, 4, 8, 9, 0, tzinfo=UTC),
@@ -238,7 +243,7 @@ def test_get_my_availability_fully_busy_has_no_free_slots(settings, monkeypatch)
         end=datetime(2026, 4, 8, 12, 0, tzinfo=UTC),
         organizer=EmailAddress(email="organizer@example.com"),
     )
-    monkeypatch.setattr(backend, "list_events", lambda request: [busy_event])
+    monkeypatch.setattr(backend, "_list_events_page", lambda request: ([busy_event], False))
 
     request = ListEventsRequest(
         start=datetime(2026, 4, 8, 9, 0, tzinfo=UTC),
@@ -261,7 +266,7 @@ def test_get_my_availability_ignores_free_status_events(settings, monkeypatch) -
         organizer=EmailAddress(email="organizer@example.com"),
         free_busy_status="free",
     )
-    monkeypatch.setattr(backend, "list_events", lambda request: [free_event])
+    monkeypatch.setattr(backend, "_list_events_page", lambda request: ([free_event], False))
 
     request = ListEventsRequest(
         start=datetime(2026, 4, 8, 9, 0, tzinfo=UTC),

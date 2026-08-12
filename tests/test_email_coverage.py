@@ -374,7 +374,7 @@ def test_add_attachment_maps_an_attach_failure(settings, tmp_path) -> None:
     source.write_text("hi")
     item = FakeItem()
     item.attach = lambda a: (_ for _ in ()).throw(ErrorAccessDenied("read only"))
-    backend = _backend(settings, item=item)
+    backend = _backend(settings.model_copy(update={"attachment_root": tmp_path}), item=item)
 
     with pytest.raises(APIError) as excinfo:
         backend.add_attachment(AddAttachmentRequest(email_id="email-1", path=source))

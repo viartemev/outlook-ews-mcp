@@ -3,6 +3,7 @@ from __future__ import annotations
 import logging
 import sys
 import time
+import traceback
 from typing import Any
 
 from pydantic import TypeAdapter
@@ -92,6 +93,17 @@ class ToolRegistry:
                 api_error.code,
                 type(exc).__name__,
             )
+            if not isinstance(exc, APIError):
+                # Preserve actionable code locations without formatting the raw
+                # exception value, which may contain SOAP, addresses or hostnames.
+                frames = traceback.extract_tb(exc.__traceback__)
+                logger.error(
+                    "tool=%s internal_trace=%s",
+                    name,
+                    " <- ".join(
+                        f"{frame.filename}:{frame.lineno}:{frame.name}" for frame in frames
+                    ),
+                )
             return api_error.to_dict(), True
 
 

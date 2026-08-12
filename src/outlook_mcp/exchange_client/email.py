@@ -291,7 +291,7 @@ class EmailOperationsMixin(BaseEWSBackend):
         # nonblocking semantics to FIFOs/devices/sockets, never to plain files).
         nonblock_flag = getattr(os, "O_NONBLOCK", 0)
         for path in attachments:
-            fd = os.open(path, os.O_RDONLY | nonblock_flag)
+            fd, opened_path = self._open_attachment_source(path, nonblock_flag)
             fd_owned = False
             try:
                 # Re-validate against the opened fd, not the earlier path-based stat: the
@@ -319,7 +319,7 @@ class EmailOperationsMixin(BaseEWSBackend):
                         {
                             "field": "attachments",
                             "reason": f"file exceeds EXCHANGE_ATTACHMENT_MAX_SIZE_MB="
-                            f"{self.settings.attachment_max_size_mb}: {path}",
+                            f"{self.settings.attachment_max_size_mb}: {opened_path}",
                         }
                     ],
                 )
@@ -336,7 +336,50 @@ class EmailOperationsMixin(BaseEWSBackend):
                         }
                     ],
                 )
-            message.attach(FileAttachment(name=Path(path).name, content=content))
+            message.attach(FileAttachment(name=opened_path.name, content=content))
+
+    def _open_attachment_source(self, path: Path, nonblock_flag: int) -> tuple[int, Path]:
+        """Open a source beneath the configured root without following symlinks.
+
+        The tool-layer resolve check gives friendly validation errors, but cannot
+        prevent a local process from swapping a path component before open(). Walk
+        from an already-open root directory and reject symlinks at every component.
+        """
+        root = self.settings.attachment_root
+        if root is None:
+            raise APIError("validation_error", "EXCHANGE_ATTACHMENT_ROOT is not configured")
+        try:
+            resolved_root = root.resolve(strict=True)
+            candidate = path if path.is_absolute() else resolved_root / path
+            resolved_path = candidate.resolve(strict=True)
+            relative = resolved_path.relative_to(resolved_root)
+        except (FileNotFoundError, ValueError) as exc:
+            raise APIError(
+                "validation_error",
+                "attachment path is missing or outside EXCHANGE_ATTACHMENT_ROOT",
+            ) from exc
+        if not relative.parts:
+            raise APIError("validation_error", "attachment path must reference a file")
+
+        directory_flags = os.O_RDONLY | getattr(os, "O_DIRECTORY", 0) | getattr(os, "O_NOFOLLOW", 0)
+        current_fd = os.open(resolved_root, directory_flags)
+        try:
+            for part in relative.parts[:-1]:
+                next_fd = os.open(part, directory_flags, dir_fd=current_fd)
+                os.close(current_fd)
+                current_fd = next_fd
+            fd = os.open(
+                relative.parts[-1],
+                os.O_RDONLY | nonblock_flag | getattr(os, "O_NOFOLLOW", 0),
+                dir_fd=current_fd,
+            )
+        except OSError as exc:
+            raise APIError(
+                "validation_error", "attachment path changed while being opened"
+            ) from exc
+        finally:
+            os.close(current_fd)
+        return fd, resolved_path
 
     def _to_folder_info(self, folder: Folder, depth: int) -> FolderInfo:
         children = []
@@ -365,7 +408,7 @@ class EmailOperationsMixin(BaseEWSBackend):
             candidate = "attachment.bin"
         return candidate
 
-    def _create_new_file(self, path: Path) -> tuple[int, Path]:
+    def _create_new_file(self, path: Path, *, directory_fd: int | None = None) -> tuple[int, Path]:
         """Atomically create a new regular file at path, refusing to follow symlinks.
 
         Replaces a `path.exists()` check followed by a later `open("wb")`: a symlink
@@ -382,9 +425,10 @@ class EmailOperationsMixin(BaseEWSBackend):
         while True:
             try:
                 fd = os.open(
-                    candidate,
+                    candidate.name if directory_fd is not None else candidate,
                     os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_NOFOLLOW", 0),
                     0o600,
+                    dir_fd=directory_fd,
                 )
                 return fd, candidate
             except OSError as exc:
@@ -1100,7 +1144,27 @@ class EmailOperationsMixin(BaseEWSBackend):
         raise NotFoundError(request.attachment_id)
 
     def get_email_mime(self, request: GetEmailMimeRequest) -> EmailMimeResult:
-        item = self._fetch_item(request.id, expected_type=Message)
+        max_size = self.settings.email_mime_max_size_mb * 1024 * 1024
+        metadata = self._fetch_item(
+            request.id,
+            expected_type=Message,
+            only_fields=("subject", "size"),
+        )
+        declared_size = getattr(metadata, "size", None)
+        if declared_size is not None and declared_size > max_size:
+            raise APIError(
+                "response_too_large",
+                "message MIME content exceeds the configured response limit",
+                extra={"size": declared_size, "max_size": max_size},
+            )
+        # Fetch MIME only after the lightweight item-size preflight. The final
+        # decoded-size check below remains authoritative because EWS item:size is
+        # not guaranteed to equal the RFC 822 representation byte-for-byte.
+        item = self._fetch_item(
+            request.id,
+            expected_type=Message,
+            only_fields=("subject", "mime_content"),
+        )
         try:
             raw = item.mime_content
         except Exception as exc:  # noqa: BLE001
@@ -1111,6 +1175,12 @@ class EmailOperationsMixin(BaseEWSBackend):
             )
         if isinstance(raw, str):
             raw = raw.encode("utf-8")
+        if len(raw) > max_size:
+            raise APIError(
+                "response_too_large",
+                "message MIME content exceeds the configured response limit",
+                extra={"size": len(raw), "max_size": max_size},
+            )
         filename = self._sanitize_attachment_filename(f"{item.subject or 'message'}.eml")
         return EmailMimeResult(
             id=request.id,
@@ -1122,42 +1192,74 @@ class EmailOperationsMixin(BaseEWSBackend):
     def get_attachment(self, request: GetAttachmentRequest) -> AttachmentResult:
         item = self._fetch_item(request.email_id, expected_type=Message)
         target_dir = Path(request.save_path) if request.save_path else Path(tempfile.gettempdir())
-        target_dir.mkdir(parents=True, exist_ok=True)
+        directory_fd, target_dir = self._open_download_directory(
+            target_dir, confined=request.save_path is not None
+        )
         max_size_bytes = self.settings.attachment_max_size_mb * 1024 * 1024
-        for attachment in getattr(item, "attachments", None) or []:
-            attachment_id = getattr(getattr(attachment, "attachment_id", None), "id", None)
-            if attachment_id == request.attachment_id:
-                if isinstance(attachment, ItemAttachment):
-                    raise APIError(
-                        "validation_error",
-                        "attachment is an embedded Exchange item and cannot be "
-                        "downloaded as a file",
-                        details=[
-                            {
-                                "field": "attachment_id",
-                                "reason": "embedded item attachments (email/calendar/"
-                                "contact items) are not supported by get_attachment",
-                            }
-                        ],
+        try:
+            for attachment in getattr(item, "attachments", None) or []:
+                attachment_id = getattr(getattr(attachment, "attachment_id", None), "id", None)
+                if attachment_id == request.attachment_id:
+                    if isinstance(attachment, ItemAttachment):
+                        raise APIError(
+                            "validation_error",
+                            "attachment is an embedded Exchange item and cannot be downloaded as a file",
+                        )
+                    self._check_attachment_size(getattr(attachment, "size", None), max_size_bytes)
+                    filename = self._sanitize_attachment_filename(getattr(attachment, "name", None))
+                    fd, path = self._create_new_file(
+                        target_dir / filename, directory_fd=directory_fd
                     )
-                self._check_attachment_size(getattr(attachment, "size", None), max_size_bytes)
-                filename = self._sanitize_attachment_filename(getattr(attachment, "name", None))
-                fd, path = self._create_new_file(target_dir / filename)
+                    try:
+                        size = self._save_attachment(attachment, fd, max_size_bytes)
+                    except APIError:
+                        os.unlink(path.name, dir_fd=directory_fd)
+                        raise
+                    except Exception as exc:  # noqa: BLE001
+                        os.unlink(path.name, dir_fd=directory_fd)
+                        raise self._map_exception(exc, item_id=request.email_id) from exc
+                    return AttachmentResult(
+                        filename=filename,
+                        size=size,
+                        saved_path=str(path),
+                        content_type=getattr(attachment, "content_type", None),
+                    )
+            raise NotFoundError(request.attachment_id)
+        finally:
+            os.close(directory_fd)
+
+    def _open_download_directory(self, path: Path, *, confined: bool) -> tuple[int, Path]:
+        directory_flags = os.O_RDONLY | getattr(os, "O_DIRECTORY", 0) | getattr(os, "O_NOFOLLOW", 0)
+        if not confined:
+            path.mkdir(parents=True, exist_ok=True)
+            return os.open(path, directory_flags), path.resolve()
+
+        root = self.settings.attachment_root
+        if root is None:
+            raise APIError("validation_error", "EXCHANGE_ATTACHMENT_ROOT is not configured")
+        try:
+            resolved_root = root.resolve(strict=True)
+            normalized = path.resolve(strict=False)
+            relative = normalized.relative_to(resolved_root)
+        except (FileNotFoundError, ValueError) as exc:
+            raise APIError(
+                "validation_error", "save_path is outside EXCHANGE_ATTACHMENT_ROOT"
+            ) from exc
+
+        current_fd = os.open(resolved_root, directory_flags)
+        try:
+            for part in relative.parts:
                 try:
-                    size = self._save_attachment(attachment, fd, max_size_bytes)
-                except APIError:
-                    path.unlink(missing_ok=True)
-                    raise
-                except Exception as exc:  # noqa: BLE001
-                    path.unlink(missing_ok=True)
-                    raise self._map_exception(exc, item_id=request.email_id) from exc
-                return AttachmentResult(
-                    filename=filename,
-                    size=size,
-                    saved_path=str(path),
-                    content_type=getattr(attachment, "content_type", None),
-                )
-        raise NotFoundError(request.attachment_id)
+                    os.mkdir(part, mode=0o700, dir_fd=current_fd)
+                except FileExistsError:
+                    pass
+                next_fd = os.open(part, directory_flags, dir_fd=current_fd)
+                os.close(current_fd)
+                current_fd = next_fd
+            return current_fd, normalized
+        except Exception:
+            os.close(current_fd)
+            raise
 
     def _save_attachment(self, attachment: Any, fd: int, max_size_bytes: int) -> int:
         with os.fdopen(fd, "wb") as dest:

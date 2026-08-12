@@ -170,3 +170,26 @@ def test_find_free_slots_normalizes_pydantic_tzinfo(settings) -> None:
     assert captured["end"].tzinfo.key == "Europe/Moscow"
     assert result[0].start.tzinfo.key == "Europe/Moscow"
     assert result[0].end.tzinfo.key == "Europe/Moscow"
+
+
+def test_shared_calendar_uses_the_target_mailbox_timezone(settings, monkeypatch) -> None:
+    backend = EWSExchangeBackend(settings)
+    folder = FakeCalendarFolder()
+    target = SimpleNamespace(
+        calendar=folder,
+        default_timezone=EWSTimeZone("America/New_York"),
+    )
+    monkeypatch.setattr(backend, "_account_for", lambda mailbox: target)
+
+    backend.list_events(
+        ListEventsRequest.model_validate(
+            {
+                "start": "2026-04-13T09:00:00",
+                "end": "2026-04-13T10:00:00",
+                "mailbox": "other@example.com",
+            }
+        )
+    )
+
+    assert folder.start.tzinfo.key == "America/New_York"
+    assert folder.end.tzinfo.key == "America/New_York"

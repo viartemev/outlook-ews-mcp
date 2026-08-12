@@ -2,16 +2,26 @@ from __future__ import annotations
 
 import threading
 import time
+from types import SimpleNamespace
 from unittest.mock import patch
 
 import pytest
 from exchangelib.ewsdatetime import EWSTimeZone
+from exchangelib.protocol import Protocol
 
 from outlook_mcp.config import Settings
 from outlook_mcp.errors import APIError
 from outlook_mcp.exchange_client import EWSExchangeBackend
+from outlook_mcp.exchange_client.base import _ews_response_hook
 
 _UNKNOWN_TIMEZONE_GUID = "2a2b3c4d-0000-0000-0000-000000000001"
+
+
+@pytest.fixture(autouse=True)
+def _isolate_protocol_cache():
+    Protocol.clear_cache()
+    yield
+    Protocol.clear_cache()
 
 
 def _settings(**overrides) -> Settings:
@@ -155,3 +165,51 @@ def test_unknown_exchange_version_raises_validation_error() -> None:
         _ = backend.account
 
     assert excinfo.value.code == "validation_error"
+
+
+def test_reconfiguring_the_same_protocol_does_not_duplicate_response_hooks() -> None:
+    backend = EWSExchangeBackend(_settings())
+    protocol = backend.account.protocol
+
+    backend._configure_protocol(protocol)
+    session = protocol.raw_session("https://mail.example.com")
+
+    assert session.hooks["response"].count(_ews_response_hook) == 1
+
+
+def test_shared_protocol_rejects_conflicting_runtime_settings() -> None:
+    first = EWSExchangeBackend(_settings(EXCHANGE_TIMEOUT=30))
+    _ = first.account
+    second = EWSExchangeBackend(_settings(EXCHANGE_TIMEOUT=5))
+
+    with pytest.raises(APIError, match="conflicting settings"):
+        _ = second.account
+
+
+def test_delegate_account_cache_is_bounded_and_case_insensitive(monkeypatch) -> None:
+    import outlook_mcp.exchange_client.base as base_module
+
+    backend = EWSExchangeBackend(_settings())
+    configured = (
+        backend.settings.exchange_timeout,
+        backend.settings.exchange_verify_ssl,
+        backend.settings.mcp_max_concurrency + 1,
+    )
+    protocol = SimpleNamespace(config=object(), _outlook_mcp_config=configured)
+    backend._account = SimpleNamespace(protocol=protocol)
+    created: list[object] = []
+
+    def fake_account(**kwargs):
+        account = SimpleNamespace(protocol=protocol, address=kwargs["primary_smtp_address"])
+        created.append(account)
+        return account
+
+    monkeypatch.setattr(base_module, "Account", fake_account)
+
+    first = backend._account_for("First@example.com")
+    assert backend._account_for("first@EXAMPLE.com") is first
+    for index in range(40):
+        backend._account_for(f"user-{index}@example.com")
+
+    assert len(backend._other_accounts) == 32
+    assert len(created) == 41
