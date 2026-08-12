@@ -3,6 +3,7 @@ from __future__ import annotations
 import logging
 import re
 import threading
+from collections import OrderedDict
 from collections.abc import Callable, Iterable
 from contextvars import ContextVar
 from datetime import UTC, datetime
@@ -99,6 +100,7 @@ _TIMEZONE_FALLBACK_PATCHED = False
 #: harmless here, but the same check-then-act shape as the account lock below, so
 #: it gets the same treatment rather than relying on the patch being a no-op twice.
 _TIMEZONE_FALLBACK_LOCK = threading.Lock()
+_PROTOCOL_CONFIG_LOCK = threading.Lock()
 _GUID_TIMEZONE_RE = re.compile(
     r"^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$"
 )
@@ -124,7 +126,8 @@ class BaseEWSBackend:
         #: build their own Account/Configuration/protocol, wasting an auth round trip
         #: per racer and leaking every loser's protocol object.
         self._account_lock = threading.Lock()
-        self._other_accounts: dict[str, Account] = {}
+        self._other_accounts: OrderedDict[str, Account] = OrderedDict()
+        self._other_accounts_lock = threading.Lock()
 
     @property
     def account(self) -> Account:
@@ -183,7 +186,14 @@ class BaseEWSBackend:
         -- this only changes which mailbox is addressed, not what access the
         credentials actually grant.
         """
-        if mailbox not in self._other_accounts:
+        key = mailbox.casefold()
+        with self._other_accounts_lock:
+            cached = self._other_accounts.get(key)
+            if cached is not None:
+                self._other_accounts.move_to_end(key)
+                _active_timezone_fallback.set(self.settings.exchange_timezone_fallback)
+                return cached
+
             primary = self.account
             auth = build_auth_context(self.settings)
             access_type = IMPERSONATION if auth.impersonate_as else DELEGATE
@@ -197,8 +207,12 @@ class BaseEWSBackend:
             except Exception as exc:  # noqa: BLE001
                 raise self._map_exception(exc) from exc
             self._configure_protocol(other.protocol)
-            self._other_accounts[mailbox] = other
-        return self._other_accounts[mailbox]
+            self._other_accounts[key] = other
+            # Account objects retain folder hierarchy caches. Keep the convenience
+            # cache bounded when callers inspect many delegate mailboxes.
+            while len(self._other_accounts) > 32:
+                self._other_accounts.popitem(last=False)
+            return other
 
     def _resolve_configured_version(self) -> Version | None:
         """Turn EXCHANGE_VERSION (e.g. "EXCHANGE_2016") into a Configuration(version=...).
@@ -239,36 +253,60 @@ class BaseEWSBackend:
         return endpoint
 
     def _configure_protocol(self, protocol: BaseProtocol) -> None:
-        """Scope timeout/SSL-verification settings to this backend's own protocol instance.
+        """Configure a cached protocol exactly once and reject conflicting settings.
 
         These used to be set as mutations on the shared `BaseProtocol` class, which meant the
         first backend built in a process silently decided the behavior for every later one.
-        Setting them directly on the instance shadows the class attribute/classmethod (both are
-        non-data descriptors, so an instance attribute of the same name wins) without touching
-        any other backend's protocol.
+        exchangelib caches Protocol by endpoint and credentials, so delegate Accounts
+        share it. Re-wrapping raw_session would duplicate hooks; silently applying a
+        second backend's settings would make behavior depend on construction order.
         """
-        protocol.TIMEOUT = self.settings.exchange_timeout
+        desired = (
+            self.settings.exchange_timeout,
+            self.settings.exchange_verify_ssl,
+            self.settings.mcp_max_concurrency + 1,
+        )
+        with _PROTOCOL_CONFIG_LOCK:
+            configured = getattr(protocol, "_outlook_mcp_config", None)
+            if configured is not None:
+                if configured != desired:
+                    raise APIError(
+                        "validation_error",
+                        "conflicting settings for a shared Exchange protocol",
+                        details=[
+                            {
+                                "field": "EXCHANGE_TIMEOUT/EXCHANGE_VERIFY_SSL/MCP_MAX_CONCURRENCY",
+                                "reason": "the same endpoint and credentials are already active with different settings",
+                            }
+                        ],
+                    )
+                return
 
-        verify_ssl = self.settings.exchange_verify_ssl
-        original_raw_session = protocol.raw_session
+            protocol.TIMEOUT = self.settings.exchange_timeout
+            if hasattr(protocol, "_session_pool_lock"):
+                protocol.max_connections = self.settings.mcp_max_concurrency + 1
 
-        def raw_session_with_verify(
-            prefix, oauth2_client=None, oauth2_session_params=None, oauth2_token_endpoint=None
-        ):
-            session = original_raw_session(
-                prefix,
-                oauth2_client=oauth2_client,
-                oauth2_session_params=oauth2_session_params,
-                oauth2_token_endpoint=oauth2_token_endpoint,
-            )
-            session.verify = verify_ssl
-            # Every session the pool ever creates -- including renewals and
-            # credential refreshes -- passes through raw_session, so this one
-            # hook covers the protocol's whole lifetime.
-            session.hooks["response"].append(_ews_response_hook)
-            return session
+            verify_ssl = self.settings.exchange_verify_ssl
+            original_raw_session = protocol.raw_session
 
-        protocol.raw_session = raw_session_with_verify
+            def raw_session_with_verify(
+                prefix, oauth2_client=None, oauth2_session_params=None, oauth2_token_endpoint=None
+            ):
+                session = original_raw_session(
+                    prefix,
+                    oauth2_client=oauth2_client,
+                    oauth2_session_params=oauth2_session_params,
+                    oauth2_token_endpoint=oauth2_token_endpoint,
+                )
+                session.verify = verify_ssl
+                # Every session the pool ever creates -- including renewals and
+                # credential refreshes -- passes through raw_session, so this one
+                # hook covers the protocol's whole lifetime.
+                session.hooks["response"].append(_ews_response_hook)
+                return session
+
+            protocol.raw_session = raw_session_with_verify
+            protocol._outlook_mcp_config = desired
 
         if not verify_ssl:
             logger.warning("SSL certificate verification is disabled for Exchange connections")
@@ -550,11 +588,12 @@ class BaseEWSBackend:
                 result[str(name)] = str(value)[: self._MAX_HEADER_VALUE_LENGTH]
         return result
 
-    def _to_ews_datetime(self, value: datetime) -> EWSDateTime:
+    def _to_ews_datetime(self, value: datetime, account: Account | None = None) -> EWSDateTime:
+        target_account = account or self.account
         if value.tzinfo is None:
-            value = value.replace(tzinfo=self.account.default_timezone)
+            value = value.replace(tzinfo=target_account.default_timezone)
         else:
-            value = value.astimezone(self.account.default_timezone)
+            value = value.astimezone(target_account.default_timezone)
         if isinstance(value, EWSDateTime):
             return value
         return EWSDateTime.from_datetime(value)

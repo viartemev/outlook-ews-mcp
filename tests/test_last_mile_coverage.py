@@ -35,6 +35,12 @@ from outlook_mcp.models import (
     dump_model,
 )
 
+
+@pytest.fixture(autouse=True)
+def _configure_attachment_root(settings, tmp_path) -> None:
+    settings.attachment_root = tmp_path
+
+
 _FOLDER = SimpleNamespace(id="folder-1", folder_class="IPF.Note")
 
 

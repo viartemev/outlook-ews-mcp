@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import re
 from collections.abc import Sequence
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from pathlib import Path
 from typing import Annotated, Any, Literal
 
@@ -600,6 +600,7 @@ class ListEventsRequest(ExchangeModel):
     end: datetime
     calendar_id: str | None = None
     include_recurring: bool = True
+    limit: int = Field(default=200, ge=1, le=1000)
     #: View another mailbox's default calendar instead of the service account's own
     #: (requires delegate/impersonation access to that mailbox on the server side).
     #: Not combinable with calendar_id -- mailbox scoping only ever targets that
@@ -610,6 +611,8 @@ class ListEventsRequest(ExchangeModel):
     def validate_range(self) -> "ListEventsRequest":
         if self.end <= self.start:
             raise ValueError("end must be greater than start")
+        if self.end - self.start > timedelta(days=366):
+            raise ValueError("event range must not exceed 366 days")
         if self.mailbox is not None and self.calendar_id is not None:
             raise ValueError("mailbox cannot be combined with calendar_id")
         return self
@@ -726,11 +729,14 @@ class FindFreeSlotsRequest(ExchangeModel):
     start: datetime
     end: datetime
     work_hours: WorkHours | None = None
+    limit: int = Field(default=200, ge=1, le=1000)
 
     @model_validator(mode="after")
     def validate_range(self) -> "FindFreeSlotsRequest":
         if self.end <= self.start:
             raise ValueError("end must be greater than start")
+        if self.end - self.start > timedelta(days=31):
+            raise ValueError("free-slot range must not exceed 31 days")
         return self
 
 

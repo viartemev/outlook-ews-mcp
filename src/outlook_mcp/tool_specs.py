@@ -388,7 +388,7 @@ TOOL_SPECS: list[ToolSpec] = [
     ),
     ToolSpec(
         "list_events",
-        "List calendar events in a time range. Set mailbox to view a colleague's "
+        "List up to limit calendar events in a time range. Set mailbox to view a colleague's "
         "default calendar instead of your own (requires delegate/impersonation "
         "access already granted on the server; not combinable with calendar_id)",
         list_events,
@@ -439,7 +439,7 @@ TOOL_SPECS: list[ToolSpec] = [
     ),
     ToolSpec(
         "find_free_slots",
-        "Find meeting time slots",
+        "Find up to limit meeting time slots",
         find_free_slots,
         request_model=models.FindFreeSlotsRequest,
         response_model=list[models.FreeSlot],

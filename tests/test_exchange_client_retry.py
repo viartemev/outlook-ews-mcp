@@ -4,6 +4,7 @@ from outlook_mcp.config import Settings
 from outlook_mcp.errors import APIError
 from outlook_mcp.exchange_client import ExchangeClient
 from outlook_mcp.models import PingResult, SendResult
+import pytest
 
 
 def _settings(**overrides) -> Settings:
@@ -51,7 +52,10 @@ class _AlwaysFailsNonRetryable:
 def test_retry_read_retries_a_busy_read_until_it_succeeds(monkeypatch) -> None:
     monkeypatch.setattr(ExchangeClient, "_RETRY_BASE_SECONDS", 0.001)
     backend = _FlakyBackend(failures=2)
-    client = ExchangeClient(settings=_settings(EXCHANGE_MAX_RETRY_WAIT_SECONDS=5), backend=backend)
+    client = ExchangeClient(
+        settings=_settings(EXCHANGE_TIMEOUT=1, EXCHANGE_MAX_RETRY_WAIT_SECONDS=10),
+        backend=backend,
+    )
 
     result = client.ping()
 
@@ -108,3 +112,32 @@ def test_writes_are_never_auto_retried() -> None:
         raise AssertionError("expected the write to propagate its error immediately")
 
     assert backend.calls == 1
+
+
+def test_retry_does_not_start_an_attempt_without_a_full_timeout_remaining(monkeypatch) -> None:
+    clock = [0.0]
+
+    class SlowBusyBackend:
+        calls = 0
+
+        def ping(self):
+            self.calls += 1
+            clock[0] += 4
+            raise _busy_error()
+
+    monkeypatch.setattr("outlook_mcp.exchange_client.facade.time.monotonic", lambda: clock[0])
+    monkeypatch.setattr(
+        "outlook_mcp.exchange_client.facade.time.sleep",
+        lambda seconds: clock.__setitem__(0, clock[0] + seconds),
+    )
+    backend = SlowBusyBackend()
+    client = ExchangeClient(
+        settings=_settings(EXCHANGE_TIMEOUT=4, EXCHANGE_MAX_RETRY_WAIT_SECONDS=5),
+        backend=backend,
+    )
+
+    with pytest.raises(APIError):
+        client.ping()
+
+    assert backend.calls == 1
+    assert clock[0] <= 9

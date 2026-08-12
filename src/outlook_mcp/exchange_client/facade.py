@@ -98,15 +98,20 @@ class ExchangeClient:
         The account's retry_policy is FailFast (exchange_client/base.py), so every EWS
         service call raises on its first transient error instead of exchangelib
         retrying it internally with no cumulative time limit. This loop is what
-        decides whether to try again, bounded by a wall-clock deadline built from
-        EXCHANGE_MAX_RETRY_WAIT_SECONDS -- not by exchangelib's own max_wait, which
-        only capped a single backoff step, not total retry time.
+        decides whether to try again, bounded by EXCHANGE_TIMEOUT plus
+        EXCHANGE_MAX_RETRY_WAIT_SECONDS. A retry starts only when one full request
+        timeout remains -- exchangelib's own max_wait only capped one backoff step,
+        not total operation time.
 
         Only read-only calls go through this. Writes never do: retrying a
         send/create/delete after an ambiguous failure risks repeating a side effect
         that already happened on the server before the error came back.
         """
-        deadline = time.monotonic() + self.settings.exchange_max_retry_wait
+        retry_budget = self.settings.exchange_max_retry_wait
+        # Reserve one full request timeout for every attempt we start. This keeps
+        # the operation inside the documented EXCHANGE_TIMEOUT + retry-wait budget
+        # instead of beginning a final attempt just as the deadline expires.
+        deadline = time.monotonic() + self.settings.exchange_timeout + retry_budget
         wait = self._RETRY_BASE_SECONDS
         while True:
             try:
@@ -114,10 +119,14 @@ class ExchangeClient:
             except APIError as exc:
                 if not exc.retryable:
                     raise
-                remaining = deadline - time.monotonic()
-                if remaining <= 0:
+                if retry_budget == 0:
                     raise
-                time.sleep(min(wait, remaining))
+                remaining = deadline - time.monotonic()
+                if remaining <= self.settings.exchange_timeout:
+                    raise
+                time.sleep(min(wait, remaining - self.settings.exchange_timeout))
+                if deadline - time.monotonic() <= self.settings.exchange_timeout:
+                    raise
                 wait *= 2
 
     def ping(self) -> PingResult:

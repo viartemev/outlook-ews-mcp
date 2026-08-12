@@ -127,8 +127,10 @@ def test_create_inbox_rule_builds_ews_conditions_and_actions(backend) -> None:
     assert sent_rule.conditions.from_addresses[0].email_address == "boss@example.com"
     assert sent_rule.actions.assign_categories == ["Boss"]
     assert blob is True
-    # The created rule is re-read from the server so the caller gets its id.
-    assert created.id == "rule-1"
+    assert FakeRuleService.calls["get"] == []
+    # EWS create returns no id. Avoiding a follow-up read means a successful
+    # mutation cannot be reported as failed due to that second request.
+    assert created.id is None
 
 
 def test_update_inbox_rule_sends_the_servers_own_rule_object_back(backend) -> None:

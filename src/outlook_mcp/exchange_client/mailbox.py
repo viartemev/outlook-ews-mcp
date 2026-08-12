@@ -102,7 +102,9 @@ class MailboxSettingsMixin(BaseEWSBackend):
             self.account.oof_settings = OofSettings(**kwargs)
         except Exception as exc:  # noqa: BLE001
             raise self._map_exception(exc) from exc
-        return self.get_out_of_office()
+        # Do not turn a successful mutation into an apparent failure by issuing a
+        # second, fallible read. Retrying after such a false negative is unsafe.
+        return request
 
     def _rule_to_model(self, rule: Rule) -> InboxRule:
         conditions = getattr(rule, "conditions", None)
@@ -222,10 +224,8 @@ class MailboxSettingsMixin(BaseEWSBackend):
             )
         except Exception as exc:  # noqa: BLE001
             raise self._map_exception(exc) from exc
-        # CreateInboxRule returns no id; re-list and match on the unique name.
-        for created in self.list_inbox_rules():
-            if created.display_name == request.display_name:
-                return created
+        # CreateInboxRule returns no id. A follow-up list is not authoritative
+        # (display names are not unique) and can fail after the mutation succeeded.
         return self._rule_to_model(rule)
 
     def update_inbox_rule(self, request: UpdateInboxRuleRequest) -> InboxRule:

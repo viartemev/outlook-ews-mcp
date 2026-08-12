@@ -58,6 +58,9 @@ class Settings(BaseSettings):
     email_body_max_chars: int = Field(
         default=200_000, alias="EXCHANGE_EMAIL_BODY_MAX_CHARS", ge=1_000, le=5_000_000
     )
+    email_mime_max_size_mb: int = Field(
+        default=25, alias="EXCHANGE_EMAIL_MIME_MAX_SIZE_MB", ge=1, le=100
+    )
 
     #: Appended to outgoing bodies (send/draft in html mode, or replies/forwards).
     #: There is no EWS API for server-side signatures, so this is configuration.
@@ -100,6 +103,13 @@ class Settings(BaseSettings):
         # staying disabled.
         if isinstance(value, str) and not value.strip():
             return None
+        return value
+
+    @field_validator("attachment_root")
+    @classmethod
+    def _attachment_root_must_be_absolute(cls, value: Path | None) -> Path | None:
+        if value is not None and not value.is_absolute():
+            raise ValueError("EXCHANGE_ATTACHMENT_ROOT must be an absolute path")
         return value
 
     @model_validator(mode="after")

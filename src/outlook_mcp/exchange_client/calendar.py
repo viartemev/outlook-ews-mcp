@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import date, datetime, time, timedelta
+from itertools import islice
 from typing import Any, Literal
 
 from exchangelib import Attendee, CalendarItem
@@ -67,7 +68,7 @@ _EVENT_SUMMARY_FIELDS = (
 
 
 class CalendarOperationsMixin(BaseEWSBackend):
-    def _event_moment(self, value: Any) -> Any:
+    def _event_moment(self, value: Any, account: Any | None = None) -> Any:
         """Anchor an all-day boundary to mailbox-local midnight.
 
         EWS reports all-day appointments with ``EWSDate``, not ``EWSDateTime``.
@@ -78,10 +79,13 @@ class CalendarOperationsMixin(BaseEWSBackend):
         if isinstance(value, datetime):
             return value
         if isinstance(value, date):
-            return datetime.combine(value, time.min, tzinfo=self.account.default_timezone)
+            target_account = account or self.account
+            return datetime.combine(value, time.min, tzinfo=target_account.default_timezone)
         return value
 
-    def _to_calendar_event(self, item: Any, include_body: bool = True) -> CalendarEvent:
+    def _to_calendar_event(
+        self, item: Any, include_body: bool = True, account: Any | None = None
+    ) -> CalendarEvent:
         attendees = [
             self._to_attendee(attendee)
             for attendee in (getattr(item, "required_attendees", None) or [])
@@ -96,8 +100,8 @@ class CalendarOperationsMixin(BaseEWSBackend):
         return CalendarEvent(
             id=item.id,
             subject=item.subject or "",
-            start=self._event_moment(item.start),
-            end=self._event_moment(item.end),
+            start=self._event_moment(item.start, account),
+            end=self._event_moment(item.end, account),
             location=getattr(item, "location", None),
             organizer=organizer,
             attendees=attendees,
@@ -173,7 +177,7 @@ class CalendarOperationsMixin(BaseEWSBackend):
         if mailbox:
             # calendar_id + mailbox is rejected at the request-model level, so this
             # only ever targets that mailbox's own default calendar.
-            folder = self._account_for(mailbox).calendar
+            folder = self._account_for(str(mailbox)).calendar
         else:
             folder = self.account.calendar if not calendar_id else self._resolve_folder(calendar_id)
         folder_class = getattr(folder, "folder_class", None)
@@ -186,29 +190,46 @@ class CalendarOperationsMixin(BaseEWSBackend):
         return folder
 
     def list_events(self, request: ListEventsRequest) -> list[CalendarEvent]:
+        events, _ = self._list_events_page(request)
+        return events
+
+    def _list_events_page(self, request: ListEventsRequest) -> tuple[list[CalendarEvent], bool]:
+        target_account = (
+            self._account_for(str(request.mailbox)) if request.mailbox else self.account
+        )
         folder = self._calendar_folder(request.calendar_id, request.mailbox)
-        # The query window is always computed in the service account's own timezone,
-        # even when `mailbox` targets another account -- resolving the target
-        # mailbox's own timezone would need an extra round trip this doesn't make.
-        start = self._to_ews_datetime(request.start)
-        end = self._to_ews_datetime(request.end)
+        start = self._to_ews_datetime(request.start, target_account)
+        end = self._to_ews_datetime(request.end, target_account)
         qs = folder.view(start=start, end=end).only(*_EVENT_SUMMARY_FIELDS)
         try:
-            items = list(qs)
+            candidates = iter(qs)
+            if not request.include_recurring:
+                candidates = (
+                    item for item in candidates if not getattr(item, "is_recurring", False)
+                )
+            items = list(islice(candidates, request.limit + 1))
         except Exception as exc:  # noqa: BLE001
             raise self._map_exception(exc) from exc
-        if not request.include_recurring:
-            items = [item for item in items if not getattr(item, "is_recurring", False)]
-        return [self._to_calendar_event(item, include_body=False) for item in items]
+        truncated = len(items) > request.limit
+        return (
+            [
+                self._to_calendar_event(item, include_body=False, account=target_account)
+                for item in items[: request.limit]
+            ],
+            truncated,
+        )
 
     def get_event(self, request: GetEventRequest) -> CalendarEvent:
+        target_account = (
+            self._account_for(str(request.mailbox)) if request.mailbox else self.account
+        )
         item = self._fetch_item(
             request.id,
             folder=self._calendar_folder(request.calendar_id, request.mailbox),
             expected_type=CalendarItem,
-            account=self._account_for(request.mailbox) if request.mailbox else None,
+            account=target_account,
         )
-        return self._to_calendar_event(item)
+        return self._to_calendar_event(item, account=target_account)
 
     def _build_recurrence(self, pattern: RecurrencePattern, start: datetime) -> Recurrence:
         if pattern.type == "daily":
@@ -475,6 +496,8 @@ class CalendarOperationsMixin(BaseEWSBackend):
                 slots.append(
                     FreeSlot(start=cursor, end=slot_end, all_available=True, busy_attendees=[])
                 )
+                if len(slots) >= request.limit:
+                    break
             cursor = slot_end
         return slots
 
@@ -495,7 +518,12 @@ class CalendarOperationsMixin(BaseEWSBackend):
         return slot_start.time() >= day_start and slot_end.time() <= day_end
 
     def get_my_availability(self, request: ListEventsRequest) -> AvailabilityResult:
-        events = self.list_events(request)
+        events, truncated = self._list_events_page(request)
+        if truncated:
+            raise APIError(
+                "response_too_large",
+                "availability needs the complete event set; narrow the range or increase limit",
+            )
         # "Free" appointments are placeholders (e.g. reminders, holidays) that
         # don't actually block time -- only exclude those from busy time, the
         # same threshold find_free_slots applies to the EWS merged free/busy view.
@@ -504,8 +532,11 @@ class CalendarOperationsMixin(BaseEWSBackend):
             {"start": event.start, "end": event.end, "subject": event.subject}
             for event in busy_events
         ]
-        start = self._to_ews_datetime(request.start)
-        end = self._to_ews_datetime(request.end)
+        target_account = (
+            self._account_for(str(request.mailbox)) if request.mailbox else self.account
+        )
+        start = self._to_ews_datetime(request.start, target_account)
+        end = self._to_ews_datetime(request.end, target_account)
         free_slots = self._compute_free_slots(start, end, busy_events)
         return AvailabilityResult(free_slots=free_slots, busy_slots=busy_slots)
 
