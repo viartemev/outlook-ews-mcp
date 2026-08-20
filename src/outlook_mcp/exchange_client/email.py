@@ -653,6 +653,10 @@ class EmailOperationsMixin(BaseEWSBackend):
 
     def send_email(self, request: SendEmailRequest) -> SendResult:
         message = self._make_message(request)
+        # _make_message leaves the copy folder as Drafts; send_and_save() saves the
+        # sent copy into self.folder, so point it at Sent instead -- otherwise the
+        # message is delivered but its copy lands in Drafts.
+        message.folder = self.account.sent
         try:
             message.send_and_save()
             # send_and_save() doesn't hand back the id of the sent-and-saved copy.
@@ -1099,7 +1103,10 @@ class EmailOperationsMixin(BaseEWSBackend):
             only_fields=("parent_folder_id",),
         )
         try:
-            item.send_and_save()
+            # send_and_save() on an existing item saves the copy back into its parent
+            # folder (Drafts). send() with copy_to_folder places the copy in Sent and
+            # removes the original from Drafts, which is the behaviour we want.
+            item.send(copy_to_folder=self.account.sent)
             # The draft's own id stops being valid the moment it's sent (it moves out
             # of Drafts), so request.id must not be echoed back as if still usable.
             return SendResult(id=None, status="sent")

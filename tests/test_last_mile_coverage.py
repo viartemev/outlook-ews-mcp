@@ -448,7 +448,7 @@ def test_send_email_reports_the_saved_copy_id(settings, monkeypatch) -> None:
             pass
 
     monkeypatch.setattr(email_module, "Message", SendingMessage)
-    backend = _backend(settings, drafts=_FOLDER)
+    backend = _backend(settings, drafts=_FOLDER, sent=_FOLDER)
 
     from outlook_mcp.models import SendEmailRequest
 
@@ -547,7 +547,7 @@ def test_create_draft_and_send_draft_map_failures(settings, monkeypatch) -> None
         backend.create_draft(DraftEmailRequest(to=["u@example.com"], subject="S", body="B"))
 
     draft = _mail_item()
-    draft.send_and_save = lambda: (_ for _ in ()).throw(ErrorAccessDenied("cannot send"))
+    draft.send = lambda **kwargs: (_ for _ in ()).throw(ErrorAccessDenied("cannot send"))
     backend._account.fetch = lambda **kwargs: iter([draft])
     with pytest.raises(APIError):
         backend.send_draft(SendDraftRequest(id="item-1"))
