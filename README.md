@@ -11,13 +11,23 @@ It gives MCP-compatible clients access to email, calendar, contacts, folders, at
 
 > Note: this project was previously referred to as `outlook-mcp`. It was renamed because that name is already taken on PyPI by an unrelated project. The distribution and CLI name is `outlook-ews-mcp`; until the first tagged PyPI release, install it from this repository as shown below.
 
-## Short description
+## Contents
 
-Secure MCP server for on-prem Microsoft Exchange (EWS) with tools for email, calendar, contacts, folders, attachments, and free/busy availability.
-
-## Suggested repository topics / tags
-
-`mcp`, `model-context-protocol`, `exchange`, `microsoft-exchange`, `ews`, `outlook`, `email`, `calendar`, `contacts`, `python`, `automation`, `exchangelib`
+- [Highlights](#highlights)
+- [Tool catalog](#tool-catalog)
+- [Typical use cases](#typical-use-cases)
+- [Security notes](#security-notes)
+- [Quick start](#quick-start)
+- [Configuration](#configuration)
+- [Request queue](#request-queue)
+- [Claude Desktop example](#claude-desktop-example)
+- [Smoke check](#smoke-check)
+- [Docker](#docker)
+- [CI/CD](#cicd)
+- [Development](#development)
+- [Project notes](#project-notes)
+- [Contributing](#contributing)
+- [License](#license)
 
 ## Highlights
 
