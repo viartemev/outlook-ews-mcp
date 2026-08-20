@@ -340,7 +340,7 @@ def test_create_draft_and_send_draft(settings, monkeypatch) -> None:
             kwargs.setdefault("id", "draft-1")
             super().__init__(**kwargs)
 
-        def send_and_save(self):
+        def send(self, **kwargs):
             self.sent = True
 
     monkeypatch.setattr(email_module, "Message", DraftMessage)
