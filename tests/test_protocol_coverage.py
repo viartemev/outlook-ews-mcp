@@ -33,6 +33,7 @@ def _sample_request(method_name: str):
             to=["user@example.com"], subject="Hi", body="Hello"
         ),
         models.ReplyEmailRequest: models.ReplyEmailRequest(id="email-1", body="Hi"),
+        models.CreateReplyDraftRequest: models.CreateReplyDraftRequest(id="email-1", body="Hi"),
         models.ForwardEmailRequest: models.ForwardEmailRequest(
             id="email-1", to=["user@example.com"]
         ),

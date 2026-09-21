@@ -37,6 +37,7 @@ from ..models import (
     DeleteFolderRequest,
     DeleteInboxRuleRequest,
     DraftEmailRequest,
+    CreateReplyDraftRequest,
     EmailFull,
     EmailMimeResult,
     EmailSummary,
@@ -225,6 +226,9 @@ class ExchangeClient:
 
     def create_draft(self, request: DraftEmailRequest) -> ActionResult:
         return self.backend.create_draft(request)
+
+    def create_reply_draft(self, request: CreateReplyDraftRequest) -> ActionResult:
+        return self.backend.create_reply_draft(request)
 
     def update_draft(self, request: UpdateDraftRequest) -> ActionResult:
         return self.backend.update_draft(request)

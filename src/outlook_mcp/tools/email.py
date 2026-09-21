@@ -18,6 +18,7 @@ from ..models import (
     DeleteEmailRequest,
     DeleteFolderRequest,
     DraftEmailRequest,
+    CreateReplyDraftRequest,
     FolderActionRequest,
     GetAttachmentRequest,
     GetEmailMimeRequest,
@@ -85,6 +86,9 @@ rename_folder = tool_handler("rename_folder", RenameFolderRequest)
 delete_folder = tool_handler("delete_folder", DeleteFolderRequest)
 create_draft = tool_handler(
     "create_draft", DraftEmailRequest, before=_validate_outgoing_attachments
+)
+create_reply_draft = tool_handler(
+    "create_reply_draft", CreateReplyDraftRequest, before=_validate_outgoing_attachments
 )
 update_draft = tool_handler(
     "update_draft", UpdateDraftRequest, before=_validate_outgoing_attachments_if_set

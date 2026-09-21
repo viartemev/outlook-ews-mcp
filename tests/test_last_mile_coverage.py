@@ -547,6 +547,8 @@ def test_create_draft_and_send_draft_map_failures(settings, monkeypatch) -> None
         backend.create_draft(DraftEmailRequest(to=["u@example.com"], subject="S", body="B"))
 
     draft = _mail_item()
+    draft.is_draft = True
+    draft.save = lambda **kwargs: None
     draft.send = lambda **kwargs: (_ for _ in ()).throw(ErrorAccessDenied("cannot send"))
     backend._account.fetch = lambda **kwargs: iter([draft])
     with pytest.raises(APIError):

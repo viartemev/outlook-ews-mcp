@@ -107,8 +107,9 @@ that never modify the mailbox — they get more concurrency (see
 | `rename_folder` | Rename a folder — refuses built-in folders (Inbox, Sent Items, Calendar, ...) | |
 | `delete_folder` | Delete a folder and everything in it — refuses built-in folders | |
 | `create_draft` | Create an email draft | |
+| `create_reply_draft` | Create a reply-all draft in the original conversation, with additional recipients, mentions and attachments; does not send | |
 | `update_draft` | Update a draft; omitted fields are left unchanged, `attachments` (if given) replaces the whole set | |
-| `send_draft` | Send an existing draft | |
+| `send_draft` | Submit a draft and confirm its copy in Sent Items | |
 | `add_attachment` | Attach a local file to a message, typically a draft — the file must live under `EXCHANGE_ATTACHMENT_ROOT` | |
 | `delete_attachment` | Remove one attachment from a message by id | |
 | `get_attachment` | Save an attachment to disk | ✅ |
@@ -250,10 +251,68 @@ A fully commented copy of every variable lives in [`.env.example`](.env.example)
 - Listings stay lean by design: email summaries carry the sender but not recipient lists
   (`get_email` has them), `list_events` returns events without bodies (`get_event` has
   them), and `get_email` returns RFC-822 headers only with `include_headers: true`.
-- Send operations return `id: null` when EWS doesn't provide a durable id for the sent
-  copy (notably replies, forwards, and sent drafts).
+- Direct sends report `submitted`, not recipient delivery. `send_draft` looks up the
+  sent copy and returns its new ID when confirmed; it never echoes the invalidated draft ID.
 - Attachment metadata includes `downloadable`; embedded Exchange item attachments have
   `downloadable: false` and can't be saved by `get_attachment`.
+
+## Reply drafts, Outlook mentions, and send confirmation
+
+Use `create_reply_draft` to prepare an actual EWS reply for review. It defaults to
+`reply_all: true`, keeps the source conversation and reply references, and accepts
+`additional_to`, `additional_cc` and `attachments`. Call `send_draft` only after
+review. `reply_email` still sends immediately; it now also accepts HTML and mentions.
+
+For `send_email`, `create_draft`, `reply_email`, `create_reply_draft` and
+`update_draft`, use explicit mention tokens and metadata:
+
+```json
+{
+  "id": "<source-message-id>",
+  "reply_all": true,
+  "body": "{{mention:owner}}, please prepare the equipment for collection.",
+  "mentions": [
+    {"key": "owner", "email": "owner@example.com", "display_name": "Equipment owner"}
+  ],
+  "additional_cc": ["logistics@example.com"],
+  "attachments": ["/configured-attachment-root/collection.xlsx"]
+}
+```
+
+Mention tokens must appear in body text, not HTML attributes, links, scripts or
+styles. The server escapes plain text and display names, generates unique
+`OWAAM...` HTML anchors, and writes the `X-Mentions` Internet header through an
+EWS extended property. **Both the anchor and header are required** for Outlook's
+mention indicator; a literal `@name` or a mailto link alone is insufficient.
+Mentioned addresses absent from To/CC are added to To; existing CC recipients
+stay in CC. Bodies with mentions use HTML and the configured HTML signature.
+This is an Outlook client convention, verified with Exchange 2016 and Legacy
+Outlook for Mac; other client/server combinations require their own validation.
+
+For partial updates, omitted fields remain unchanged, explicit `null` clears
+nullable fields, and `attachments: []` removes attachments. Supplying mentions
+requires a replacement body. Replacing the body without mentions clears old
+mention notification metadata. The MCP adapter preserves omission before request
+validation, including for contacts and calendar updates.
+
+`send_draft` stamps a unique `submission_id`, calls SendItem exactly once with
+the copy destination explicitly set to this account's Sent Items, then polls for
+the saved copy. `confirmation_timeout_seconds` defaults to 10, accepts 0–30,
+and 0 skips polling. The budget limits polling; a final network request can still
+take up to the configured Exchange request timeout.
+
+- `sent_confirmed`: the non-draft copy was found; `id` is its new Exchange ID.
+- `submitted`: Exchange accepted SendItem; confirmation was disabled.
+- `submitted_unconfirmed`: Exchange accepted SendItem, but the read failed or
+  the copy was not visible before the polling budget expired. Do not resend.
+- `send_outcome_unknown` error: SendItem failed or its response was lost.
+  Do not automatically retry; inspect Sent Items before another attempt.
+
+Results include the actual `sent_copy_mailbox`, `sent_copy_folder` and, when
+available, `datetime_sent`. A Sent Items copy confirms submission, not recipient
+delivery or refresh of Outlook's local cache. Operators can correlate uncertain
+sends using the named String property `OutlookMcpSubmissionId` in property set
+`a8b318c0-6eae-4c97-91aa-5ef142043c2b`. Unit tests never send real mail.
 
 ## Request queue
 

@@ -40,7 +40,7 @@ def test_send_email_checks_attachment_exists(client, tmp_path: Path) -> None:
             "attachments": [str(existing)],
         },
     )
-    assert result["status"] == "sent"
+    assert result["status"] == "submitted"
 
 
 def test_send_email_rejects_missing_attachment(client, tmp_path: Path) -> None:
@@ -95,7 +95,7 @@ def test_send_email_allows_no_attachments_when_root_not_configured(client) -> No
         client,
         {"to": ["user@example.com"], "subject": "Test", "body": "Hello"},
     )
-    assert result["status"] == "sent"
+    assert result["status"] == "submitted"
 
 
 def test_send_email_rejects_non_regular_file_attachment(client, tmp_path: Path) -> None:
@@ -225,7 +225,7 @@ def test_send_email_allows_attachment_inside_root(client, tmp_path: Path) -> Non
             "attachments": [str(inside)],
         },
     )
-    assert result["status"] == "sent"
+    assert result["status"] == "submitted"
 
 
 def test_get_attachment_rejects_save_path_outside_root(client, tmp_path: Path) -> None:

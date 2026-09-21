@@ -206,11 +206,28 @@ class GetThreadRequest(ExchangeModel):
         return self
 
 
-class SendEmailRequest(ExchangeModel):
-    to: list[EmailStr] = Field(min_length=1)
-    subject: str = Field(min_length=1)
+class Mention(ExchangeModel):
+    key: str = Field(pattern=r"^[A-Za-z0-9_-]+$", min_length=1)
+    email: EmailStr
+    display_name: str = Field(min_length=1)
+
+
+class MentionBody(ExchangeModel):
     body: str
     body_type: Literal["text", "html"] = "text"
+    mentions: list[Mention] = Field(default_factory=list)
+
+    @model_validator(mode="after")
+    def validate_mentions(self) -> "MentionBody":
+        from .mentions import validate_mentions
+
+        validate_mentions(self.body, self.body_type, self.mentions)
+        return self
+
+
+class SendEmailRequest(MentionBody):
+    to: list[EmailStr] = Field(min_length=1)
+    subject: str = Field(min_length=1)
     cc: list[EmailStr] = Field(default_factory=list)
     bcc: list[EmailStr] = Field(default_factory=list)
     reply_to: EmailStr | None = None
@@ -219,12 +236,17 @@ class SendEmailRequest(ExchangeModel):
     include_signature: bool = True
 
 
-class ReplyEmailRequest(ExchangeModel):
+class ReplyEmailRequest(MentionBody):
     id: str
-    body: str
     reply_all: bool = False
+    additional_to: list[EmailStr] = Field(default_factory=list)
+    additional_cc: list[EmailStr] = Field(default_factory=list)
     attachments: list[Path] = Field(default_factory=list)
     include_signature: bool = True
+
+
+class CreateReplyDraftRequest(ReplyEmailRequest):
+    reply_all: bool = True
 
 
 class ForwardEmailRequest(ExchangeModel):
@@ -490,11 +512,9 @@ class DeleteFolderRequest(ExchangeModel):
     hard_delete: bool = False
 
 
-class DraftEmailRequest(ExchangeModel):
+class DraftEmailRequest(MentionBody):
     to: list[EmailStr] = Field(min_length=1)
     subject: str = Field(min_length=1)
-    body: str
-    body_type: Literal["text", "html"] = "text"
     cc: list[EmailStr] = Field(default_factory=list)
     bcc: list[EmailStr] = Field(default_factory=list)
     attachments: list[Path] = Field(default_factory=list)
@@ -515,10 +535,22 @@ class UpdateDraftRequest(ExchangeModel):
     cc: list[EmailStr] | None = None
     bcc: list[EmailStr] | None = None
     attachments: list[Path] | None = None
+    mentions: list[Mention] = Field(default_factory=list)
+
+    @model_validator(mode="after")
+    def validate_mentions(self) -> "UpdateDraftRequest":
+        from .mentions import validate_mentions
+
+        if self.mentions and self.body is None:
+            raise ValueError("mentions requires a replacement body")
+        if self.body is not None:
+            validate_mentions(self.body, self.body_type, self.mentions)
+        return self
 
 
 class SendDraftRequest(ExchangeModel):
     id: str
+    confirmation_timeout_seconds: int = Field(default=10, ge=0, le=30)
 
 
 class SearchEmailsRequest(ExchangeModel):
@@ -754,12 +786,15 @@ class FreeSlot(ExchangeModel):
 
 
 class SendResult(ExchangeModel):
-    # EWS doesn't hand back a usable id for a send: send-and-save typically returns
-    # none at all, and a reply/forward/draft-send's only candidate ids (the source
-    # item, the now-invalidated draft) refer to a different or no-longer-valid item.
+    # Only a confirmed Sent Items lookup yields the new durable ID after SendItem.
+    # Never use a source message or invalidated draft ID as a sent-copy ID.
     id: str | None = None
     status: str
     warning: str | None = None
+    submission_id: str | None = None
+    sent_copy_mailbox: str | None = None
+    sent_copy_folder: str | None = None
+    datetime_sent: datetime | None = None
 
 
 class CreateEventResult(ExchangeModel):

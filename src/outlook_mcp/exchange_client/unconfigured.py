@@ -35,6 +35,7 @@ from ..models import (
     DeleteFolderRequest,
     DeleteInboxRuleRequest,
     DraftEmailRequest,
+    CreateReplyDraftRequest,
     EmailFull,
     EmailMimeResult,
     EmailSummary,
@@ -180,6 +181,9 @@ class UnconfiguredExchangeBackend:
         self._raise()
 
     def create_draft(self, request: DraftEmailRequest) -> ActionResult:
+        self._raise()
+
+    def create_reply_draft(self, request: CreateReplyDraftRequest) -> ActionResult:
         self._raise()
 
     def update_draft(self, request: UpdateDraftRequest) -> ActionResult:
