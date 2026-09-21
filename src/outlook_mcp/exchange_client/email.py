@@ -7,6 +7,8 @@ import os
 import re
 import stat
 import tempfile
+import time
+from uuid import uuid4
 from collections import Counter
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -26,6 +28,7 @@ from exchangelib.items import HARD_DELETE, MOVE_TO_DELETED_ITEMS
 from exchangelib.properties import ConversationId, ItemId
 
 from ..errors import APIError, NotFoundError
+from ..mentions import render_mentions
 from ..models import (
     ActionResult,
     Attachment,
@@ -42,6 +45,7 @@ from ..models import (
     CategorizeEmailRequest,
     CategoryUsage,
     CreateFolderRequest,
+    CreateReplyDraftRequest,
     DeleteEmailRequest,
     DeleteFolderRequest,
     DraftEmailRequest,
@@ -59,6 +63,7 @@ from ..models import (
     ListEmailsRequest,
     ListFoldersRequest,
     MarkEmailRequest,
+    Mention,
     RenameFolderRequest,
     ReplyEmailRequest,
     SearchEmailsRequest,
@@ -89,10 +94,28 @@ class FlagDueDate(ExtendedProperty):
     property_type = "SystemTime"
 
 
+class SubmissionId(ExtendedProperty):
+    """Stable correlation across the draft -> sent copy EWS item-ID change."""
+
+    property_set_id = "a8b318c0-6eae-4c97-91aa-5ef142043c2b"
+    property_name = "OutlookMcpSubmissionId"
+    property_type = "String"
+
+
+class MentionHeader(ExtendedProperty):
+    """Outlook's recipient mention metadata, written via PS_INTERNET_HEADERS."""
+
+    distinguished_property_set_id = "InternetHeaders"
+    property_name = "X-Mentions"
+    property_type = "String"
+
+
 for _field_name, _field_cls in (
     ("flag_status", Flag),
     ("flag_start_date", FlagStartDate),
     ("flag_due_date", FlagDueDate),
+    ("mcp_submission_id", SubmissionId),
+    ("x_mentions", MentionHeader),
 ):
     try:
         Message.get_field_by_fieldname(_field_name)
@@ -264,8 +287,9 @@ class EmailOperationsMixin(BaseEWSBackend):
         return f"{body}{separator}{signature}"
 
     def _make_message(self, request: SendEmailRequest | DraftEmailRequest) -> Message:
-        body_text = self._with_signature(request.body, request.body_type, request.include_signature)
-        body: str | HTMLBody = HTMLBody(body_text) if request.body_type == "html" else body_text
+        body = self._outgoing_body(
+            request.body, request.body_type, request.mentions, request.include_signature
+        )
         reply_to: str | None = getattr(request, "reply_to", None)
         importance: str | None = getattr(request, "importance", None)
         message = Message(
@@ -279,8 +303,44 @@ class EmailOperationsMixin(BaseEWSBackend):
             reply_to=[self._mailbox(reply_to)] if reply_to else None,
             importance=importance.capitalize() if importance else "Normal",
         )
+        self._add_recipients(message, [str(m.email) for m in request.mentions], [])
+        if request.mentions:
+            message.x_mentions = self._mention_header(request.mentions)
         self._attach_files(message, request.attachments)
         return message
+
+    @staticmethod
+    def _mention_header(mentions: list[Mention]) -> str | None:
+        addresses = dict.fromkeys(str(m.email).casefold() for m in mentions)
+        return ",".join(addresses) or None
+
+    def _outgoing_body(
+        self, body: str, body_type: str, mentions: list[Mention], include_signature: bool
+    ) -> str | HTMLBody:
+        text, kind = render_mentions(body, body_type, mentions)
+        text = self._with_signature(text, kind, include_signature)
+        return HTMLBody(text) if kind == "html" else text
+
+    def _add_recipients(self, item: Any, to: list[str], cc: list[str]) -> list[str]:
+        # Mentions must actually receive the message; never move an existing CC
+        # recipient to To, or create duplicates (including case-only variants).
+        seen = {
+            (getattr(m, "email_address", None) or "").casefold()
+            for field in ("to_recipients", "cc_recipients")
+            for m in getattr(item, field, None) or []
+        }
+        changed = []
+        for field, addresses in (("to_recipients", to), ("cc_recipients", cc)):
+            recipients = list(getattr(item, field, None) or [])
+            for address in addresses:
+                if address.casefold() not in seen:
+                    recipients.append(self._mailbox(address))
+                    seen.add(address.casefold())
+                    if field not in changed:
+                        changed.append(field)
+            if field in changed:
+                setattr(item, field, recipients)
+        return changed
 
     def _attach_files(self, message: Message, attachments: list[Path]) -> None:
         max_size_bytes = self.settings.attachment_max_size_mb * 1024 * 1024
@@ -660,21 +720,52 @@ class EmailOperationsMixin(BaseEWSBackend):
         try:
             message.send_and_save()
             # send_and_save() doesn't hand back the id of the sent-and-saved copy.
-            return SendResult(id=message.id or None, status="sent")
+            return SendResult(id=message.id or None, status="submitted")
         except Exception as exc:  # noqa: BLE001
             raise self._map_exception(exc) from exc
 
     def reply_email(self, request: ReplyEmailRequest) -> SendResult:
-        item = self._fetch_item(request.id, expected_type=Message)
         try:
-            subject = reply_subject(item.subject)
-            body = self._with_signature(request.body, "text", request.include_signature)
-            response = (
-                item.create_reply_all(subject=subject, body=body)
-                if request.reply_all
-                else item.create_reply(subject=subject, body=body)
-            )
+            if request.mentions:
+                draft = self.create_reply_draft(
+                    CreateReplyDraftRequest.model_validate(request.model_dump())
+                )
+                return self.send_draft(SendDraftRequest(id=draft.id))
+            response = self._reply_response(request)
             return self._send_response_object(response, request.attachments)
+        except Exception as exc:  # noqa: BLE001
+            raise self._map_exception(exc, item_id=request.id) from exc
+
+    def _reply_response(self, request: ReplyEmailRequest) -> Any:
+        item = self._fetch_item(request.id, expected_type=Message)
+        body = self._outgoing_body(
+            request.body, request.body_type, request.mentions, request.include_signature
+        )
+        response = (
+            item.create_reply_all(subject=reply_subject(item.subject), body=body)
+            if request.reply_all
+            else item.create_reply(subject=reply_subject(item.subject), body=body)
+        )
+        self._add_recipients(
+            response,
+            [str(a) for a in request.additional_to] + [str(m.email) for m in request.mentions],
+            [str(a) for a in request.additional_cc],
+        )
+        return response
+
+    def create_reply_draft(self, request: CreateReplyDraftRequest) -> ActionResult:
+        try:
+            response = self._reply_response(request)
+            draft = response.save(self.account.drafts)
+            if request.attachments or request.mentions:
+                message = self._fetch_item(
+                    draft.id, folder=self.account.drafts, expected_type=Message
+                )
+                if request.mentions:
+                    message.x_mentions = self._mention_header(request.mentions)
+                    message.save(update_fields=["x_mentions"])
+                self._attach_files(message, request.attachments)
+            return ActionResult(id=draft.id, status="draft")
         except Exception as exc:  # noqa: BLE001
             raise self._map_exception(exc, item_id=request.id) from exc
 
@@ -693,17 +784,16 @@ class EmailOperationsMixin(BaseEWSBackend):
     def _send_response_object(self, response: Any, attachments: list[Path]) -> SendResult:
         # create_reply/create_reply_all/create_forward response objects have no attachments
         # field of their own, so attachments require saving as a draft first, then attaching.
-        # Neither path hands back a trustworthy id for the sent message: response.send()
-        # doesn't save/return the sent item at all, and the draft's id stops being valid
-        # the moment message.send() moves it out of Drafts -- so no id is fabricated here.
+        # Neither path hands back the sent-copy ID. Report submission only; use
+        # create_reply_draft + send_draft when the caller needs confirmation.
         if not attachments:
             response.send()
-            return SendResult(id=None, status="sent")
+            return SendResult(id=None, status="submitted")
         draft = response.save(self.account.drafts)
         message = self._fetch_item(draft.id, folder=self.account.drafts, expected_type=Message)
         self._attach_files(message, attachments)
-        message.send()
-        return SendResult(id=None, status="sent")
+        message.send(copy_to_folder=self.account.sent)
+        return SendResult(id=None, status="submitted")
 
     def move_email(self, request: FolderActionRequest) -> ActionResult:
         item = self._fetch_item(request.id, expected_type=Message)
@@ -1078,13 +1168,21 @@ class EmailOperationsMixin(BaseEWSBackend):
                 continue
             value = getattr(request, request_field)
             if request_field == "body" and value is not None:
-                value = HTMLBody(value) if request.body_type == "html" else value
+                value = self._outgoing_body(value, request.body_type, request.mentions, False)
             elif request_field in ("to", "cc", "bcc"):
                 value = [self._mailbox(address) for address in value or []]
             setattr(item, item_field, value)
             updated_fields.append(request_field)
             save_fields.append(item_field)
         try:
+            if "body" in fields_set and (request.mentions or getattr(item, "x_mentions", None)):
+                # A replacement body must not leave a stale notification header.
+                item.x_mentions = self._mention_header(request.mentions)
+                save_fields.append("x_mentions")
+            for field in self._add_recipients(item, [str(m.email) for m in request.mentions], []):
+                if field not in save_fields:
+                    save_fields.append(field)
+                    updated_fields.append("to" if field == "to_recipients" else "cc")
             if "attachments" in fields_set:
                 item.detach(list(item.attachments))
                 self._attach_files(item, request.attachments or [])
@@ -1100,18 +1198,64 @@ class EmailOperationsMixin(BaseEWSBackend):
             request.id,
             folder=self.account.drafts,
             expected_type=Message,
-            only_fields=("parent_folder_id",),
+            only_fields=("parent_folder_id", "is_draft"),
         )
+        if not item.is_draft:
+            raise APIError("validation_error", "the selected item is not an unsent draft")
+        submission_id = str(uuid4())
+        item.mcp_submission_id = submission_id
+        # Save before SendItem. If this fails, no send was attempted.
         try:
-            # send_and_save() on an existing item saves the copy back into its parent
-            # folder (Drafts). send() with copy_to_folder places the copy in Sent and
-            # removes the original from Drafts, which is the behaviour we want.
-            item.send(copy_to_folder=self.account.sent)
-            # The draft's own id stops being valid the moment it's sent (it moves out
-            # of Drafts), so request.id must not be echoed back as if still usable.
-            return SendResult(id=None, status="sent")
+            item.save(update_fields=["mcp_submission_id"])
         except Exception as exc:  # noqa: BLE001
             raise self._map_exception(exc, item_id=request.id) from exc
+        try:
+            item.send(copy_to_folder=self.account.sent)
+        except Exception as exc:  # noqa: BLE001
+            # Never invite a blind retry after a potentially successful SendItem.
+            raise APIError(
+                "send_outcome_unknown",
+                "SendItem failed or its response was lost. Check Sent Items using "
+                "submission_id before attempting another send.",
+                extra={"submission_id": submission_id, "draft_id": request.id},
+            ) from exc
+        return self._confirm_submission(submission_id, request.confirmation_timeout_seconds)
+
+    def _confirm_submission(self, submission_id: str, timeout: int) -> SendResult:
+        result = SendResult(
+            status="submitted",
+            submission_id=submission_id,
+            sent_copy_mailbox=self.account.primary_smtp_address,
+            sent_copy_folder="sentitems",
+        )
+        if timeout == 0:
+            return result
+        deadline = time.monotonic() + timeout
+        while True:
+            try:
+                copies = list(
+                    self.account.sent.filter(mcp_submission_id=submission_id).only(
+                        "is_draft", "datetime_sent"
+                    )[:2]
+                )
+                if len(copies) == 1 and not copies[0].is_draft:
+                    result.id = copies[0].id
+                    result.datetime_sent = copies[0].datetime_sent
+                    result.status = "sent_confirmed"
+                    return result
+            except Exception:  # noqa: BLE001
+                # The send already succeeded; a failed read must not look like a
+                # failed send (which encourages a duplicate).
+                result.warning = "Exchange accepted SendItem, but Sent Items verification failed."
+                break
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                result.warning = "Exchange accepted SendItem; its sent copy is not visible yet."
+                break
+            time.sleep(min(0.5, remaining))
+        result.status = "submitted_unconfirmed"
+        result.warning += " Do not resend; check Sent Items using submission_id."
+        return result
 
     def add_attachment(self, request: AddAttachmentRequest) -> ActionResult:
         path = request.path

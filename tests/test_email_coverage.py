@@ -338,6 +338,7 @@ def test_create_draft_and_send_draft(settings, monkeypatch) -> None:
             kwargs.pop("account", None)
             kwargs.pop("folder", None)
             kwargs.setdefault("id", "draft-1")
+            kwargs.setdefault("is_draft", True)
             super().__init__(**kwargs)
 
         def send(self, **kwargs):
@@ -350,10 +351,12 @@ def test_create_draft_and_send_draft(settings, monkeypatch) -> None:
     assert created.status == "draft"
 
     draft = DraftMessage()
+    backend._account.primary_smtp_address = "u@example.com"
     backend._account.fetch = lambda **kwargs: iter([draft])
-    sent = backend.send_draft(SendDraftRequest(id="draft-1"))
+    sent = backend.send_draft(SendDraftRequest(id="draft-1", confirmation_timeout_seconds=0))
     # The draft's id dies the moment it is sent; it must not be echoed back.
     assert sent.id is None
+    assert sent.status == "submitted"
     assert draft.sent is True
 
 

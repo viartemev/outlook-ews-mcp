@@ -38,6 +38,7 @@ from outlook_mcp.models import (
     DeleteFolderRequest,
     DeleteInboxRuleRequest,
     DraftEmailRequest,
+    CreateReplyDraftRequest,
     EmailAddress,
     EmailFull,
     EmailMimeResult,
@@ -196,13 +197,13 @@ class FakeExchangeBackend:
         )
 
     def send_email(self, request: SendEmailRequest) -> SendResult:
-        return SendResult(id="sent-1", status="sent")
+        return SendResult(id=None, status="submitted")
 
     def reply_email(self, request: ReplyEmailRequest) -> SendResult:
-        return SendResult(id=request.id, status="sent")
+        return SendResult(id=None, status="submitted")
 
     def forward_email(self, request: ForwardEmailRequest) -> SendResult:
-        return SendResult(id=request.id, status="sent")
+        return SendResult(id=None, status="submitted")
 
     def move_email(self, request: FolderActionRequest) -> ActionResult:
         return ActionResult(id=request.id, status="moved", new_folder=request.folder)
@@ -294,6 +295,9 @@ class FakeExchangeBackend:
     def create_draft(self, request: DraftEmailRequest) -> ActionResult:
         return ActionResult(id="draft-1", status="draft")
 
+    def create_reply_draft(self, request: CreateReplyDraftRequest) -> ActionResult:
+        return ActionResult(id="reply-draft-1", status="draft")
+
     def update_draft(self, request: UpdateDraftRequest) -> ActionResult:
         fields_set = request.model_fields_set
         updated_fields = [
@@ -304,7 +308,7 @@ class FakeExchangeBackend:
         return ActionResult(id=request.id, status="updated", updated_fields=updated_fields)
 
     def send_draft(self, request: SendDraftRequest) -> SendResult:
-        return SendResult(id=request.id, status="sent")
+        return SendResult(id="sent-copy-1", status="sent_confirmed")
 
     def add_attachment(self, request: AddAttachmentRequest) -> ActionResult:
         return ActionResult(id=request.email_id, status="updated", updated_fields=["attachments"])

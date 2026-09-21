@@ -29,6 +29,7 @@ from .tools.email import (
     categorize_emails,
     copy_email,
     create_draft,
+    create_reply_draft,
     create_folder,
     delete_email,
     delete_emails,
@@ -345,6 +346,14 @@ TOOL_SPECS: list[ToolSpec] = [
         response_model=models.ActionResult,
     ),
     ToolSpec(
+        "create_reply_draft",
+        "Create a reply-all draft in the original thread without sending. Supports HTML, "
+        "{{mention:key}} tokens, additional To/CC recipients and attachments.",
+        create_reply_draft,
+        request_model=models.CreateReplyDraftRequest,
+        response_model=models.ActionResult,
+    ),
+    ToolSpec(
         "update_draft",
         "Update an existing email draft. Omitted fields are left unchanged; "
         "'attachments', if given, replaces the draft's entire attachment set",
@@ -355,7 +364,9 @@ TOOL_SPECS: list[ToolSpec] = [
     ),
     ToolSpec(
         "send_draft",
-        "Send a draft email",
+        "Submit a draft and verify its copy in Sent Items. sent_confirmed means the copy "
+        "was found, not recipient delivery. submitted/submitted_unconfirmed must not be "
+        "retried blindly. Returns the actual sent-copy mailbox and correlation ID.",
         send_draft,
         request_model=models.SendDraftRequest,
         response_model=models.SendResult,

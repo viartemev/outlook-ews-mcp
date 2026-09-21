@@ -12,6 +12,7 @@ import anyio
 import anyio.to_thread
 from mcp.types import CallToolResult, TextContent
 from pydantic.fields import FieldInfo
+from pydantic.experimental.missing_sentinel import MISSING
 
 from .config import Settings
 from .errors import APIError
@@ -153,12 +154,6 @@ class ToolGateway:
                 )
 
 
-def _field_default(field: FieldInfo) -> Any:
-    if field.is_required():
-        return inspect.Parameter.empty
-    return field.get_default(call_default_factory=True)
-
-
 def _field_annotation(field: FieldInfo) -> Any:
     """The field's type, carrying its Field(...) constraints (ge/le/min_length/...).
 
@@ -199,6 +194,9 @@ def bind_mcp_tool(
     """
 
     async def execute(**arguments: Any) -> CallToolResult:
+        # FastMCP expands every optional argument, including omitted PATCH fields.
+        # Preserve omission until the request model applies its own defaults.
+        arguments = {key: value for key, value in arguments.items() if value is not MISSING}
         if gateway is None:
             payload, is_error = registry_call(spec.name, arguments)
         else:
@@ -231,11 +229,15 @@ def bind_mcp_tool(
     annotations: dict[str, Any] = {"return": CallToolResult}
     for field_name, field in spec.request_model.model_fields.items():
         annotation = _field_annotation(field)
+        default: Any = inspect.Parameter.empty
+        if not field.is_required():
+            annotation = annotation | MISSING
+            default = MISSING
         parameters.append(
             inspect.Parameter(
                 field_name,
                 inspect.Parameter.KEYWORD_ONLY,
-                default=_field_default(field),
+                default=default,
                 annotation=annotation,
             )
         )

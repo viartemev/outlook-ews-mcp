@@ -1033,7 +1033,7 @@ def test_reply_email_sends_response_object_when_no_attachments(settings) -> None
     result = backend.reply_email(ReplyEmailRequest(id="msg-1", body="Reply body"))
 
     assert events == [("create_reply", "Re: Hello", "Reply body"), ("send",)]
-    assert result == SendResult(id=None, status="sent")
+    assert result == SendResult(id=None, status="submitted")
 
 
 def test_reply_email_saves_draft_attaches_files_then_sends(settings, tmp_path) -> None:
@@ -1042,6 +1042,7 @@ def test_reply_email_saves_draft_attaches_files_then_sends(settings, tmp_path) -
     attachment_path.write_text("hi")
     events: list[tuple] = []
     drafts_folder = SimpleNamespace(id="drafts-folder")
+    sent_folder = SimpleNamespace(id="sent-folder")
 
     class FakeMessage:
         id = "sent-1"
@@ -1050,7 +1051,8 @@ def test_reply_email_saves_draft_attaches_files_then_sends(settings, tmp_path) -
         def attach(self, attachment):
             events.append(("attach", attachment.name))
 
-        def send(self):
+        def send(self, copy_to_folder):
+            assert copy_to_folder is sent_folder
             events.append(("send",))
 
     class FakeDraft:
@@ -1073,7 +1075,7 @@ def test_reply_email_saves_draft_attaches_files_then_sends(settings, tmp_path) -
     def fetch(ids, folder=None):
         yield next(fetch_results)
 
-    backend._account = SimpleNamespace(fetch=fetch, drafts=drafts_folder)
+    backend._account = SimpleNamespace(fetch=fetch, drafts=drafts_folder, sent=sent_folder)
 
     result = backend.reply_email(
         ReplyEmailRequest(
@@ -1087,7 +1089,7 @@ def test_reply_email_saves_draft_attaches_files_then_sends(settings, tmp_path) -
         ("attach", "note.txt"),
         ("send",),
     ]
-    assert result == SendResult(id=None, status="sent")
+    assert result == SendResult(id=None, status="submitted")
 
 
 @pytest.mark.parametrize(
@@ -1171,6 +1173,7 @@ def test_forward_email_saves_draft_attaches_files_then_sends(settings, tmp_path)
     attachment_path.write_text("hi")
     events: list[tuple] = []
     drafts_folder = SimpleNamespace(id="drafts-folder")
+    sent_folder = SimpleNamespace(id="sent-folder")
 
     class FakeMessage:
         id = "sent-1"
@@ -1179,7 +1182,8 @@ def test_forward_email_saves_draft_attaches_files_then_sends(settings, tmp_path)
         def attach(self, attachment):
             events.append(("attach", attachment.name))
 
-        def send(self):
+        def send(self, copy_to_folder):
+            assert copy_to_folder is sent_folder
             events.append(("send",))
 
     class FakeDraft:
@@ -1204,7 +1208,7 @@ def test_forward_email_saves_draft_attaches_files_then_sends(settings, tmp_path)
     def fetch(ids, folder=None):
         yield next(fetch_results)
 
-    backend._account = SimpleNamespace(fetch=fetch, drafts=drafts_folder)
+    backend._account = SimpleNamespace(fetch=fetch, drafts=drafts_folder, sent=sent_folder)
 
     result = backend.forward_email(
         ForwardEmailRequest(id="msg-1", to=["dest@example.com"], attachments=[attachment_path])
@@ -1216,7 +1220,7 @@ def test_forward_email_saves_draft_attaches_files_then_sends(settings, tmp_path)
         ("attach", "note.txt"),
         ("send",),
     ]
-    assert result == SendResult(id=None, status="sent")
+    assert result == SendResult(id=None, status="submitted")
 
 
 @pytest.mark.skipif(not hasattr(os, "mkfifo"), reason="FIFOs are POSIX-only")
