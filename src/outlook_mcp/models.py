@@ -687,6 +687,12 @@ class CreateEventRequest(ExchangeModel):
     calendar_id: str | None = None
     location: str | None = None
     body: str | None = None
+    #: External meeting link (Teams, ToлК, Zoom, ...) to attach to the event.
+    #: Stored in EWS's native net_show_url field (round-trips as
+    #: online_meeting_url on CalendarEvent), prefixed onto the body, and
+    #: prefixed onto location (ahead of any real room) -- the way the
+    #: mailbox's own online-meeting add-ins place a join link.
+    meeting_url: str | None = None
     attendees: list[EmailStr] = Field(default_factory=list)
     is_all_day: bool = False
     reminder_minutes: int | None = Field(default=15, ge=0, le=10080)
@@ -715,6 +721,10 @@ class UpdateEventRequest(ExchangeModel):
     end: datetime | None = None
     location: str | None = None
     body: str | None = None
+    #: Updates only the structural net_show_url field -- unlike create_event,
+    #: this does not touch the body text, since finding and replacing a
+    #: previously-inserted link line reliably isn't worth the complexity here.
+    meeting_url: str | None = None
     add_attendees: list[EmailStr] = Field(default_factory=list)
     remove_attendees: list[EmailStr] = Field(default_factory=list)
     reminder_minutes: int | None = Field(default=None, ge=0, le=10080)

@@ -276,14 +276,24 @@ class CalendarOperationsMixin(BaseEWSBackend):
         end = self._to_ews_datetime(request.end)
         if request.is_all_day:
             start, end = self._all_day_bounds(start, end)
+        body = request.body
+        location = request.location
+        if request.meeting_url:
+            link_line = f"Join the meeting: {request.meeting_url}"
+            body = f"{link_line}\n\n{body}" if body else link_line
+            # Mirrors how the mailbox's own online-meeting add-ins (Teams, ToлК)
+            # place the join URL: it leads location, with any real room kept
+            # after it rather than overwritten.
+            location = f"{request.meeting_url}; {location}" if location else request.meeting_url
         item = CalendarItem(
             account=self.account,
             folder=folder,
             subject=request.subject,
             start=start,
             end=end,
-            location=request.location,
-            body=request.body,
+            location=location,
+            body=body,
+            net_show_url=request.meeting_url,
             required_attendees=[
                 Attendee(mailbox=self._mailbox(address)) for address in request.attendees
             ],
@@ -367,7 +377,11 @@ class CalendarOperationsMixin(BaseEWSBackend):
         # in the request (even as null) means "clear it"; an omitted field means
         # "leave it untouched". Mirrors the fields_set handling in update_contact.
         fields_set = request.model_fields_set
-        for request_field, item_field in [("location", "location"), ("body", "body")]:
+        for request_field, item_field in [
+            ("location", "location"),
+            ("body", "body"),
+            ("meeting_url", "net_show_url"),
+        ]:
             if request_field not in fields_set:
                 continue
             setattr(item, item_field, getattr(request, request_field))
