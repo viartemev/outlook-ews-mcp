@@ -88,6 +88,56 @@ def test_create_event_omits_read_only_fields_from_xml(settings, monkeypatch) -> 
         assert read_only_field not in xml
 
 
+def test_create_event_with_meeting_url_sets_net_show_url_and_body(settings, monkeypatch) -> None:
+    captured = _capture_save(monkeypatch, CalendarItem)
+    backend = EWSExchangeBackend(settings)
+    backend._account = _bare_account()
+
+    request = CreateEventRequest.model_validate(
+        {
+            "subject": "Standup",
+            "start": "2026-04-13T09:00:00+00:00",
+            "end": "2026-04-13T09:15:00+00:00",
+            "body": "Agenda: status updates",
+            "meeting_url": "https://teams.microsoft.com/l/meetup-join/abc",
+        }
+    )
+
+    backend.create_event(request)
+
+    xml = captured["xml"]
+    assert "<t:NetShowUrl>https://teams.microsoft.com/l/meetup-join/abc</t:NetShowUrl>" in xml
+    assert "Join the meeting: https://teams.microsoft.com/l/meetup-join/abc" in xml
+    assert "Agenda: status updates" in xml
+    assert "<t:Location>https://teams.microsoft.com/l/meetup-join/abc</t:Location>" in xml
+
+
+def test_create_event_with_meeting_url_and_room_combines_location(settings, monkeypatch) -> None:
+    """A real room stays visible after the link, matching how the mailbox's own
+    online-meeting add-ins compose location (link first, room kept after)."""
+    captured = _capture_save(monkeypatch, CalendarItem)
+    backend = EWSExchangeBackend(settings)
+    backend._account = _bare_account()
+
+    request = CreateEventRequest.model_validate(
+        {
+            "subject": "Standup",
+            "start": "2026-04-13T09:00:00+00:00",
+            "end": "2026-04-13T09:15:00+00:00",
+            "location": "520-Москва Tower A-Переговорная",
+            "meeting_url": "https://talk.magnit.ru/abc123",
+        }
+    )
+
+    backend.create_event(request)
+
+    # Cyrillic text comes back as numeric XML entities in the raw string, so
+    # compare the parsed element text rather than a literal substring.
+    tree = etree.fromstring(captured["xml"].encode())
+    location = tree.find(".//{http://schemas.microsoft.com/exchange/services/2006/types}Location")
+    assert location.text == "https://talk.magnit.ru/abc123; 520-Москва Tower A-Переговорная"
+
+
 def test_send_email_serializes_recipients_and_importance(settings, monkeypatch) -> None:
     captured = _capture_save(monkeypatch, Message)
     backend = EWSExchangeBackend(settings)
