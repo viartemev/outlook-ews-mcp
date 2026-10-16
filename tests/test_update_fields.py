@@ -318,6 +318,33 @@ def test_update_event_explicit_null_clears_location_body_reminder(settings) -> N
     assert result.updated_fields == ["location", "body", "reminder_minutes"]
 
 
+def test_update_event_sets_meeting_url(settings) -> None:
+    backend = EWSExchangeBackend(settings)
+    item = FakeSavableItem(id="event-1", net_show_url=None)
+    backend._account = _account_with_item(item, calendar=_fake_folder())
+
+    request = UpdateEventRequest.model_validate(
+        {"id": "event-1", "meeting_url": "https://teams.microsoft.com/l/meetup-join/abc"}
+    )
+    result = backend.update_event(request)
+
+    assert item.net_show_url == "https://teams.microsoft.com/l/meetup-join/abc"
+    assert item.save_calls[-1]["update_fields"] == ["net_show_url"]
+    assert result.updated_fields == ["meeting_url"]
+
+
+def test_update_event_explicit_null_clears_meeting_url(settings) -> None:
+    backend = EWSExchangeBackend(settings)
+    item = FakeSavableItem(id="event-1", net_show_url="https://old-link.example.com")
+    backend._account = _account_with_item(item, calendar=_fake_folder())
+
+    request = UpdateEventRequest.model_validate({"id": "event-1", "meeting_url": None})
+    result = backend.update_event(request)
+
+    assert item.net_show_url is None
+    assert result.updated_fields == ["meeting_url"]
+
+
 def test_update_event_all_day_update_floors_new_end_to_midnight(settings) -> None:
     backend = EWSExchangeBackend(settings)
     item = FakeSavableItem(
