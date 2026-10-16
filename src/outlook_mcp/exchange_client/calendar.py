@@ -4,7 +4,7 @@ from datetime import date, datetime, time, timedelta
 from itertools import islice
 from typing import Any, Literal
 
-from exchangelib import Attendee, CalendarItem
+from exchangelib import UTC, Attendee, CalendarItem
 from exchangelib.recurrence import (
     WEEKDAY_NAMES,
     AbsoluteMonthlyPattern,
@@ -462,8 +462,10 @@ class CalendarOperationsMixin(BaseEWSBackend):
             views = list(
                 self.account.protocol.get_free_busy_info(
                     accounts=[(str(address), "Required", False) for address in request.attendees],
-                    start=start,
-                    end=end,
+                    # Exchange shifts MergedFreeBusy when TimeWindow carries a numeric
+                    # offset; with UTC ("Z") the merged grid starts at StartTime.
+                    start=start.astimezone(UTC),
+                    end=end.astimezone(UTC),
                     merged_free_busy_interval=sample_minutes,
                     requested_view="DetailedMerged",
                 )

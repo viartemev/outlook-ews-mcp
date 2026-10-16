@@ -166,8 +166,8 @@ def test_find_free_slots_normalizes_pydantic_tzinfo(settings) -> None:
     assert len(result) == 1
     assert isinstance(captured["start"], EWSDateTime)
     assert isinstance(captured["end"], EWSDateTime)
-    assert captured["start"].tzinfo.key == "Europe/Moscow"
-    assert captured["end"].tzinfo.key == "Europe/Moscow"
+    assert captured["start"].tzinfo.key == "UTC"
+    assert captured["end"].tzinfo.key == "UTC"
     assert result[0].start.tzinfo.key == "Europe/Moscow"
     assert result[0].end.tzinfo.key == "Europe/Moscow"
 

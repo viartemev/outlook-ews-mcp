@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import os
 import threading
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -277,6 +278,37 @@ def test_find_free_slots_filters_by_work_hours(settings) -> None:
     assert len(slots) == 2
     assert slots[0].start.hour == 9
     assert slots[1].start.hour == 10
+
+
+def test_find_free_slots_sends_window_in_utc(settings) -> None:
+    """An on-prem Exchange 2019 server was observed to shift MergedFreeBusy by
+    (request offset - server offset) when the TimeWindow carries a numeric offset;
+    with UTC (``Z``) the grid starts at StartTime. The absolute window must stay
+    the requested one."""
+    backend = EWSExchangeBackend(settings)
+    captured: dict = {}
+    backend._account = _fake_account([SimpleNamespace(merged="00")], captured)
+
+    backend.find_free_slots(_free_slots_request())
+
+    assert captured["start"].tzinfo.key == "UTC"
+    assert captured["end"].tzinfo.key == "UTC"
+    assert captured["start"] == datetime(2026, 4, 13, 6, 0, tzinfo=timezone.utc)
+    assert captured["end"] == datetime(2026, 4, 13, 8, 0, tzinfo=timezone.utc)
+
+
+def test_find_free_slots_returns_slots_in_mailbox_timezone(settings) -> None:
+    backend = EWSExchangeBackend(settings)
+    # First hour busy, second free: the free cell is counted from the requested start.
+    backend._account = _fake_account([SimpleNamespace(merged="20")])
+
+    slots = backend.find_free_slots(_free_slots_request())
+
+    moscow = timezone(timedelta(hours=3))
+    assert [(slot.start, slot.end) for slot in slots] == [
+        (datetime(2026, 4, 13, 10, 0, tzinfo=moscow), datetime(2026, 4, 13, 11, 0, tzinfo=moscow))
+    ]
+    assert slots[0].start.utcoffset() == timedelta(hours=3)
 
 
 def test_fetch_item_raises_api_error_when_exchange_returns_error(settings) -> None:
