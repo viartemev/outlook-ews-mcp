@@ -10,11 +10,16 @@ updates:
       interval: "weekly"
 
   # Dockerfile pins python:3.12-slim (both stages) and the uv builder image by
-  # digest; same rationale as above.
+  # digest; same rationale as above. Python minor/major bumps are ignored: the
+  # image must run a version the CI test matrix covers, so moving it is a manual
+  # change together with .github/workflows/ci.yml, not a digest refresh.
   - package-ecosystem: "docker"
     directory: "/"
     schedule:
       interval: "weekly"
+    ignore:
+      - dependency-name: "python"
+        update-types: ["version-update:semver-major", "version-update:semver-minor"]
 
   # Keeps pyproject.toml/uv.lock dependency bounds current; pip-audit in CI
   # already flags known vulnerabilities, this catches routine version drift.

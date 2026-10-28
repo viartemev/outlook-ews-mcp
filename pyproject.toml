@@ -65,7 +65,10 @@ package-dir = {"" = "src"}
 where = ["src"]
 
 [tool.uv]
-required-version = "==0.12.1"
+# A floor, not an exact pin: Dependabot bumps the uv image in the Dockerfile on
+# its own schedule, and an exact pin made every such bump fail `uv sync` there
+# (and locally for anyone on a newer uv). CI still installs exactly UV_VERSION.
+required-version = ">=0.12.1"
 
 [tool.pytest.ini_options]
 pythonpath = ["src"]
