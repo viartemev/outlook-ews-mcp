@@ -11,23 +11,21 @@ from typing import Any, Literal
 from urllib.parse import urlparse
 
 import requests
-from exchangelib import version as ews_version
 from exchangelib import (
-    Account,
     BASIC,
+    DELEGATE,
+    IMPERSONATION,
+    NTLM,
+    Account,
     Configuration,
     Credentials,
-    DELEGATE,
     EWSTimeZone,
     Folder,
     HTMLBody,
-    IMPERSONATION,
     Mailbox,
-    NTLM,
 )
-from exchangelib.ewsdatetime import EWSDateTime
+from exchangelib import version as ews_version
 from exchangelib.errors import (
-    EWSError,
     ErrorAccessDenied,
     ErrorExceededConnectionCount,
     ErrorFolderSavePropertyError,
@@ -38,12 +36,14 @@ from exchangelib.errors import (
     ErrorServerBusy,
     ErrorTimeoutExpired,
     ErrorTooManyObjectsOpened,
+    EWSError,
     RateLimitError,
     ResponseMessageError,
     TransportError,
-    UnknownTimeZone,
     UnauthorizedError,
+    UnknownTimeZone,
 )
+from exchangelib.ewsdatetime import EWSDateTime
 from exchangelib.folders import FolderCollection
 from exchangelib.items import Item
 from exchangelib.properties import ItemId
@@ -278,8 +278,10 @@ class BaseEWSBackend:
                         "conflicting settings for a shared Exchange protocol",
                         details=[
                             {
-                                "field": "EXCHANGE_TIMEOUT/EXCHANGE_VERIFY_SSL/EXCHANGE_CA_BUNDLE/MCP_MAX_CONCURRENCY",
-                                "reason": "the same endpoint and credentials are already active with different settings",
+                                "field": "EXCHANGE_TIMEOUT/EXCHANGE_VERIFY_SSL/"
+                                "EXCHANGE_CA_BUNDLE/MCP_MAX_CONCURRENCY",
+                                "reason": "the same endpoint and credentials are already "
+                                "active with different settings",
                             }
                         ],
                     )

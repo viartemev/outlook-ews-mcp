@@ -5,12 +5,13 @@ from types import SimpleNamespace
 
 import pytest
 from exchangelib import DELEGATE
+from exchangelib.errors import ErrorAccessDenied
+from pydantic import ValidationError
 
 import outlook_mcp.exchange_client.base as exchange_client_base
 import outlook_mcp.exchange_client.calendar as exchange_client_calendar
-from exchangelib.errors import ErrorAccessDenied
-from outlook_mcp.errors import PermissionDeniedError
 from outlook_mcp.config import Settings
+from outlook_mcp.errors import APIError, PermissionDeniedError
 from outlook_mcp.exchange_client import EWSExchangeBackend
 from outlook_mcp.models import GetEventRequest, ListEventsRequest
 
@@ -29,7 +30,7 @@ def settings() -> Settings:
 
 
 class FakeAccount:
-    instances: list["FakeAccount"] = []
+    instances: list[FakeAccount] = []
 
     def __init__(self, primary_smtp_address, config, autodiscover, access_type):
         self.primary_smtp_address = primary_smtp_address
@@ -69,7 +70,7 @@ def test_account_for_maps_exceptions_from_account_construction(settings, monkeyp
     backend = EWSExchangeBackend(settings)
     backend._account = SimpleNamespace(protocol=SimpleNamespace(config=object()))
 
-    with pytest.raises(Exception):
+    with pytest.raises(APIError):
         backend._account_for("colleague@example.com")
 
 
@@ -188,7 +189,7 @@ def test_get_event_fetches_from_the_mailbox_account(settings, monkeypatch) -> No
 
 
 def test_mailbox_cannot_be_combined_with_calendar_id_for_list_events() -> None:
-    with pytest.raises(Exception):
+    with pytest.raises(ValidationError):
         ListEventsRequest(
             start=datetime(2026, 4, 13, 9, 0, tzinfo=UTC),
             end=datetime(2026, 4, 13, 10, 0, tzinfo=UTC),
@@ -198,5 +199,5 @@ def test_mailbox_cannot_be_combined_with_calendar_id_for_list_events() -> None:
 
 
 def test_mailbox_cannot_be_combined_with_calendar_id_for_get_event() -> None:
-    with pytest.raises(Exception):
+    with pytest.raises(ValidationError):
         GetEventRequest(id="event-1", mailbox="colleague@example.com", calendar_id="some-folder-id")

@@ -7,9 +7,9 @@ import pytest
 import requests
 from exchangelib import HTMLBody
 from exchangelib.errors import (
-    EWSError,
     ErrorAccessDenied,
     ErrorFolderSavePropertyError,
+    EWSError,
     ResponseMessageError,
     UnauthorizedError,
 )

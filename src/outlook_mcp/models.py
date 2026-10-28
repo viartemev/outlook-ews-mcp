@@ -160,7 +160,7 @@ class RecurrencePattern(ExchangeModel):
     days_of_week: list[WeekdayName] | None = None
 
     @model_validator(mode="after")
-    def _validate_combination(self) -> "RecurrencePattern":
+    def _validate_combination(self) -> RecurrencePattern:
         if self.end_date is not None and self.occurrences is not None:
             raise ValueError("set either end_date or occurrences, not both")
         if self.days_of_week is not None and self.type != "weekly":
@@ -204,7 +204,7 @@ class GetThreadRequest(ExchangeModel):
     limit: int = Field(default=20, ge=1, le=100)
 
     @model_validator(mode="after")
-    def validate_selector(self) -> "GetThreadRequest":
+    def validate_selector(self) -> GetThreadRequest:
         if bool(self.id) == bool(self.conversation_id):
             raise ValueError("exactly one of id or conversation_id must be provided")
         return self
@@ -222,7 +222,7 @@ class MentionBody(ExchangeModel):
     mentions: list[Mention] = Field(default_factory=list)
 
     @model_validator(mode="after")
-    def validate_mentions(self) -> "MentionBody":
+    def validate_mentions(self) -> MentionBody:
         from .mentions import validate_mentions
 
         validate_mentions(self.body, self.body_type, self.mentions)
@@ -284,7 +284,7 @@ class MarkEmailRequest(ExchangeModel):
     flag_due_date: datetime | None = None
 
     @model_validator(mode="after")
-    def validate_flag_dates(self) -> "MarkEmailRequest":
+    def validate_flag_dates(self) -> MarkEmailRequest:
         if (
             self.flag_start_date is not None
             and self.flag_due_date is not None
@@ -370,7 +370,7 @@ class CreateInboxRuleRequest(ExchangeModel):
     remove_outlook_rule_blob: bool = True
 
     @model_validator(mode="after")
-    def validate_rule(self) -> "CreateInboxRuleRequest":
+    def validate_rule(self) -> CreateInboxRuleRequest:
         if self.conditions.is_empty():
             raise ValueError("at least one condition is required")
         if self.actions.is_empty():
@@ -388,7 +388,7 @@ class UpdateInboxRuleRequest(ExchangeModel):
     remove_outlook_rule_blob: bool = True
 
     @model_validator(mode="after")
-    def validate_update(self) -> "UpdateInboxRuleRequest":
+    def validate_update(self) -> UpdateInboxRuleRequest:
         if self.is_enabled is None and self.priority is None:
             raise ValueError("nothing to update: set is_enabled and/or priority")
         return self
@@ -425,7 +425,7 @@ class OutOfOfficeSettings(ExchangeModel):
     end: datetime | None = None
 
     @model_validator(mode="after")
-    def validate_schedule(self) -> "OutOfOfficeSettings":
+    def validate_schedule(self) -> OutOfOfficeSettings:
         if self.state == "scheduled":
             if self.start is None or self.end is None:
                 raise ValueError("state='scheduled' requires both start and end")
@@ -479,7 +479,7 @@ class CategorizeEmailRequest(ExchangeModel):
     mode: Literal["set", "add", "remove"] = "set"
 
     @model_validator(mode="after")
-    def validate_categories(self) -> "CategorizeEmailRequest":
+    def validate_categories(self) -> CategorizeEmailRequest:
         if self.mode in {"add", "remove"} and not self.categories:
             raise ValueError(f"categories must not be empty when mode is '{self.mode}'")
         if any(not name.strip() for name in self.categories):
@@ -546,7 +546,7 @@ class UpdateDraftRequest(ExchangeModel):
     mentions: list[Mention] = Field(default_factory=list)
 
     @model_validator(mode="after")
-    def validate_mentions(self) -> "UpdateDraftRequest":
+    def validate_mentions(self) -> UpdateDraftRequest:
         from .mentions import validate_mentions
 
         if self.mentions and self.body is None:
@@ -573,7 +573,7 @@ class SearchEmailsRequest(ExchangeModel):
     include_preview: bool = False
 
     @model_validator(mode="after")
-    def validate_selector(self) -> "SearchEmailsRequest":
+    def validate_selector(self) -> SearchEmailsRequest:
         if bool(self.query) == bool(self.aqs):
             raise ValueError("exactly one of query or aqs must be provided")
         return self
@@ -609,7 +609,7 @@ class BulkMarkEmailsRequest(ExchangeModel):
     flag_due_date: datetime | None = None
 
     @model_validator(mode="after")
-    def validate_flag_dates(self) -> "BulkMarkEmailsRequest":
+    def validate_flag_dates(self) -> BulkMarkEmailsRequest:
         if (
             self.flag_start_date is not None
             and self.flag_due_date is not None
@@ -629,7 +629,7 @@ class BulkCategorizeEmailsRequest(ExchangeModel):
     mode: Literal["set", "add", "remove"] = "set"
 
     @model_validator(mode="after")
-    def validate_categories(self) -> "BulkCategorizeEmailsRequest":
+    def validate_categories(self) -> BulkCategorizeEmailsRequest:
         if self.mode in {"add", "remove"} and not self.categories:
             raise ValueError(f"categories must not be empty when mode is '{self.mode}'")
         if any(not name.strip() for name in self.categories):
@@ -650,7 +650,7 @@ class ListEventsRequest(ExchangeModel):
     mailbox: EmailStr | None = None
 
     @model_validator(mode="after")
-    def validate_range(self) -> "ListEventsRequest":
+    def validate_range(self) -> ListEventsRequest:
         if self.end <= self.start:
             raise ValueError("end must be greater than start")
         if self.end - self.start > timedelta(days=366):
@@ -666,7 +666,7 @@ class GetEventRequest(ExchangeModel):
     mailbox: EmailStr | None = None
 
     @model_validator(mode="after")
-    def validate_mailbox(self) -> "GetEventRequest":
+    def validate_mailbox(self) -> GetEventRequest:
         if self.mailbox is not None and self.calendar_id is not None:
             raise ValueError("mailbox cannot be combined with calendar_id")
         return self
@@ -684,7 +684,7 @@ class WorkHours(ExchangeModel):
         return value
 
     @model_validator(mode="after")
-    def _validate_order(self) -> "WorkHours":
+    def _validate_order(self) -> WorkHours:
         if self.end <= self.start:
             raise ValueError("end must be after start")
         return self
@@ -705,7 +705,7 @@ class CreateEventRequest(ExchangeModel):
     importance: Literal["low", "normal", "high"] = "normal"
 
     @model_validator(mode="after")
-    def validate_range(self) -> "CreateEventRequest":
+    def validate_range(self) -> CreateEventRequest:
         if self.end <= self.start:
             raise ValueError("end must be greater than start")
         if (
@@ -731,7 +731,7 @@ class UpdateEventRequest(ExchangeModel):
     send_updates: Literal["none", "all", "modified"] = "all"
 
     @model_validator(mode="after")
-    def validate_range(self) -> "UpdateEventRequest":
+    def validate_range(self) -> UpdateEventRequest:
         if self.start and self.end and self.end <= self.start:
             raise ValueError("end must be greater than start")
         return self
@@ -774,7 +774,7 @@ class FindFreeSlotsRequest(ExchangeModel):
     limit: int = Field(default=200, ge=1, le=1000)
 
     @model_validator(mode="after")
-    def validate_range(self) -> "FindFreeSlotsRequest":
+    def validate_range(self) -> FindFreeSlotsRequest:
         if self.end <= self.start:
             raise ValueError("end must be greater than start")
         if self.end - self.start > timedelta(days=31):
@@ -789,7 +789,7 @@ class FreeSlot(ExchangeModel):
     busy_attendees: list[ServerAddress] = Field(default_factory=list)
 
     @model_validator(mode="after")
-    def validate_range(self) -> "FreeSlot":
+    def validate_range(self) -> FreeSlot:
         if self.end <= self.start:
             raise ValueError("end must be greater than start")
         return self
@@ -839,7 +839,7 @@ class FolderInfo(ExchangeModel):
     path: str
     unread_count: int = 0
     total_count: int = 0
-    children: list["FolderInfo"] = Field(default_factory=list)
+    children: list[FolderInfo] = Field(default_factory=list)
 
 
 class ActionResult(ExchangeModel):

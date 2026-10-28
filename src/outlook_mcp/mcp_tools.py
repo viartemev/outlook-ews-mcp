@@ -11,12 +11,11 @@ from typing import Annotated, Any
 import anyio
 import anyio.to_thread
 from mcp.types import CallToolResult, TextContent
-from pydantic.fields import FieldInfo
 from pydantic.experimental.missing_sentinel import MISSING
+from pydantic.fields import FieldInfo
 
 from .config import Settings
 from .errors import APIError
-
 from .exchange_client import ExchangeClient
 from .models import ExchangeModel
 

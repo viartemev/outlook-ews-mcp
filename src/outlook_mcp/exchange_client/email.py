@@ -8,11 +8,11 @@ import re
 import stat
 import tempfile
 import time
-from uuid import uuid4
 from collections import Counter
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
+from uuid import uuid4
 
 from exchangelib import Account, FileAttachment, Folder, HTMLBody, ItemAttachment, Message, Q
 from exchangelib.errors import (
@@ -31,21 +31,21 @@ from ..errors import APIError, NotFoundError
 from ..mentions import render_mentions
 from ..models import (
     ActionResult,
-    Attachment,
     AddAttachmentRequest,
+    Attachment,
     AttachmentResult,
     BulkCategorizeEmailsRequest,
     BulkDeleteEmailsRequest,
-    BulkMarkEmailsRequest,
-    DeleteAttachmentRequest,
     BulkItemFailure,
     BulkItemResult,
+    BulkMarkEmailsRequest,
     BulkMoveEmailsRequest,
     BulkResult,
     CategorizeEmailRequest,
     CategoryUsage,
     CreateFolderRequest,
     CreateReplyDraftRequest,
+    DeleteAttachmentRequest,
     DeleteEmailRequest,
     DeleteFolderRequest,
     DraftEmailRequest,
@@ -405,7 +405,8 @@ class EmailOperationsMixin(BaseEWSBackend):
                     details=[
                         {
                             "field": "attachments",
-                            "reason": f"combined size exceeds EXCHANGE_ATTACHMENT_MAX_TOTAL_SIZE_MB="
+                            "reason": "combined size exceeds "
+                            "EXCHANGE_ATTACHMENT_MAX_TOTAL_SIZE_MB="
                             f"{self.settings.attachment_max_total_size_mb}",
                         }
                     ],
@@ -520,8 +521,9 @@ class EmailOperationsMixin(BaseEWSBackend):
         )
         filters: dict[str, Any] = {}
         if request.from_address:
-            # 'author' is a MailboxField, not an IndexedField, so EWS only supports filtering the field
-            # as a whole (exact match against the address) -- '__email_address' is not a valid subfield path.
+            # 'author' is a MailboxField, not an IndexedField, so EWS only supports filtering
+            # the field as a whole (exact match against the address) -- '__email_address' is
+            # not a valid subfield path.
             filters["author__iexact"] = str(request.from_address)
         if request.subject:
             filters["subject__icontains"] = request.subject
@@ -918,7 +920,7 @@ class EmailOperationsMixin(BaseEWSBackend):
             results = list(results) + [None] * (len(ids) - len(results))
         succeeded: list[BulkItemResult] = []
         failed: list[BulkItemFailure] = []
-        for item_id, result in zip(ids, results):
+        for item_id, result in zip(ids, results, strict=False):
             # Some Exchange versions successfully delete meeting-response items
             # but still return ErrorItemNotFound for them. Delete is idempotent,
             # so an already-absent item has reached the requested final state.
@@ -1397,7 +1399,8 @@ class EmailOperationsMixin(BaseEWSBackend):
                     if isinstance(attachment, ItemAttachment):
                         raise APIError(
                             "validation_error",
-                            "attachment is an embedded Exchange item and cannot be downloaded as a file",
+                            "attachment is an embedded Exchange item and cannot be "
+                            "downloaded as a file",
                         )
                     self._check_attachment_size(getattr(attachment, "size", None), max_size_bytes)
                     filename = self._sanitize_attachment_filename(getattr(attachment, "name", None))

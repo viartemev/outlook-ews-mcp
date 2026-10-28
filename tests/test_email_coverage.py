@@ -22,8 +22,8 @@ from outlook_mcp.models import (
     ListEmailsRequest,
     ListFoldersRequest,
     MarkEmailRequest,
-    SendDraftRequest,
     SearchEmailsRequest,
+    SendDraftRequest,
     SendEmailRequest,
 )
 

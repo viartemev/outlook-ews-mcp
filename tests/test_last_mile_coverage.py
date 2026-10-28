@@ -4,10 +4,10 @@ from datetime import UTC, datetime
 from types import SimpleNamespace
 
 import pytest
+from conftest import FakeExchangeBackend
 from exchangelib.errors import ErrorAccessDenied, UnauthorizedError, UnknownTimeZone
 from exchangelib.ewsdatetime import EWSTimeZone
 
-from conftest import FakeExchangeBackend
 from outlook_mcp.auth import build_auth_context
 from outlook_mcp.config import Settings, get_settings
 from outlook_mcp.errors import APIError, NotFoundError
@@ -122,8 +122,9 @@ def test_timezone_fallback_reraises_non_guid_ids(settings) -> None:
 
 
 def test_resolve_archive_falls_back_to_root_on_a_scoped_fault(settings, monkeypatch) -> None:
-    import outlook_mcp.exchange_client.base as base_module
     from exchangelib.errors import ResponseMessageError
+
+    import outlook_mcp.exchange_client.base as base_module
 
     class EmptyIdLookup:
         def __init__(self, account, folders):

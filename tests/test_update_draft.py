@@ -4,6 +4,7 @@ from types import SimpleNamespace
 
 import pytest
 
+from outlook_mcp.errors import APIError
 from outlook_mcp.exchange_client import EWSExchangeBackend
 from outlook_mcp.models import ActionResult, UpdateDraftRequest
 
@@ -147,7 +148,7 @@ def test_update_draft_rejects_wrong_folder() -> None:
     draft.parent_folder_id = SimpleNamespace(id="some-other-folder")
     backend = _backend_with_draft(draft)
 
-    with pytest.raises(Exception):
+    with pytest.raises(APIError):
         backend.update_draft(UpdateDraftRequest(id="draft-1", subject="New subject"))
 
 
@@ -161,7 +162,7 @@ def test_update_draft_maps_exceptions_from_save() -> None:
     draft.save = failing_save
     backend = _backend_with_draft(draft)
 
-    with pytest.raises(Exception):
+    with pytest.raises(APIError):
         backend.update_draft(UpdateDraftRequest(id="draft-1", subject="New subject"))
 
 

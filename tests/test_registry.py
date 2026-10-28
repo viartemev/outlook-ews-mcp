@@ -3,8 +3,8 @@ from __future__ import annotations
 from dataclasses import replace
 
 from outlook_mcp.errors import InternalError
-from outlook_mcp.server import build_registry
 from outlook_mcp.models import SendResult
+from outlook_mcp.server import build_registry
 from outlook_mcp.tool_specs import TOOL_SPECS
 
 
