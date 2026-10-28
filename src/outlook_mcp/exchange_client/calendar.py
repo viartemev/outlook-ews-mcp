@@ -455,25 +455,12 @@ class CalendarOperationsMixin(BaseEWSBackend):
             updated_fields.append("reminder_minutes")
             save_fields.extend(["reminder_is_set", "reminder_minutes_before_start"])
         if request.add_attendees:
-            current = list(getattr(item, "required_attendees", None) or [])
-            current.extend(
-                Attendee(mailbox=self._mailbox(address)) for address in request.add_attendees
-            )
-            item.required_attendees = current
             updated_fields.append("add_attendees")
-            if "required_attendees" not in save_fields:
-                save_fields.append("required_attendees")
         if request.remove_attendees:
-            remove_set = {address.lower() for address in request.remove_attendees}
-            item.required_attendees = [
-                attendee
-                for attendee in getattr(item, "required_attendees", None) or []
-                if getattr(getattr(attendee, "mailbox", None), "email_address", "").lower()
-                not in remove_set
-            ]
             updated_fields.append("remove_attendees")
-            if "required_attendees" not in save_fields:
-                save_fields.append("required_attendees")
+        save_fields.extend(
+            self._apply_attendee_changes(item, request.add_attendees, request.remove_attendees)
+        )
         if not save_fields:
             # Nothing actually changed -- saving anyway would still fire attendee
             # notifications per request.send_updates (default "all") for a no-op update.
@@ -488,6 +475,40 @@ class CalendarOperationsMixin(BaseEWSBackend):
             return ActionResult(id=request.id, status="updated", updated_fields=updated_fields)
         except Exception as exc:  # noqa: BLE001
             raise self._map_exception(exc, item_id=request.id) from exc
+
+    @staticmethod
+    def _attendee_address(attendee: Any) -> str:
+        mailbox = getattr(attendee, "mailbox", None)
+        return (getattr(mailbox, "email_address", None) or "").casefold()
+
+    def _apply_attendee_changes(self, item: Any, add: list[str], remove: list[str]) -> list[str]:
+        """Apply add/remove to the item's attendee lists; return the lists that changed.
+
+        Removal covers optional attendees too -- someone invited as optional (by
+        Outlook, or by another client) was otherwise impossible to remove. Adding
+        skips anyone already invited in either list, so a repeated call does not
+        list the same person twice. Only changed lists are saved: saving an
+        untouched one still re-sends the update to every attendee.
+        """
+        remove_set = {str(address).casefold() for address in remove}
+        lists: dict[str, list[Any]] = {}
+        changed: list[str] = []
+        for field in ("required_attendees", "optional_attendees"):
+            current = list(getattr(item, field, None) or [])
+            lists[field] = [a for a in current if self._attendee_address(a) not in remove_set]
+            if len(lists[field]) != len(current):
+                changed.append(field)
+        invited = {self._attendee_address(a) for kept in lists.values() for a in kept}
+        for address in add:
+            if str(address).casefold() in invited:
+                continue
+            invited.add(str(address).casefold())
+            lists["required_attendees"].append(Attendee(mailbox=self._mailbox(str(address))))
+            if "required_attendees" not in changed:
+                changed.insert(0, "required_attendees")
+        for field in changed:
+            setattr(item, field, lists[field])
+        return changed
 
     def delete_event(self, request: DeleteEventRequest) -> ActionResult:
         item = self._fetch_item(
