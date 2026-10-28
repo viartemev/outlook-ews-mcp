@@ -526,13 +526,21 @@ class CalendarOperationsMixin(BaseEWSBackend):
         except Exception as exc:  # noqa: BLE001
             raise self._map_exception(exc, item_id=request.id) from exc
 
+    #: Width of one MergedFreeBusy cell, and the step between candidate slot
+    #: starts. Sampling at the meeting's own duration (as this used to) put every
+    #: candidate on a grid anchored at `start`: with a 9:00-9:30 meeting, a
+    #: 60-minute search from 9:00 could never offer 9:30.
+    _FREE_BUSY_SAMPLE_MINUTES = 15
+    #: MergedFreeBusy digit for "no data" -- an attendee whose availability the
+    #: server cannot see (external address, no rights). Not evidence of being busy.
+    _NO_DATA = "5"
+
     def find_free_slots(self, request: FindFreeSlotsRequest) -> list[FreeSlot]:
         start = self._to_ews_datetime(request.start)
         end = self._to_ews_datetime(request.end)
-        # EWS's free/busy sampling granularity is bounded to [5, 1440] minutes and
-        # is independent of the requested meeting duration -- a 1-minute meeting
-        # still has to be checked against 5-minute-wide free/busy samples.
-        sample_minutes = max(request.duration, 5)
+        # EWS bounds the sampling interval to [5, 1440] minutes; a meeting shorter
+        # than one cell gets cells no wider than itself.
+        sample_minutes = max(5, min(request.duration, self._FREE_BUSY_SAMPLE_MINUTES))
         try:
             views = list(
                 self.account.protocol.get_free_busy_info(
@@ -554,7 +562,10 @@ class CalendarOperationsMixin(BaseEWSBackend):
         if not views:
             return []
 
-        merged_per_attendee = [getattr(view, "merged", "") or "" for view in views]
+        merged_per_attendee = [
+            (str(address), getattr(view, "merged", "") or "")
+            for address, view in zip(request.attendees, views)
+        ]
         work_hours = self._parse_work_hours(request.work_hours)
         slots: list[FreeSlot] = []
         cursor = start
@@ -565,17 +576,37 @@ class CalendarOperationsMixin(BaseEWSBackend):
         # so isn't actually usable for scheduling a meeting of that length.
         while cursor + interval <= end:
             slot_end = cursor + interval
-            position = (cursor - start) // sample_interval
-            all_free = all(
-                position < len(merged) and merged[position] == "0" for merged in merged_per_attendee
-            )
-            if all_free and self._within_work_hours(cursor, slot_end, work_hours):
+            # Every cell the slot touches, not just the one it starts in: a slot
+            # starting in a free cell can still run into a busy one.
+            first = (cursor - start) // sample_interval
+            last = -((start - slot_end) // sample_interval)  # ceil division
+            unknown: list[str] = []
+            blocked = False
+            for address, merged in merged_per_attendee:
+                cells = merged[first:last]
+                # A short or empty grid says nothing about the uncovered tail.
+                cells = cells + self._NO_DATA * (last - first - len(cells))
+                if any(cell not in ("0", self._NO_DATA) for cell in cells):
+                    # Tentative, busy, OOF and working-elsewhere all block a slot.
+                    blocked = True
+                    break
+                if self._NO_DATA in cells:
+                    unknown.append(address)
+            if not blocked and self._within_work_hours(cursor, slot_end, work_hours):
                 slots.append(
-                    FreeSlot(start=cursor, end=slot_end, all_available=True, busy_attendees=[])
+                    FreeSlot(
+                        start=cursor,
+                        end=slot_end,
+                        all_available=not unknown,
+                        unknown_attendees=unknown,
+                    )
                 )
                 if len(slots) >= request.limit:
                     break
-            cursor = slot_end
+                # Offered slots don't overlap; after one, look right past it.
+                cursor = slot_end
+            else:
+                cursor += sample_interval
         return slots
 
     def _parse_work_hours(self, work_hours: WorkHours | None) -> tuple[time, time] | None:

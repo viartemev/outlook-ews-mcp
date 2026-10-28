@@ -779,8 +779,11 @@ class FindFreeSlotsRequest(ExchangeModel):
 class FreeSlot(ExchangeModel):
     start: datetime
     end: datetime
+    #: False when some attendees' availability is unknown to the server (external
+    #: addresses, no free/busy rights); they are listed in unknown_attendees.
+    #: Attendees known to be busy never appear on an offered slot.
     all_available: bool = True
-    busy_attendees: list[ServerAddress] = Field(default_factory=list)
+    unknown_attendees: list[ServerAddress] = Field(default_factory=list)
 
     @model_validator(mode="after")
     def validate_range(self) -> "FreeSlot":
