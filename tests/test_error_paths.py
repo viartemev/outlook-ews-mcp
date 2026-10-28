@@ -4,8 +4,10 @@ from datetime import UTC, datetime
 from types import SimpleNamespace
 
 import pytest
+import requests
 from exchangelib import HTMLBody
 from exchangelib.errors import (
+    EWSError,
     ErrorAccessDenied,
     ErrorFolderSavePropertyError,
     ResponseMessageError,
@@ -193,8 +195,22 @@ def test_map_exception_covers_the_remaining_branches(settings) -> None:
     timeout = backend._map_exception(TimeoutError("socket timed out"))
     assert timeout.code == "timeout"
 
-    unmapped = backend._map_exception(RuntimeError("who knows"))
+    unmapped = backend._map_exception(EWSError("who knows"))
     assert unmapped.code == "exchange_unavailable"
+
+    network = backend._map_exception(requests.ConnectionError("connection refused"))
+    assert network.code == "exchange_unavailable"
+
+
+@pytest.mark.parametrize(
+    "exc", [AttributeError("'NoneType' object has no attribute 'id'"), OSError(28, "No space")]
+)
+def test_map_exception_reports_non_exchange_failures_as_internal(settings, exc) -> None:
+    # A bug here or a local disk error is not Exchange being down; reporting it as
+    # exchange_unavailable sends callers retrying and hides the traceback.
+    mapped = _backend(settings)._map_exception(exc)
+
+    assert mapped.code == "internal_error"
 
 
 def test_ping_maps_an_inbox_failure(settings) -> None:
