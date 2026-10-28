@@ -401,8 +401,10 @@ TOOL_SPECS: list[ToolSpec] = [
     ToolSpec(
         "list_events",
         "List up to limit calendar events in a time range. Set mailbox to view a colleague's "
-        "default calendar instead of your own (requires delegate/impersonation "
-        "access already granted on the server; not combinable with calendar_id)",
+        "default calendar instead of your own (requires read access to that calendar "
+        "already granted on the server; not combinable with calendar_id). If only "
+        "free/busy is shared, events come from the availability service with an empty "
+        "id and only time, status, subject and location",
         list_events,
         request_model=models.ListEventsRequest,
         response_model=list[models.CalendarEvent],

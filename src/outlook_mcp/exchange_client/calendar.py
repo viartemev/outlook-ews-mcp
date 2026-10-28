@@ -4,7 +4,9 @@ from datetime import date, datetime, time, timedelta
 from itertools import islice
 from typing import Any, Literal
 
-from exchangelib import UTC, Attendee, CalendarItem
+from exchangelib import UTC, Attendee, CalendarItem, Mailbox
+from exchangelib.folders import Calendar, SingleFolderQuerySet
+from exchangelib.properties import DistinguishedFolderId
 from exchangelib.recurrence import (
     WEEKDAY_NAMES,
     AbsoluteMonthlyPattern,
@@ -14,7 +16,7 @@ from exchangelib.recurrence import (
     WeeklyPattern,
 )
 
-from ..errors import APIError
+from ..errors import APIError, PermissionDeniedError
 from ..models import (
     ActionResult,
     Attendee as ApiAttendee,
@@ -27,6 +29,7 @@ from ..models import (
     CreateEventRequest,
     CreateEventResult,
     DeleteEventRequest,
+    EmailAddress,
     FindFreeSlotsRequest,
     FreeSlot,
     GetEventRequest,
@@ -177,7 +180,7 @@ class CalendarOperationsMixin(BaseEWSBackend):
         if mailbox:
             # calendar_id + mailbox is rejected at the request-model level, so this
             # only ever targets that mailbox's own default calendar.
-            folder = self._account_for(str(mailbox)).calendar
+            folder = self._shared_calendar_folder(str(mailbox))
         else:
             folder = self.account.calendar if not calendar_id else self._resolve_folder(calendar_id)
         folder_class = getattr(folder, "folder_class", None)
@@ -189,6 +192,73 @@ class CalendarOperationsMixin(BaseEWSBackend):
             )
         return folder
 
+    def _shared_calendar_folder(self, mailbox: str) -> Any:
+        """Open another mailbox's default calendar without touching its other folders.
+
+        Account.calendar resolves every distinguished folder of the mailbox in one
+        batch, so a calendar shared on its own (no rights on Inbox and friends)
+        fails the whole batch with ErrorBatchProcessingStopped. Addressing the
+        calendar by DistinguishedFolderId plus Mailbox asks for that folder only.
+        """
+        folder = SingleFolderQuerySet(
+            account=self._account_for(mailbox),
+            folder=DistinguishedFolderId(
+                id=Calendar.DISTINGUISHED_FOLDER_ID,
+                mailbox=Mailbox(email_address=mailbox),
+            ),
+        ).resolve()
+        if isinstance(folder, Exception):
+            raise self._map_exception(folder)
+        return folder
+
+    def _list_events_from_free_busy(
+        self, request: ListEventsRequest
+    ) -> tuple[list[CalendarEvent], bool]:
+        """Fallback for calendars shared with free/busy rights only.
+
+        Outlook shows such calendars through the availability service, which
+        returns times and status, plus subject and location when the share
+        includes them. Ids, attendees and bodies are not available, so the
+        events come back with an empty id and cannot be passed to get_event.
+        """
+        mailbox = str(request.mailbox)
+        start = self._to_ews_datetime(request.start)
+        end = self._to_ews_datetime(request.end)
+        try:
+            views = list(
+                self.account.protocol.get_free_busy_info(
+                    accounts=[(mailbox, "Required", False)],
+                    start=start,
+                    end=end,
+                    requested_view="Detailed",
+                )
+            )
+        except Exception as exc:  # noqa: BLE001
+            raise self._map_exception(exc) from exc
+        if not views:
+            return [], False
+        if isinstance(views[0], Exception):
+            raise self._map_exception(views[0])
+        events = []
+        for entry in sorted(views[0].calendar_events or [], key=lambda e: e.start):
+            details = entry.details
+            is_recurring = bool(details is not None and details.is_recurring)
+            if is_recurring and not request.include_recurring:
+                continue
+            events.append(
+                CalendarEvent(
+                    id="",
+                    subject=(details.subject if details is not None else None) or "",
+                    start=entry.start,
+                    end=entry.end,
+                    location=details.location if details is not None else None,
+                    organizer=EmailAddress(email=mailbox),
+                    is_recurring=is_recurring,
+                    free_busy_status=self._normalize_free_busy_status(entry.busy_type),
+                )
+            )
+        return events[: request.limit], len(events) > request.limit
+
     def list_events(self, request: ListEventsRequest) -> list[CalendarEvent]:
         events, _ = self._list_events_page(request)
         return events
@@ -197,7 +267,12 @@ class CalendarOperationsMixin(BaseEWSBackend):
         target_account = (
             self._account_for(str(request.mailbox)) if request.mailbox else self.account
         )
-        folder = self._calendar_folder(request.calendar_id, request.mailbox)
+        try:
+            folder = self._calendar_folder(request.calendar_id, request.mailbox)
+        except PermissionDeniedError:
+            if not request.mailbox:
+                raise
+            return self._list_events_from_free_busy(request)
         start = self._to_ews_datetime(request.start, target_account)
         end = self._to_ews_datetime(request.end, target_account)
         qs = folder.view(start=start, end=end).only(*_EVENT_SUMMARY_FIELDS)

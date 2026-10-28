@@ -7,6 +7,9 @@ import pytest
 from exchangelib import DELEGATE
 
 import outlook_mcp.exchange_client.base as exchange_client_base
+import outlook_mcp.exchange_client.calendar as exchange_client_calendar
+from exchangelib.errors import ErrorAccessDenied
+from outlook_mcp.errors import PermissionDeniedError
 from outlook_mcp.config import Settings
 from outlook_mcp.exchange_client import EWSExchangeBackend
 from outlook_mcp.models import GetEventRequest, ListEventsRequest
@@ -70,15 +73,58 @@ def test_account_for_maps_exceptions_from_account_construction(settings, monkeyp
         backend._account_for("colleague@example.com")
 
 
+class _CalendarOnlyAccount:
+    """A mailbox shared with calendar rights only: Account.calendar would batch-resolve
+    every distinguished folder and fail, so touching it is a bug."""
+
+    @property
+    def calendar(self):
+        raise AssertionError("must not resolve the mailbox's distinguished folders")
+
+
+def _fake_single_folder_query_set(result, captured):
+    class FakeSingleFolderQuerySet:
+        def __init__(self, account, folder):
+            captured["account"] = account
+            captured["folder"] = folder
+
+        def resolve(self):
+            return result
+
+    return FakeSingleFolderQuerySet
+
+
 def test_calendar_folder_uses_mailbox_account_when_given(settings, monkeypatch) -> None:
     backend = EWSExchangeBackend(settings)
     other_calendar = SimpleNamespace(folder_class="IPF.Appointment")
-    other_account = SimpleNamespace(calendar=other_calendar)
+    other_account = _CalendarOnlyAccount()
     monkeypatch.setattr(backend, "_account_for", lambda mailbox: other_account)
+    captured: dict = {}
+    monkeypatch.setattr(
+        exchange_client_calendar,
+        "SingleFolderQuerySet",
+        _fake_single_folder_query_set(other_calendar, captured),
+    )
 
     folder = backend._calendar_folder(None, "colleague@example.com")
 
     assert folder is other_calendar
+    assert captured["account"] is other_account
+    assert captured["folder"].id == "calendar"
+    assert captured["folder"].mailbox.email_address == "colleague@example.com"
+
+
+def test_calendar_folder_maps_access_denied_on_shared_calendar(settings, monkeypatch) -> None:
+    backend = EWSExchangeBackend(settings)
+    monkeypatch.setattr(backend, "_account_for", lambda mailbox: _CalendarOnlyAccount())
+    monkeypatch.setattr(
+        exchange_client_calendar,
+        "SingleFolderQuerySet",
+        _fake_single_folder_query_set(ErrorAccessDenied("denied"), {}),
+    )
+
+    with pytest.raises(PermissionDeniedError):
+        backend._calendar_folder(None, "colleague@example.com")
 
 
 def test_list_events_queries_the_mailbox_calendar_not_the_service_account(
@@ -99,10 +145,9 @@ def test_list_events_queries_the_mailbox_calendar_not_the_service_account(
 
     other_calendar = SimpleNamespace(view=lambda start, end: _EventQuery())
     monkeypatch.setattr(
-        backend,
-        "_account_for",
-        lambda mailbox: SimpleNamespace(calendar=other_calendar, default_timezone=UTC),
+        backend, "_account_for", lambda mailbox: SimpleNamespace(default_timezone=UTC)
     )
+    monkeypatch.setattr(backend, "_shared_calendar_folder", lambda mailbox: other_calendar)
 
     request = ListEventsRequest(
         start=datetime(2026, 4, 13, 9, 0, tzinfo=UTC),
@@ -117,8 +162,9 @@ def test_list_events_queries_the_mailbox_calendar_not_the_service_account(
 def test_get_event_fetches_from_the_mailbox_account(settings, monkeypatch) -> None:
     backend = EWSExchangeBackend(settings)
     other_calendar = SimpleNamespace(folder_class="IPF.Appointment")
-    other_account = SimpleNamespace(calendar=other_calendar)
+    other_account = _CalendarOnlyAccount()
     monkeypatch.setattr(backend, "_account_for", lambda mailbox: other_account)
+    monkeypatch.setattr(backend, "_shared_calendar_folder", lambda mailbox: other_calendar)
 
     captured: dict = {}
 

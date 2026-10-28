@@ -119,7 +119,7 @@ that never modify the mailbox — they get more concurrency (see
 
 | Tool | Description | Read-only |
 | --- | --- | --- |
-| `list_events` | List calendar events in a time range; pass `mailbox` for a colleague's default calendar (needs delegate/impersonation access, not combinable with `calendar_id`) | ✅ |
+| `list_events` | List calendar events in a time range; pass `mailbox` for a colleague's or shared mailbox's default calendar (needs read access to that calendar, not combinable with `calendar_id`). If only free/busy is shared, falls back to the availability service: events then have an empty `id` and carry only time, status, subject and location | ✅ |
 | `get_event` | Get a calendar event by id; pass `mailbox` for a colleague's calendar | ✅ |
 | `create_event` | Create a calendar event | |
 | `update_event` | Update a calendar event | |

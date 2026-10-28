@@ -4,6 +4,7 @@ from types import SimpleNamespace
 
 from exchangelib.ewsdatetime import EWSDate, EWSDateTime, EWSTimeZone
 
+from outlook_mcp.errors import PermissionDeniedError
 from outlook_mcp.exchange_client import EWSExchangeBackend
 from outlook_mcp.models import FindFreeSlotsRequest, ListEventsRequest
 
@@ -180,6 +181,7 @@ def test_shared_calendar_uses_the_target_mailbox_timezone(settings, monkeypatch)
         default_timezone=EWSTimeZone("America/New_York"),
     )
     monkeypatch.setattr(backend, "_account_for", lambda mailbox: target)
+    monkeypatch.setattr(backend, "_shared_calendar_folder", lambda mailbox: folder)
 
     backend.list_events(
         ListEventsRequest.model_validate(
@@ -193,3 +195,53 @@ def test_shared_calendar_uses_the_target_mailbox_timezone(settings, monkeypatch)
 
     assert folder.start.tzinfo.key == "America/New_York"
     assert folder.end.tzinfo.key == "America/New_York"
+
+
+def test_free_busy_only_share_falls_back_to_availability(settings, monkeypatch) -> None:
+    """A calendar shared with free/busy rights only cannot be opened as a folder,
+    but the availability service still returns its entries with subject and
+    location, the way Outlook shows it."""
+    backend = EWSExchangeBackend(settings)
+    tz = EWSTimeZone("Europe/Berlin")
+
+    def denied(mailbox):
+        raise PermissionDeniedError()
+
+    captured = {}
+
+    def get_free_busy_info(accounts, start, end, requested_view):
+        captured.update(accounts=accounts, requested_view=requested_view)
+        entry = SimpleNamespace(
+            start=EWSDateTime(2026, 4, 13, 9, 0, tzinfo=tz),
+            end=EWSDateTime(2026, 4, 13, 10, 0, tzinfo=tz),
+            busy_type="Busy",
+            details=SimpleNamespace(subject="Team meeting", location="Room 1", is_recurring=True),
+        )
+        return iter([SimpleNamespace(calendar_events=[entry])])
+
+    account = SimpleNamespace(
+        default_timezone=tz,
+        protocol=SimpleNamespace(get_free_busy_info=get_free_busy_info),
+    )
+    monkeypatch.setattr(type(backend), "account", property(lambda self: account))
+    monkeypatch.setattr(backend, "_account_for", lambda mailbox: account)
+    monkeypatch.setattr(backend, "_shared_calendar_folder", denied)
+
+    request = {
+        "start": "2026-04-13T08:00:00",
+        "end": "2026-04-13T18:00:00",
+        "mailbox": "team@example.com",
+    }
+    events = backend.list_events(ListEventsRequest.model_validate(request))
+
+    assert captured["accounts"] == [("team@example.com", "Required", False)]
+    assert captured["requested_view"] == "Detailed"
+    assert [(e.subject, e.location, e.free_busy_status, e.id) for e in events] == [
+        ("Team meeting", "Room 1", "busy", "")
+    ]
+    assert events[0].organizer.email == "team@example.com"
+
+    events = backend.list_events(
+        ListEventsRequest.model_validate({**request, "include_recurring": False})
+    )
+    assert events == []
