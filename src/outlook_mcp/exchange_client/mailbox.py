@@ -40,6 +40,10 @@ _AUDIENCE_TO_EWS = {"none": "None", "known": "Known", "all": "All"}
 _AUDIENCE_FROM_EWS = {value: key for key, value in _AUDIENCE_TO_EWS.items()}
 
 
+def _level(permissions: Any, field: str) -> str:
+    return str(getattr(permissions, field, None) or "None")
+
+
 class MailboxSettingsMixin(BaseEWSBackend):
     def list_delegates(self) -> list[DelegateInfo]:
         try:
@@ -50,19 +54,15 @@ class MailboxSettingsMixin(BaseEWSBackend):
         for delegate in delegates:
             user = getattr(delegate, "user_id", None)
             permissions = getattr(delegate, "delegate_permissions", None)
-
-            def _level(field: str) -> str:
-                return str(getattr(permissions, field, None) or "None")
-
             result.append(
                 DelegateInfo(
                     email=getattr(user, "primary_smtp_address", None),
                     display_name=getattr(user, "display_name", None),
                     permissions=DelegatePermissionLevels(
-                        calendar=_level("calendar_folder_permission_level"),
-                        inbox=_level("inbox_folder_permission_level"),
-                        tasks=_level("tasks_folder_permission_level"),
-                        contacts=_level("contacts_folder_permission_level"),
+                        calendar=_level(permissions, "calendar_folder_permission_level"),
+                        inbox=_level(permissions, "inbox_folder_permission_level"),
+                        tasks=_level(permissions, "tasks_folder_permission_level"),
+                        contacts=_level(permissions, "contacts_folder_permission_level"),
                     ),
                     receives_copies_of_meeting_messages=bool(
                         getattr(delegate, "receive_copies_of_meeting_messages", False)

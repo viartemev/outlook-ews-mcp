@@ -142,7 +142,7 @@ class Settings(BaseSettings):
         return True
 
     @model_validator(mode="after")
-    def _reject_insecure_basic_auth(self) -> "Settings":
+    def _reject_insecure_basic_auth(self) -> Settings:
         if self.exchange_auth_type != "Basic" or self.exchange_allow_insecure_basic_auth:
             return self
         scheme = urlparse(self.exchange_server).scheme.lower()

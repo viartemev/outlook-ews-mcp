@@ -1,10 +1,11 @@
 from __future__ import annotations
 
-from datetime import UTC, datetime, date
+from datetime import UTC, date, datetime
 from types import SimpleNamespace
 
 import pytest
 from exchangelib.errors import UnauthorizedError
+from pydantic import ValidationError
 
 import outlook_mcp.exchange_client.calendar as calendar_module
 from outlook_mcp.errors import APIError, AuthFailedError
@@ -21,7 +22,7 @@ from outlook_mcp.models import (
 
 
 class FakeCalendarItem:
-    saved: list["FakeCalendarItem"] = []
+    saved: list[FakeCalendarItem] = []
 
     def __init__(self, **kwargs) -> None:
         self.kwargs = kwargs
@@ -335,7 +336,7 @@ def test_work_hours_rejects_end_before_start() -> None:
 
 
 def test_recurrence_pattern_rejects_invalid_weekday() -> None:
-    with pytest.raises(Exception):
+    with pytest.raises(ValidationError):
         RecurrencePattern(type="weekly", days_of_week=["someday"])
 
 

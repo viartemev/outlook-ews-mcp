@@ -78,9 +78,11 @@ testpaths = ["tests"]
 line-length = 100
 
 [tool.ruff.lint]
-# Pin the pre-0.16 default rule set (E4, E7, E9, F) explicitly so future ruff
-# releases can't silently widen what CI enforces.
-select = ["E4", "E7", "E9", "F"]
+# An explicit list, so future ruff releases can't silently widen what CI
+# enforces: the pre-0.16 defaults (E4, E7, E9, F), the line length the
+# formatter already targets (E501), sorted imports (I), likely bugs (B) and
+# idioms for the supported Python versions (UP).
+select = ["E4", "E7", "E9", "E501", "F", "I", "B", "UP"]
 
 [tool.mypy]
 python_version = "3.12"

@@ -24,7 +24,6 @@ from ..models import (
 )
 from .base import BaseEWSBackend
 
-
 #: Fields ContactSummary actually reads -- restricting the fetch to these avoids
 #: exchangelib issuing an extra GetItem per contact and loading full notes/addresses.
 _CONTACT_SUMMARY_FIELDS = (
@@ -202,7 +201,7 @@ class ContactOperationsMixin(BaseEWSBackend):
 
     @staticmethod
     def _smtp_address(value: str | None) -> str | None:
-        """Drop non-SMTP proxy addresses (X500, EX, ...) and strip the `SMTP:` prefix the GAL adds."""
+        """Drop non-SMTP proxy addresses (X500, EX, ...); strip the `SMTP:` prefix the GAL adds."""
         address = (value or "").strip()
         prefix, separator, remainder = address.partition(":")
         if separator:

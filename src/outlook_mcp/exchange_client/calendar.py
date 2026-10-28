@@ -19,7 +19,6 @@ from exchangelib.recurrence import (
 from ..errors import APIError, PermissionDeniedError
 from ..models import (
     ActionResult,
-    Attendee as ApiAttendee,
     AvailabilityResult,
     BulkDeleteEventsRequest,
     BulkRespondToInvitesRequest,
@@ -41,6 +40,9 @@ from ..models import (
     RoomListInfo,
     UpdateEventRequest,
     WorkHours,
+)
+from ..models import (
+    Attendee as ApiAttendee,
 )
 from .base import BaseEWSBackend
 

@@ -2,30 +2,29 @@ from __future__ import annotations
 
 import os
 import threading
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta, timezone
 from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
+from exchangelib import CalendarItem, Message
 from exchangelib.errors import (
     ErrorAccessDenied,
-    ErrorUnsupportedPathForQuery,
     ErrorInvalidIdMalformed,
     ErrorIrresolvableConflict,
     ErrorItemNotFound,
     ErrorItemSavePropertyError,
     ErrorServerBusy,
     ErrorTimeoutExpired,
+    ErrorUnsupportedPathForQuery,
     RateLimitError,
     UnauthorizedError,
 )
 from exchangelib.ewsdatetime import EWSTimeZone
 from exchangelib.folders import Inbox
-from exchangelib import CalendarItem, Message
+from exchangelib.items import HARD_DELETE, MOVE_TO_DELETED_ITEMS
 from exchangelib.restriction import Q, Restriction
 from exchangelib.version import EXCHANGE_2016, Version
-
-from exchangelib.items import HARD_DELETE, MOVE_TO_DELETED_ITEMS
 
 import outlook_mcp.exchange_client.base as exchange_client_base
 import outlook_mcp.exchange_client.contacts as exchange_client_contacts
@@ -67,7 +66,7 @@ def _free_slots_request() -> FindFreeSlotsRequest:
 
 
 def _fake_account(views, captured: dict | None = None) -> SimpleNamespace:
-    """An account whose protocol answers get_free_busy_info with a generator, like exchangelib does."""
+    """An account answering get_free_busy_info with a generator, as exchangelib does."""
 
     def get_free_busy_info(**kwargs):
         if captured is not None:
@@ -293,8 +292,8 @@ def test_find_free_slots_sends_window_in_utc(settings) -> None:
 
     assert captured["start"].tzinfo.key == "UTC"
     assert captured["end"].tzinfo.key == "UTC"
-    assert captured["start"] == datetime(2026, 4, 13, 6, 0, tzinfo=timezone.utc)
-    assert captured["end"] == datetime(2026, 4, 13, 8, 0, tzinfo=timezone.utc)
+    assert captured["start"] == datetime(2026, 4, 13, 6, 0, tzinfo=UTC)
+    assert captured["end"] == datetime(2026, 4, 13, 8, 0, tzinfo=UTC)
 
 
 def test_find_free_slots_returns_slots_in_mailbox_timezone(settings) -> None:
@@ -1517,8 +1516,9 @@ def _bound_inbox() -> Inbox:
 
 
 def test_list_emails_from_address_filter_uses_author_field_not_a_subfield(settings) -> None:
-    """'author' is a MailboxField, not an IndexedField: EWS rejects a '__email_address' subfield path
-    with 'Unknown field path', so filtering must target 'author' itself (see the __iexact lookup)."""
+    """'author' is a MailboxField, not an IndexedField: EWS rejects a '__email_address'
+    subfield path with 'Unknown field path', so filtering must target 'author' itself
+    (see the __iexact lookup)."""
     backend = EWSExchangeBackend(settings)
     captured: dict = {}
 
