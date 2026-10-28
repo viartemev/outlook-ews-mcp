@@ -453,7 +453,9 @@ TOOL_SPECS: list[ToolSpec] = [
     ),
     ToolSpec(
         "find_free_slots",
-        "Find up to limit meeting time slots",
+        "Find up to limit non-overlapping slots of `duration` minutes where every attendee "
+        "is free, on a 15-minute grid. Attendees whose free/busy the server cannot see "
+        "are listed in unknown_attendees (all_available=false) rather than blocking.",
         find_free_slots,
         request_model=models.FindFreeSlotsRequest,
         response_model=list[models.FreeSlot],

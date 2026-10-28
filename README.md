@@ -125,7 +125,7 @@ that never modify the mailbox — they get more concurrency (see
 | `update_event` | Update a calendar event | |
 | `delete_event` | Delete a calendar event | |
 | `respond_to_invite` | Accept, decline, or tentatively respond to an invite | |
-| `find_free_slots` | Find open meeting time slots | ✅ |
+| `find_free_slots` | Find non-overlapping meeting slots on a 15-minute grid; attendees without free/busy data are listed in `unknown_attendees` instead of blocking every slot | ✅ |
 | `delete_events` | Bulk delete events, with per-item results | |
 | `respond_to_invites` | Bulk respond to invites, with per-item results | |
 | `get_my_availability` | Get free/busy slots; pass `mailbox` for a colleague's calendar | ✅ |

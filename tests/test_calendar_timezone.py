@@ -144,7 +144,7 @@ def test_find_free_slots_normalizes_pydantic_tzinfo(settings) -> None:
 
     def get_free_busy_info(**kwargs):
         captured.update(kwargs)
-        yield SimpleNamespace(merged="0")
+        yield SimpleNamespace(merged="0000")
 
     backend._account = SimpleNamespace(
         default_timezone=EWSTimeZone("Europe/Moscow"),

@@ -190,12 +190,12 @@ def test_map_exception_does_not_log_raw_exchange_message(settings, caplog) -> No
 def test_find_free_slots_accepts_generator_response(settings) -> None:
     backend = EWSExchangeBackend(settings)
     captured: dict = {}
-    backend._account = _fake_account([SimpleNamespace(merged="00")], captured)
+    backend._account = _fake_account([SimpleNamespace(merged="0" * 8)], captured)
 
     slots = backend.find_free_slots(_free_slots_request())
 
     assert captured["accounts"] == [("user@example.com", "Required", False)]
-    assert captured["merged_free_busy_interval"] == 60
+    assert captured["merged_free_busy_interval"] == 15
     assert len(slots) == 2
     assert slots[0].start.hour == 9
     assert slots[1].start.hour == 10
@@ -229,7 +229,9 @@ def test_find_free_slots_requires_every_attendee_free(settings) -> None:
             "end": "2026-04-13T11:00:00+03:00",
         }
     )
-    backend._account = _fake_account([SimpleNamespace(merged="00"), SimpleNamespace(merged="02")])
+    backend._account = _fake_account(
+        [SimpleNamespace(merged="0" * 8), SimpleNamespace(merged="0000" + "2222")]
+    )
 
     slots = backend.find_free_slots(request)
 
@@ -240,7 +242,7 @@ def test_find_free_slots_requires_every_attendee_free(settings) -> None:
 def test_find_free_slots_clamps_sub_5_minute_duration_to_ews_minimum(settings) -> None:
     """EWS rejects merged_free_busy_interval below 5, so a short meeting duration
     (e.g. 2 minutes) must still request a valid 5-minute sample, and slots must be
-    matched against the sample that covers each short slot's start time."""
+    matched against every sample the short slot overlaps."""
     backend = EWSExchangeBackend(settings)
     captured: dict = {}
     request = FindFreeSlotsRequest.model_validate(
@@ -257,7 +259,61 @@ def test_find_free_slots_clamps_sub_5_minute_duration_to_ews_minimum(settings) -
     slots = backend.find_free_slots(request)
 
     assert captured["merged_free_busy_interval"] == 5
-    assert [slot.start.minute for slot in slots] == [0, 2, 4]
+    # 9:04-9:06 would run into the busy 9:05-9:10 cell.
+    assert [slot.start.minute for slot in slots] == [0, 2]
+
+
+def test_find_free_slots_offers_a_slot_right_after_a_short_meeting(settings) -> None:
+    """Candidates used to sit on a grid of `duration` anchored at `start`: after a
+    9:00-9:30 meeting, a 60-minute search from 9:00 jumped straight to 10:00."""
+    backend = EWSExchangeBackend(settings)
+    # 9:00-9:30 busy, then free until 11:00.
+    backend._account = _fake_account([SimpleNamespace(merged="22" + "000000")])
+
+    slots = backend.find_free_slots(_free_slots_request())
+
+    assert [(slot.start.hour, slot.start.minute) for slot in slots] == [(9, 30)]
+    assert (slots[0].end.hour, slots[0].end.minute) == (10, 30)
+
+
+def test_find_free_slots_offers_non_overlapping_slots(settings) -> None:
+    backend = EWSExchangeBackend(settings)
+    backend._account = _fake_account([SimpleNamespace(merged="0" * 8)])
+
+    slots = backend.find_free_slots(_free_slots_request())
+
+    assert all(a.end <= b.start for a, b in zip(slots, slots[1:]))
+
+
+def test_find_free_slots_treats_tentative_as_blocking(settings) -> None:
+    backend = EWSExchangeBackend(settings)
+    # Tentative 9:15-9:30 and 10:15-10:30: no free hour fits around them.
+    backend._account = _fake_account([SimpleNamespace(merged="0100" + "0100")])
+
+    assert backend.find_free_slots(_free_slots_request()) == []
+
+
+def test_find_free_slots_reports_attendees_without_free_busy_data(settings) -> None:
+    """NoData (an external address, no free/busy rights) used to count as busy, so
+    a single such attendee made every search come back empty."""
+    backend = EWSExchangeBackend(settings)
+    request = FindFreeSlotsRequest.model_validate(
+        {
+            "attendees": ["me@example.com", "external@partner.example"],
+            "duration": 60,
+            "start": "2026-04-13T09:00:00+03:00",
+            "end": "2026-04-13T11:00:00+03:00",
+        }
+    )
+    backend._account = _fake_account(
+        [SimpleNamespace(merged="0" * 8), SimpleNamespace(merged="5" * 8)]
+    )
+
+    slots = backend.find_free_slots(request)
+
+    assert len(slots) == 2
+    assert all(slot.all_available is False for slot in slots)
+    assert all(slot.unknown_attendees == ["external@partner.example"] for slot in slots)
 
 
 def test_find_free_slots_filters_by_work_hours(settings) -> None:
@@ -271,7 +327,7 @@ def test_find_free_slots_filters_by_work_hours(settings) -> None:
             "work_hours": {"start": "09:00", "end": "18:00"},
         }
     )
-    backend._account = _fake_account([SimpleNamespace(merged="000")])
+    backend._account = _fake_account([SimpleNamespace(merged="0" * 12)])
 
     slots = backend.find_free_slots(request)
 
@@ -300,7 +356,7 @@ def test_find_free_slots_sends_window_in_utc(settings) -> None:
 def test_find_free_slots_returns_slots_in_mailbox_timezone(settings) -> None:
     backend = EWSExchangeBackend(settings)
     # First hour busy, second free: the free cell is counted from the requested start.
-    backend._account = _fake_account([SimpleNamespace(merged="20")])
+    backend._account = _fake_account([SimpleNamespace(merged="2222" + "0000")])
 
     slots = backend.find_free_slots(_free_slots_request())
 
