@@ -49,7 +49,7 @@ testable Python service — no direct mailbox scripting required.
 - **Contacts** — search, read, create, update, delete
 - **Folders & attachments** — folder CRUD and attachment download
 - **Auth** — `NTLM` and `Basic` against on-prem Exchange
-- **Transport** — `stdio` and `SSE`
+- **Transport** — `stdio`, Streamable HTTP and (deprecated) SSE; HTTP requires a bearer token
 - **Architecture** — centralized error mapping through a single `ExchangeClient`
   abstraction (see [Project notes](#project-notes))
 - **Safety** — a privacy-safer smoke check by default (see [Smoke check](#smoke-check))
@@ -200,8 +200,13 @@ cp .env.example .env
 outlook-ews-mcp
 ```
 
-By default the server runs in `stdio` mode. Set `MCP_TRANSPORT=sse` to start an HTTP
-server instead.
+By default the server runs in `stdio` mode. Set `MCP_TRANSPORT=streamable-http` (or the
+deprecated `sse`, for clients that don't support Streamable HTTP yet) to start an HTTP
+server instead; the endpoint is `/mcp` (`/sse` for SSE). HTTP mode requires
+`MCP_HTTP_AUTH_TOKEN`, which clients send as `Authorization: Bearer <token>` — every
+request without it gets `401`. The token is a static shared secret, not per-user auth:
+anyone holding it gets full access to the mailbox (read, send, delete), so keep TLS
+termination (and ideally an IP allowlist) in front of the server when it leaves loopback.
 
 ## Configuration
 
@@ -240,9 +245,10 @@ A fully commented copy of every variable lives in [`.env.example`](.env.example)
 | `EXCHANGE_EMAIL_MIME_MAX_SIZE_MB` | `25` | Cap on raw MIME export size before base64 expansion (1–100) |
 | `EXCHANGE_SIGNATURE_TEXT` | unset | Appended to outgoing text bodies and replies/forwards. No EWS signature API exists, so this is configuration, not the mailbox's Outlook signature |
 | `EXCHANGE_SIGNATURE_HTML` | unset | Appended to outgoing HTML bodies. Same caveat as above; no cross-conversion between the two. Either can be skipped per call with `include_signature: false` |
-| `MCP_TRANSPORT` | `stdio` | `stdio` or `sse` |
-| `MCP_SSE_HOST` | `127.0.0.1` | Bind host when `MCP_TRANSPORT=sse` |
-| `MCP_SSE_PORT` | `8080` | Bind port when `MCP_TRANSPORT=sse` |
+| `MCP_TRANSPORT` | `stdio` | `stdio`, `streamable-http`, or the deprecated `sse` |
+| `MCP_HTTP_HOST` | `127.0.0.1` | Bind host for the HTTP transports |
+| `MCP_HTTP_PORT` | `8080` | Bind port for the HTTP transports |
+| `MCP_HTTP_AUTH_TOKEN` | — | Required for the HTTP transports: bearer token clients must send (e.g. `openssl rand -hex 32`) |
 | `MCP_MAX_CONCURRENCY` | `4` | Concurrent read-only tool calls (1–8); mutating calls always run exclusively. See [Request queue](#request-queue) |
 | `MCP_MAX_QUEUE_SIZE` | `20` | Max calls admitted at once, running + waiting (1–1000); beyond that, calls get an immediate `server_busy` error |
 | `LOG_LEVEL` | `INFO` | `DEBUG`, `INFO`, `WARNING`, or `ERROR` |
