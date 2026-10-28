@@ -734,6 +734,13 @@ class UpdateEventRequest(ExchangeModel):
     def validate_range(self) -> "UpdateEventRequest":
         if self.start and self.end and self.end <= self.start:
             raise ValueError("end must be greater than start")
+        both = {str(a).casefold() for a in self.add_attendees} & {
+            str(a).casefold() for a in self.remove_attendees
+        }
+        if both:
+            raise ValueError(
+                f"an address cannot be both added and removed: {', '.join(sorted(both))}"
+            )
         return self
 
 

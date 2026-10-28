@@ -735,6 +735,67 @@ def test_update_event_remove_attendees_alone_still_saves_the_field(settings) -> 
     assert item.required_attendees == []
 
 
+def _attendee(address):
+    return SimpleNamespace(mailbox=SimpleNamespace(email_address=address), response_type=None)
+
+
+def _attendee_backend(settings, **attendees):
+    item = _item(
+        start=datetime(2026, 4, 8, 9, 0, tzinfo=UTC),
+        end=datetime(2026, 4, 8, 10, 0, tzinfo=UTC),
+        **attendees,
+    )
+    saves: list[dict] = []
+    item.save = lambda **kwargs: saves.append(kwargs)
+    backend = _backend(
+        settings, calendar=SimpleNamespace(id="folder-1"), fetch=lambda **kwargs: iter([item])
+    )
+    return backend, item, saves
+
+
+def test_update_event_removes_optional_attendees_too(settings) -> None:
+    from outlook_mcp.models import UpdateEventRequest
+
+    backend, item, saves = _attendee_backend(
+        settings,
+        required_attendees=[_attendee("keep@example.com")],
+        optional_attendees=[_attendee("Old@Example.com"), _attendee(None)],
+    )
+
+    backend.update_event(UpdateEventRequest(id="event-1", remove_attendees=["old@example.com"]))
+
+    assert saves[0]["update_fields"] == ["optional_attendees"]
+    assert [a.mailbox.email_address for a in item.optional_attendees] == [None]
+    assert [a.mailbox.email_address for a in item.required_attendees] == ["keep@example.com"]
+
+
+def test_update_event_does_not_invite_someone_twice(settings) -> None:
+    from outlook_mcp.models import UpdateEventRequest
+
+    backend, item, saves = _attendee_backend(
+        settings,
+        required_attendees=[_attendee("a@example.com")],
+        optional_attendees=[_attendee("b@example.com")],
+    )
+
+    backend.update_event(
+        UpdateEventRequest(id="event-1", add_attendees=["A@example.com", "b@example.com"])
+    )
+
+    # Nothing changed, so nothing is saved -- and no update goes out to attendees.
+    assert saves == []
+    assert len(item.required_attendees) == 1
+
+
+def test_update_event_rejects_an_address_both_added_and_removed() -> None:
+    from outlook_mcp.models import UpdateEventRequest
+
+    with pytest.raises(ValueError, match="both added and removed"):
+        UpdateEventRequest(
+            id="event-1", add_attendees=["x@example.com"], remove_attendees=["X@example.com"]
+        )
+
+
 def test_bulk_copy_and_bulk_delete_map_wholesale_failures(settings) -> None:
     from outlook_mcp.models import BulkDeleteEmailsRequest
 
