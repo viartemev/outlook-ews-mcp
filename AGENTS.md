@@ -26,7 +26,7 @@ Package/CLI/repo are all `outlook-ews-mcp` now — `outlook-mcp` was already tak
 - Tests never hit a real Exchange server: `tests/conftest.py` provides `FakeExchangeBackend` implementing the `ExchangeBackend` protocol. Extend that fake rather than mocking `exchangelib` directly.
 - Lint: `.venv/bin/python -m ruff check .` (line length 100, configured in `pyproject.toml`). Format: `.venv/bin/python -m ruff format .`.
 - Type check: `.venv/bin/python -m mypy src` (config in `pyproject.toml`; `exchangelib` has no stubs, so it's exempted via `ignore_missing_imports`).
-- Coverage gate: `.venv/bin/python -m pytest -q --cov=outlook_mcp --cov-fail-under=70` (current coverage is ~75%; the 70% floor has slack, not a target to write to).
+- Coverage gate: `.venv/bin/python -m pytest -q --cov=outlook_mcp`; the floor is `fail_under` in `pyproject.toml` (95%, with coverage at ~99%). New code comes with tests; don't write tests just to hit the number.
 - All of the above run in CI: GitHub Actions (`.github/workflows/ci.yml`) and GitLab CI (`.gitlab-ci.yml`, additionally builds the package, runs `pip-audit`, and publishes a Docker image on `main`/tags).
 
 ## Conventions

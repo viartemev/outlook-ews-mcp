@@ -95,3 +95,8 @@ ignore_missing_imports = true
 
 [tool.coverage.run]
 source = ["outlook_mcp"]
+
+[tool.coverage.report]
+# The suite sits at ~99%; this floor catches a PR that lands untested code,
+# which the old 70% (set when coverage was ~75%) no longer could.
+fail_under = 95

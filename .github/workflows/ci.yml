@@ -46,7 +46,7 @@ jobs:
         with:
           version: ${{ env.UV_VERSION }}
       - run: uv sync --frozen --extra dev --python ${{ matrix.python-version }}
-      - run: uv run pytest -q --cov=outlook_mcp --cov-report=term-missing --cov-fail-under=70
+      - run: uv run pytest -q --cov=outlook_mcp --cov-report=term-missing
 
   security:
     runs-on: ubuntu-latest
