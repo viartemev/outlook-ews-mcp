@@ -43,8 +43,9 @@ class ToolGateway:
     rejected immediately with a structured server_busy error instead of queuing
     forever.
 
-    *Reads run in parallel, writes run alone.* Read-only tools (spec.read_only,
-    the same flag published to clients as readOnlyHint) each take one of
+    *Reads run in parallel, writes run alone.* Tools that leave the mailbox
+    untouched (spec.read_only -- the flag published to clients as readOnlyHint --
+    or spec.mailbox_read_only for tools that only write locally) each take one of
     MCP_MAX_CONCURRENCY permits, so an agent asking for "the email, the folder
     list and the calendar" pays the slowest round trip, not the sum. A mutating
     tool first takes the writer lock (mutations never overlap each other), then
@@ -180,6 +181,11 @@ class ToolSpec:
     response_model: Any = None
     read_only: bool = False
     destructive: bool = False
+    #: Changes nothing in the mailbox even though read_only is False, because it
+    #: writes somewhere else (get_attachment saves to local disk). read_only is
+    #: what clients see as readOnlyHint and may auto-approve on, so it must stay
+    #: honest; this flag only lets the gateway run the tool alongside reads.
+    mailbox_read_only: bool = False
 
 
 def bind_mcp_tool(
@@ -203,7 +209,7 @@ def bind_mcp_tool(
             payload, is_error = await gateway.run(
                 spec.name,
                 lambda: registry_call(spec.name, arguments),
-                read_only=spec.read_only,
+                read_only=spec.read_only or spec.mailbox_read_only,
             )
         structured = payload if isinstance(payload, dict) else {"result": payload}
         return CallToolResult(
