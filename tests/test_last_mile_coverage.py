@@ -22,10 +22,8 @@ from outlook_mcp.models import (
     CreateInboxRuleActions,
     CreateInboxRuleConditions,
     CreateInboxRuleRequest,
-    DeleteEmailRequest,
     DraftEmailRequest,
     FindFreeSlotsRequest,
-    FolderActionRequest,
     ForwardEmailRequest,
     GetAttachmentRequest,
     ListEventsRequest,
@@ -467,22 +465,6 @@ def test_reply_and_forward_map_creation_failures(settings) -> None:
         backend.reply_email(ReplyEmailRequest(id="item-1", body="B"))
     with pytest.raises(APIError):
         backend.forward_email(ForwardEmailRequest(id="item-1", to=["u@example.com"]))
-
-
-def test_move_copy_delete_map_failures(settings, monkeypatch) -> None:
-    item = _mail_item()
-    item.move = lambda to_folder: (_ for _ in ()).throw(ErrorAccessDenied("locked"))
-    item.copy = lambda to_folder: (_ for _ in ()).throw(ErrorAccessDenied("locked"))
-    item.move_to_trash = lambda: (_ for _ in ()).throw(ErrorAccessDenied("locked"))
-    backend = _backend(settings, fetch=lambda **kwargs: iter([item]))
-    backend._resolve_folder = lambda value: _FOLDER
-
-    with pytest.raises(APIError):
-        backend.move_email(FolderActionRequest(id="item-1", folder="inbox"))
-    with pytest.raises(APIError):
-        backend.copy_email(FolderActionRequest(id="item-1", folder="inbox"))
-    with pytest.raises(APIError):
-        backend.delete_email(DeleteEmailRequest(id="item-1"))
 
 
 def test_bulk_move_maps_a_wholesale_failure(settings) -> None:

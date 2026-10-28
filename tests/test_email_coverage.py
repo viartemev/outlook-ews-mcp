@@ -14,9 +14,7 @@ from outlook_mcp.models import (
     BulkMoveEmailsRequest,
     CreateFolderRequest,
     DeleteAttachmentRequest,
-    DeleteEmailRequest,
     DraftEmailRequest,
-    FolderActionRequest,
     GetEmailRequest,
     ListCategoriesRequest,
     ListEmailsRequest,
@@ -212,45 +210,6 @@ def test_send_email_maps_a_send_failure(settings, monkeypatch) -> None:
         backend.send_email(SendEmailRequest(to=["u@example.com"], subject="Hi", body="B"))
 
     assert excinfo.value.code == "permission_denied"
-
-
-def test_copy_email_returns_both_ids(settings) -> None:
-    item = FakeItem()
-    item.copy = lambda to_folder: ("copy-1", "ck")
-    backend = _backend(settings, folder=FakeFolder(), item=item)
-
-    result = backend.copy_email(FolderActionRequest(id="email-1", folder="inbox"))
-
-    assert result.new_id == "copy-1"
-    assert result.status == "copied"
-
-
-def test_copy_email_tolerates_a_missing_new_id(settings) -> None:
-    item = FakeItem()
-    item.copy = lambda to_folder: None
-    backend = _backend(settings, folder=FakeFolder(), item=item)
-
-    assert backend.copy_email(FolderActionRequest(id="email-1", folder="inbox")).new_id is None
-
-
-def test_delete_email_soft_uses_the_trash(settings) -> None:
-    item = FakeItem()
-    backend = _backend(settings, item=item)
-
-    backend.delete_email(DeleteEmailRequest(id="email-1"))
-
-    assert item.trashed is True
-    assert item.deleted == []
-
-
-def test_delete_email_hard_bypasses_the_trash(settings) -> None:
-    item = FakeItem()
-    backend = _backend(settings, item=item)
-
-    backend.delete_email(DeleteEmailRequest(id="email-1", hard_delete=True))
-
-    assert item.trashed is False
-    assert item.deleted == [{}]
 
 
 def test_mark_email_sets_importance(settings) -> None:

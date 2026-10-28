@@ -26,15 +26,12 @@ from outlook_mcp.models import (
     ContactFull,
     ContactSummary,
     CreateContactRequest,
-    CategorizeEmailRequest,
     CategoryUsage,
     CreateEventRequest,
     CreateEventResult,
     CreateInboxRuleRequest,
     DelegateInfo,
     DeleteContactRequest,
-    DeleteEmailRequest,
-    DeleteEventRequest,
     DeleteFolderRequest,
     DeleteInboxRuleRequest,
     DraftEmailRequest,
@@ -43,7 +40,6 @@ from outlook_mcp.models import (
     EmailFull,
     EmailMimeResult,
     EmailSummary,
-    FolderActionRequest,
     FolderInfo,
     FindFreeSlotsRequest,
     ForwardEmailRequest,
@@ -61,12 +57,10 @@ from outlook_mcp.models import (
     ListFoldersRequest,
     ListRoomsRequest,
     MailboxInfo,
-    MarkEmailRequest,
     OutOfOfficeSettings,
     PingResult,
     RenameFolderRequest,
     ReplyEmailRequest,
-    RespondToInviteRequest,
     RoomInfo,
     RoomListInfo,
     SearchContactsRequest,
@@ -205,26 +199,6 @@ class FakeExchangeBackend:
     def forward_email(self, request: ForwardEmailRequest) -> SendResult:
         return SendResult(id=None, status="submitted")
 
-    def move_email(self, request: FolderActionRequest) -> ActionResult:
-        return ActionResult(id=request.id, status="moved", new_folder=request.folder)
-
-    def copy_email(self, request: FolderActionRequest) -> ActionResult:
-        return ActionResult(
-            id=request.id,
-            status="copied",
-            new_folder=request.folder,
-            new_id="email-copy-1",
-        )
-
-    def delete_email(self, request: DeleteEmailRequest) -> ActionResult:
-        return ActionResult(id=request.id, status="deleted")
-
-    def mark_email(self, request: MarkEmailRequest) -> ActionResult:
-        updated_fields = [
-            field for field in ["read", "flag", "importance"] if getattr(request, field) is not None
-        ]
-        return ActionResult(id=request.id, status="updated", updated_fields=updated_fields)
-
     def move_emails(self, request: BulkMoveEmailsRequest) -> BulkResult:
         return BulkResult(
             succeeded=[
@@ -247,21 +221,6 @@ class FakeExchangeBackend:
 
     def categorize_emails(self, request: BulkCategorizeEmailsRequest) -> BulkResult:
         return BulkResult(succeeded=[BulkItemResult(id=item_id) for item_id in request.ids])
-
-    def categorize_email(self, request: CategorizeEmailRequest) -> ActionResult:
-        existing = ["Existing"]
-        if request.mode == "set":
-            categories = list(request.categories)
-        elif request.mode == "add":
-            categories = existing + [name for name in request.categories if name not in existing]
-        else:
-            categories = [name for name in existing if name not in request.categories]
-        return ActionResult(
-            id=request.id,
-            status="updated",
-            updated_fields=["categories"],
-            categories=categories,
-        )
 
     def list_categories(self, request: ListCategoriesRequest) -> list[CategoryUsage]:
         return [
@@ -364,12 +323,6 @@ class FakeExchangeBackend:
             if getattr(request, field) is not None
         ]
         return ActionResult(id=request.id, status="updated", updated_fields=updated_fields)
-
-    def delete_event(self, request: DeleteEventRequest) -> ActionResult:
-        return ActionResult(id=request.id, status="deleted")
-
-    def respond_to_invite(self, request: RespondToInviteRequest) -> ActionResult:
-        return ActionResult(id=request.id, status=request.response)
 
     def delete_events(self, request: BulkDeleteEventsRequest) -> BulkResult:
         return BulkResult(succeeded=[BulkItemResult(id=item_id) for item_id in request.ids])
