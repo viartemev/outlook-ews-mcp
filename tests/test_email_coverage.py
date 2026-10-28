@@ -102,7 +102,7 @@ def _backend(settings, *, folder=None, item=None, **account_extra) -> EWSExchang
         "default_timezone": EWSTimeZone("UTC"),
         "inbox": inbox,
         "drafts": FakeFolder(name="Черновики"),
-        # _resolve_folder builds its builtin map eagerly, touching all of these.
+        # Well-known folders _resolve_folder may look up by name.
         "root": SimpleNamespace(children=[], tois=SimpleNamespace(children=[inbox])),
         "sent": FakeFolder(name="Отправленные"),
         "trash": FakeFolder(name="Удаленные"),

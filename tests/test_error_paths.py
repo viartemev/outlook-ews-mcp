@@ -105,6 +105,36 @@ def test_resolve_folder_root_value_returns_root(settings, monkeypatch) -> None:
     assert backend._resolve_folder("//") is root
 
 
+class _OnlyInboxShared(SimpleNamespace):
+    """A delegate mailbox where only the Inbox is shared with us."""
+
+    inbox = _FOLDER
+
+    def __getattr__(self, name):
+        if name in {"sent", "drafts", "trash", "junk", "calendar", "contacts"}:
+            raise ErrorAccessDenied(f"{name} is not shared")
+        raise AttributeError(name)
+
+
+def test_resolve_folder_looks_up_only_the_requested_well_known_folder(settings) -> None:
+    # Resolving every well-known folder up front cost a GetFolder each and failed
+    # "inbox" whenever any other one of them was not shared.
+    backend = _backend(settings)
+    backend._account = _OnlyInboxShared()
+
+    assert backend._resolve_folder("Inbox") is _FOLDER
+
+
+def test_resolve_folder_maps_an_unreadable_well_known_folder(settings) -> None:
+    backend = _backend(settings)
+    backend._account = _OnlyInboxShared()
+
+    with pytest.raises(APIError) as excinfo:
+        backend._resolve_folder("junk")
+
+    assert excinfo.value.code == "permission_denied"
+
+
 def test_walk_child_folders_survives_an_unreadable_folder(settings) -> None:
     class Unreadable:
         @property
