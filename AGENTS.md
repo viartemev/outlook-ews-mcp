@@ -15,7 +15,7 @@ MCP server exposing on-prem Exchange (EWS) to LLM clients. Source lives under `s
 - `models.py` — pydantic request/response models for every MCP tool
 - `errors.py` — `APIError` and subclasses (`ExchangeUnavailableError`, `AuthFailedError`, ...); `.to_dict()` feeds MCP `isError=true` responses
 - `tools/` — MCP tool definitions by domain (`email.py`, `calendar.py`, `contacts.py`, `system.py`), registered via `mcp_tools.py`
-- `server.py` — `FastMCP` app entrypoint (`stdio` or `sse` transport)
+- `server.py` — `FastMCP` app entrypoint (`stdio`, or `streamable-http`/`sse` served via uvicorn behind `BearerTokenMiddleware`)
 - `smoke.py` — privacy-safe manual smoke check against a real mailbox (`OUTLOOK_MCP_SMOKE_INCLUDE_DATA=true` to see real data)
 
 Package/CLI/repo are all `outlook-ews-mcp` now — `outlook-mcp` was already taken on PyPI, so the PyPI distribution, the two console scripts, and the GitHub repo itself were renamed to match. The Python import path stays `outlook_mcp` (unrenamed, and not worth churning across every file).

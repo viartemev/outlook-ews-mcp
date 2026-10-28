@@ -70,9 +70,17 @@ class Settings(BaseSettings):
     signature_html: str | None = Field(default=None, alias="EXCHANGE_SIGNATURE_HTML")
     signature_text: str | None = Field(default=None, alias="EXCHANGE_SIGNATURE_TEXT")
 
-    mcp_transport: Literal["stdio", "sse"] = Field(default="stdio", alias="MCP_TRANSPORT")
-    mcp_sse_host: str = Field(default="127.0.0.1", alias="MCP_SSE_HOST")
-    mcp_sse_port: int = Field(default=8080, alias="MCP_SSE_PORT", ge=1, le=65535)
+    #: streamable-http is the MCP spec's HTTP transport; sse is its deprecated
+    #: predecessor, kept for clients that have not moved yet.
+    mcp_transport: Literal["stdio", "streamable-http", "sse"] = Field(
+        default="stdio", alias="MCP_TRANSPORT"
+    )
+    mcp_http_host: str = Field(default="127.0.0.1", alias="MCP_HTTP_HOST")
+    mcp_http_port: int = Field(default=8080, alias="MCP_HTTP_PORT", ge=1, le=65535)
+    #: Static bearer token every HTTP request must present. Required for both HTTP
+    #: transports: they expose the whole mailbox (read, send, delete) to anything
+    #: that reaches the port -- loopback included, i.e. every local process.
+    mcp_http_auth_token: SecretStr | None = Field(default=None, alias="MCP_HTTP_AUTH_TOKEN")
     #: How many read-only tool calls execute at once. Mutating calls always run
     #: exclusively -- one at a time, never overlapping a read -- regardless of
     #: this value; see ToolGateway. There is deliberately no per-call timeout --
@@ -96,6 +104,7 @@ class Settings(BaseSettings):
         "exchange_ca_bundle",
         "attachment_root",
         "log_file",
+        "mcp_http_auth_token",
         mode="before",
     )
     @classmethod
@@ -143,6 +152,16 @@ class Settings(BaseSettings):
                 "EXCHANGE_SERVER=http://... . Use an https:// endpoint, or set "
                 "EXCHANGE_ALLOW_INSECURE_BASIC_AUTH=true to explicitly opt into "
                 "sending Basic auth over plain HTTP (e.g. for a local/test server)."
+            )
+        return self
+
+    @model_validator(mode="after")
+    def _require_http_auth_token(self) -> "Settings":
+        if self.mcp_transport != "stdio" and self.mcp_http_auth_token is None:
+            raise ValueError(
+                f"MCP_TRANSPORT={self.mcp_transport} exposes the mailbox over HTTP and "
+                "requires MCP_HTTP_AUTH_TOKEN; clients send it as "
+                "`Authorization: Bearer <token>`. Generate one with `openssl rand -hex 32`."
             )
         return self
 

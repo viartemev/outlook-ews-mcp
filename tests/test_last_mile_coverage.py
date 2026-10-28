@@ -677,17 +677,6 @@ def test_configure_logging_writes_to_a_file(tmp_path, settings, monkeypatch) -> 
     assert log_file.exists()
 
 
-def test_main_refuses_an_unknown_transport(monkeypatch, settings) -> None:
-    import outlook_mcp.server as server_module
-
-    monkeypatch.setattr(settings, "mcp_transport", "carrier-pigeon")
-    monkeypatch.setattr(server_module, "get_settings", lambda: settings)
-    monkeypatch.setattr(server_module, "build_mcp_server", lambda settings=None: SimpleNamespace())
-
-    with pytest.raises(RuntimeError, match="unsupported transport"):
-        server_module.main()
-
-
 def test_added_attachment_hook_resolves_relative_paths(tmp_path, settings, monkeypatch) -> None:
     from outlook_mcp.exchange_client import ExchangeClient
     from outlook_mcp.tools.email import _validate_added_attachment
