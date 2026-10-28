@@ -84,11 +84,11 @@ that never modify the mailbox — they get more concurrency (see
 
 | Tool | Description | Read-only |
 | --- | --- | --- |
-| `list_emails` | List emails in a folder | ✅ |
+| `list_emails` | List emails in a folder; `include_preview=true` adds a 200-char body preview (downloads full bodies) | ✅ |
 | `get_email` | Get a full email by id | ✅ |
 | `get_email_mime` | Export a message's raw RFC 822 MIME content, base64-encoded | ✅ |
 | `get_thread` | Get every message of a conversation in order, bodies included | ✅ |
-| `search_emails` | Search by substring (subject/body/sender) or server-side Advanced Query Syntax | ✅ |
+| `search_emails` | Search by substring (subject/body/sender) or server-side Advanced Query Syntax; `include_preview` as in `list_emails` | ✅ |
 | `send_email` | Send a new email; `from_mailbox` sends from a shared mailbox (needs Send As) | |
 | `reply_email` | Reply to an email | |
 | `forward_email` | Forward an email | |
