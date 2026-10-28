@@ -182,6 +182,10 @@ class ListEmailsRequest(ExchangeModel):
     before: date | None = None
     unread_only: bool = False
     has_attachments: bool | None = None
+    #: Fill `preview` with the first 200 characters of each body. Off by default:
+    #: EWS can only return whole bodies, so this downloads every listed message
+    #: in full.
+    include_preview: bool = False
 
 
 class GetEmailRequest(ExchangeModel):
@@ -565,6 +569,8 @@ class SearchEmailsRequest(ExchangeModel):
     aqs: str | None = Field(default=None, min_length=1)
     folder: str | None = None
     limit: int = Field(default=20, ge=1, le=100)
+    #: Same as ListEmailsRequest.include_preview.
+    include_preview: bool = False
 
     @model_validator(mode="after")
     def validate_selector(self) -> "SearchEmailsRequest":

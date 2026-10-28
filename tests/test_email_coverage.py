@@ -23,6 +23,7 @@ from outlook_mcp.models import (
     ListFoldersRequest,
     MarkEmailRequest,
     SendDraftRequest,
+    SearchEmailsRequest,
     SendEmailRequest,
 )
 
@@ -43,6 +44,7 @@ class FakeQuerySet:
         return self
 
     def only(self, *fields):
+        self.projected = fields
         return self
 
     def order_by(self, *fields):
@@ -141,6 +143,34 @@ def test_list_emails_maps_every_filter(settings) -> None:
     assert merged["datetime_received__gte"].date().isoformat() == "2026-04-01"
     # "before" is inclusive: the cutoff is the start of the next day.
     assert merged["datetime_received__lt"].date().isoformat() == "2026-05-01"
+
+
+@pytest.mark.parametrize("include_preview", [False, True])
+def test_list_emails_downloads_bodies_only_for_a_requested_preview(
+    settings, include_preview
+) -> None:
+    # text_body is the whole body: fetching it for every row of a listing just to
+    # cut a 200-char preview made listings of long mail cost megabytes.
+    folder = FakeFolder([FakeItem(text_body="Body of the message")])
+    backend = _backend(settings, folder=folder)
+
+    backend.list_emails(ListEmailsRequest(include_preview=include_preview))
+
+    assert ("text_body" in folder.projected) is include_preview
+
+
+@pytest.mark.parametrize("include_preview", [False, True])
+def test_search_emails_downloads_bodies_only_for_a_requested_preview(
+    settings, include_preview
+) -> None:
+    folder = FakeFolder([FakeItem(text_body="Body of the message")])
+    backend = _backend(settings, folder=folder)
+
+    backend.search_emails(
+        SearchEmailsRequest(query="report", folder="inbox", include_preview=include_preview)
+    )
+
+    assert ("text_body" in folder.projected) is include_preview
 
 
 def test_list_emails_maps_a_server_failure(settings) -> None:
