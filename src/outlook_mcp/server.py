@@ -82,6 +82,11 @@ class ToolRegistry:
             return result, False
         except Exception as exc:  # noqa: BLE001
             api_error = normalize_exception(exc)
+            # The backend wraps unexpected exceptions in InternalError; the
+            # innermost cause is the one whose type and frames point at the bug.
+            root = exc
+            while root.__cause__ is not None:
+                root = root.__cause__  # type: ignore[assignment]
             duration_ms = round((time.perf_counter() - started) * 1000)
             logger.warning(
                 "tool=%s status=error duration_ms=%s ews_requests=%s ews_ms=%s error=%s "
@@ -91,12 +96,12 @@ class ToolRegistry:
                 ews.requests,
                 round(ews.total_ms),
                 api_error.code,
-                type(exc).__name__,
+                type(root).__name__,
             )
-            if not isinstance(exc, APIError):
+            if api_error.code == "internal_error":
                 # Preserve actionable code locations without formatting the raw
                 # exception value, which may contain SOAP, addresses or hostnames.
-                frames = traceback.extract_tb(exc.__traceback__)
+                frames = traceback.extract_tb(root.__traceback__)
                 logger.error(
                     "tool=%s internal_trace=%s",
                     name,

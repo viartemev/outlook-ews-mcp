@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import replace
 
+from outlook_mcp.errors import InternalError
 from outlook_mcp.server import build_registry
 from outlook_mcp.models import SendResult
 from outlook_mcp.tool_specs import TOOL_SPECS
@@ -49,6 +50,30 @@ def test_registry_does_not_log_raw_unexpected_exception(client, settings, caplog
     assert payload["error"] == "internal_error"
     assert secret_detail not in caplog.text
     assert "exception_type=RuntimeError" in caplog.text
+
+
+def test_registry_logs_the_root_cause_of_a_wrapped_internal_error(client, settings, caplog) -> None:
+    # The backend maps an unexpected exception to InternalError raised `from` the
+    # original; the log must point at the original bug, not at the wrapper.
+    registry = build_registry(settings=settings, client=client)
+
+    def buggy_backend_call():
+        raise AttributeError("'NoneType' object has no attribute 'id'")
+
+    def fail(_client, _arguments):
+        try:
+            buggy_backend_call()
+        except AttributeError as exc:
+            raise InternalError() from exc
+
+    registry._specs["ping_exchange"] = replace(registry._specs["ping_exchange"], handler=fail)
+    payload, is_error = registry.call("ping_exchange")
+
+    assert is_error is True
+    assert payload["error"] == "internal_error"
+    assert "exception_type=AttributeError" in caplog.text
+    assert "buggy_backend_call" in caplog.text
+    assert "NoneType" not in caplog.text
 
 
 def test_registry_validates_success_payload_against_response_model(client, settings) -> None:

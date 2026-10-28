@@ -10,6 +10,7 @@ from datetime import UTC, datetime
 from typing import Any, Literal
 from urllib.parse import urlparse
 
+import requests
 from exchangelib import version as ews_version
 from exchangelib import (
     Account,
@@ -26,6 +27,7 @@ from exchangelib import (
 )
 from exchangelib.ewsdatetime import EWSDateTime
 from exchangelib.errors import (
+    EWSError,
     ErrorAccessDenied,
     ErrorExceededConnectionCount,
     ErrorFolderSavePropertyError,
@@ -56,6 +58,7 @@ from ..errors import (
     AuthFailedError,
     ConflictError,
     ExchangeUnavailableError,
+    InternalError,
     NotFoundError,
     PermissionDeniedError,
     TimeoutAPIError,
@@ -657,8 +660,14 @@ class BaseEWSBackend:
         if isinstance(exc, TransportError):
             logger.warning("Exchange transport error: %s", type(exc).__name__)
             return ExchangeUnavailableError("exchange is unavailable")
-        logger.warning("Unmapped Exchange exception: %s", type(exc).__name__)
-        return ExchangeUnavailableError("exchange is unavailable")
+        if isinstance(exc, (EWSError, requests.RequestException)):
+            logger.warning("Unmapped Exchange exception: %s", type(exc).__name__)
+            return ExchangeUnavailableError("exchange is unavailable")
+        # Not something Exchange or the network reported: a bug here (AttributeError,
+        # TypeError, ...) or a local OS error. Calling that "exchange is unavailable"
+        # sends the caller retrying and the operator chasing the network, and hides
+        # the traceback ToolRegistry logs for internal errors.
+        return InternalError()
 
     def _bulk(self, ids: Iterable[str], action: Callable[[str], Any]) -> BulkResult:
         """Run a single-item action over every id, capturing per-item failures.
