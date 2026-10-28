@@ -4,7 +4,6 @@ from . import models
 from .mcp_tools import ToolSpec
 from .tools.calendar import (
     create_event,
-    delete_event,
     delete_events,
     find_free_slots,
     get_event,
@@ -13,7 +12,6 @@ from .tools.calendar import (
     list_events,
     list_room_lists,
     list_rooms,
-    respond_to_invite,
     respond_to_invites,
     update_event,
 )
@@ -25,13 +23,10 @@ from .tools.contacts import (
     update_contact,
 )
 from .tools.email import (
-    categorize_email,
     categorize_emails,
-    copy_email,
     create_draft,
     create_reply_draft,
     create_folder,
-    delete_email,
     delete_emails,
     delete_folder,
     delete_attachment,
@@ -44,9 +39,7 @@ from .tools.email import (
     list_categories,
     list_emails,
     list_folders,
-    mark_email,
     mark_emails,
-    move_email,
     move_emails,
     copy_emails,
     rename_folder,
@@ -81,7 +74,7 @@ TOOL_SPECS: list[ToolSpec] = [
     ),
     ToolSpec(
         "get_mailbox_info",
-        "Get mailbox metadata",
+        "Get the mailbox's address, display name, timezone and Exchange version",
         get_mailbox_info,
         response_model=models.MailboxInfo,
         read_only=True,
@@ -146,7 +139,9 @@ TOOL_SPECS: list[ToolSpec] = [
     ),
     ToolSpec(
         "list_emails",
-        "List emails in a folder",
+        "List emails in a folder (default inbox), newest first, with paging (limit/offset) "
+        "and filters: sender, subject substring, date range, unread, has attachments. Returns "
+        "summaries; use get_email or get_thread for full bodies",
         list_emails,
         request_model=models.ListEmailsRequest,
         response_model=list[models.EmailSummary],
@@ -154,7 +149,9 @@ TOOL_SPECS: list[ToolSpec] = [
     ),
     ToolSpec(
         "get_email",
-        "Get a full email by ID",
+        "Get one email by id with recipients, text and HTML body (truncated past "
+        "EXCHANGE_EMAIL_BODY_MAX_CHARS) and attachment metadata. Set include_headers for the "
+        "raw internet headers",
         get_email,
         request_model=models.GetEmailRequest,
         response_model=models.EmailFull,
@@ -199,7 +196,9 @@ TOOL_SPECS: list[ToolSpec] = [
     ),
     ToolSpec(
         "reply_email",
-        "Reply to an email",
+        "Reply to an email and send it immediately: to the sender only, or to everyone with "
+        "reply_all. Supports extra To/CC recipients and attachments. Use create_reply_draft "
+        "to review before sending",
         reply_email,
         request_model=models.ReplyEmailRequest,
         response_model=models.SendResult,
@@ -207,31 +206,18 @@ TOOL_SPECS: list[ToolSpec] = [
     ),
     ToolSpec(
         "forward_email",
-        "Forward an email",
+        "Forward an email to new recipients and send it immediately, with an optional comment "
+        "above the original and extra attachments",
         forward_email,
         request_model=models.ForwardEmailRequest,
         response_model=models.SendResult,
         destructive=True,
     ),
     ToolSpec(
-        "move_email",
-        "Move email to another folder",
-        move_email,
-        request_model=models.FolderActionRequest,
-        response_model=models.ActionResult,
-        destructive=True,
-    ),
-    ToolSpec(
-        "copy_email",
-        "Copy email to another folder",
-        copy_email,
-        request_model=models.FolderActionRequest,
-        response_model=models.ActionResult,
-    ),
-    ToolSpec(
         "move_emails",
-        "Move many emails to another folder in one call. Per-item results: one "
-        "bad id does not fail the rest. Moved items get new ids.",
+        "Move one or more emails (ids) to another folder in one call. Per-item results: one "
+        "bad id does not fail the rest. Moved items get new ids, returned as new_id; the old "
+        "ids stop working",
         move_emails,
         request_model=models.BulkMoveEmailsRequest,
         response_model=models.BulkResult,
@@ -239,49 +225,27 @@ TOOL_SPECS: list[ToolSpec] = [
     ),
     ToolSpec(
         "copy_emails",
-        "Copy many emails to another folder in one call, with per-item results.",
+        "Copy one or more emails (ids) to another folder in one call, with per-item results; "
+        "each copy's id is returned as new_id",
         copy_emails,
         request_model=models.BulkMoveEmailsRequest,
         response_model=models.BulkResult,
     ),
     ToolSpec(
         "delete_emails",
-        "Delete many emails in one call, with per-item results. Soft-deletes to "
-        "Deleted Items unless hard_delete is set.",
+        "Delete one or more emails (ids) in one call, with per-item results. Moves them to "
+        "Deleted Items (recoverable) unless hard_delete is set, which removes them "
+        "permanently",
         delete_emails,
         request_model=models.BulkDeleteEmailsRequest,
         response_model=models.BulkResult,
         destructive=True,
     ),
     ToolSpec(
-        "delete_email",
-        "Delete an email",
-        delete_email,
-        request_model=models.DeleteEmailRequest,
-        response_model=models.ActionResult,
-        destructive=True,
-    ),
-    ToolSpec(
-        "mark_email",
-        "Update read state, importance, or the follow-up flag "
-        "(optionally with start and due dates)",
-        mark_email,
-        request_model=models.MarkEmailRequest,
-        response_model=models.ActionResult,
-        destructive=True,
-    ),
-    ToolSpec(
-        "categorize_email",
-        "Set, add, or remove Outlook categories (the coloured labels) on an email",
-        categorize_email,
-        request_model=models.CategorizeEmailRequest,
-        response_model=models.ActionResult,
-        destructive=True,
-    ),
-    ToolSpec(
         "mark_emails",
-        "Update read state, importance, or the follow-up flag on multiple emails in "
-        "one call, with per-item results.",
+        "Set read/unread, importance, or the follow-up flag (optionally with start and due "
+        "dates) on one or more emails (ids), with per-item results. Omitted fields are left "
+        "unchanged",
         mark_emails,
         request_model=models.BulkMarkEmailsRequest,
         response_model=models.BulkResult,
@@ -289,8 +253,8 @@ TOOL_SPECS: list[ToolSpec] = [
     ),
     ToolSpec(
         "categorize_emails",
-        "Set, add, or remove Outlook categories on multiple emails in one call, "
-        "with per-item results.",
+        "Set, add, or remove Outlook categories (the coloured labels) on one or more emails "
+        "(ids), with per-item results. mode=set with an empty list clears all categories",
         categorize_emails,
         request_model=models.BulkCategorizeEmailsRequest,
         response_model=models.BulkResult,
@@ -307,7 +271,8 @@ TOOL_SPECS: list[ToolSpec] = [
     ),
     ToolSpec(
         "list_folders",
-        "List mailbox folders",
+        "List mailbox folders as a tree with unread/total counts, starting under parent "
+        "(default: the mailbox root) down to depth levels",
         list_folders,
         request_model=models.ListFoldersRequest,
         response_model=list[models.FolderInfo],
@@ -315,7 +280,7 @@ TOOL_SPECS: list[ToolSpec] = [
     ),
     ToolSpec(
         "create_folder",
-        "Create a mailbox folder",
+        "Create a mailbox folder under parent (default inbox)",
         create_folder,
         request_model=models.CreateFolderRequest,
         response_model=models.ActionResult,
@@ -341,7 +306,8 @@ TOOL_SPECS: list[ToolSpec] = [
     ),
     ToolSpec(
         "create_draft",
-        "Create an email draft",
+        "Save a new email to Drafts without sending it. Returns the draft id for "
+        "update_draft, add_attachment and send_draft",
         create_draft,
         request_model=models.DraftEmailRequest,
         response_model=models.ActionResult,
@@ -392,7 +358,9 @@ TOOL_SPECS: list[ToolSpec] = [
     ),
     ToolSpec(
         "get_attachment",
-        "Save an attachment to disk",
+        "Download one attachment of an email to local disk (under EXCHANGE_ATTACHMENT_ROOT "
+        "when save_path is given, else a temp directory) and return the saved path. Never "
+        "overwrites an existing file",
         get_attachment,
         request_model=models.GetAttachmentRequest,
         response_model=models.AttachmentResult,
@@ -421,7 +389,8 @@ TOOL_SPECS: list[ToolSpec] = [
     ),
     ToolSpec(
         "create_event",
-        "Create a calendar event",
+        "Create a calendar event, optionally all-day or recurring. If attendees are given "
+        "this is a meeting and invitations are sent to them immediately",
         create_event,
         request_model=models.CreateEventRequest,
         response_model=models.CreateEventResult,
@@ -429,25 +398,11 @@ TOOL_SPECS: list[ToolSpec] = [
     ),
     ToolSpec(
         "update_event",
-        "Update a calendar event",
+        "Update a calendar event: subject, time, location, body, reminder, add/remove "
+        "attendees. Omitted fields are left unchanged. send_updates (default all) controls "
+        "whether attendees are notified",
         update_event,
         request_model=models.UpdateEventRequest,
-        response_model=models.ActionResult,
-        destructive=True,
-    ),
-    ToolSpec(
-        "delete_event",
-        "Delete a calendar event",
-        delete_event,
-        request_model=models.DeleteEventRequest,
-        response_model=models.ActionResult,
-        destructive=True,
-    ),
-    ToolSpec(
-        "respond_to_invite",
-        "Respond to a calendar invite",
-        respond_to_invite,
-        request_model=models.RespondToInviteRequest,
         response_model=models.ActionResult,
         destructive=True,
     ),
@@ -461,7 +416,9 @@ TOOL_SPECS: list[ToolSpec] = [
     ),
     ToolSpec(
         "delete_events",
-        "Delete multiple calendar events in one call, with per-item results",
+        "Delete one or more calendar events (ids), with per-item results. For meetings you "
+        "organize, attendees get a cancellation (with cancel_message) unless notify_attendees "
+        "is false",
         delete_events,
         request_model=models.BulkDeleteEventsRequest,
         response_model=models.BulkResult,
@@ -469,7 +426,8 @@ TOOL_SPECS: list[ToolSpec] = [
     ),
     ToolSpec(
         "respond_to_invites",
-        "Respond to multiple calendar invites in one call, with per-item results",
+        "Accept, tentatively accept, or decline one or more meeting invitations (ids) with an "
+        "optional message; the organizer is notified. Per-item results",
         respond_to_invites,
         request_model=models.BulkRespondToInvitesRequest,
         response_model=models.BulkResult,
@@ -485,7 +443,7 @@ TOOL_SPECS: list[ToolSpec] = [
     ),
     ToolSpec(
         "list_calendars",
-        "List calendars",
+        "List the calendar folders in your own mailbox; their ids can be passed as calendar_id",
         list_calendars,
         response_model=list[models.CalendarInfo],
         read_only=True,
@@ -507,7 +465,8 @@ TOOL_SPECS: list[ToolSpec] = [
     ),
     ToolSpec(
         "search_contacts",
-        "Search contacts",
+        "Search contacts by name or email: personal Contacts folder, the global address list "
+        "(GAL), or both (default)",
         search_contacts,
         request_model=models.SearchContactsRequest,
         response_model=list[models.ContactSummary],
@@ -515,7 +474,7 @@ TOOL_SPECS: list[ToolSpec] = [
     ),
     ToolSpec(
         "get_contact",
-        "Get a contact by ID",
+        "Get a contact by id, including its email addresses, phones, addresses and notes",
         get_contact,
         request_model=models.GetContactRequest,
         response_model=models.ContactFull,
@@ -523,14 +482,15 @@ TOOL_SPECS: list[ToolSpec] = [
     ),
     ToolSpec(
         "create_contact",
-        "Create a personal contact",
+        "Create a contact in your personal Contacts folder",
         create_contact,
         request_model=models.CreateContactRequest,
         response_model=models.ActionResult,
     ),
     ToolSpec(
         "update_contact",
-        "Update a personal contact",
+        "Update a personal contact. Omitted fields are left unchanged; a field set to null is "
+        "cleared",
         update_contact,
         request_model=models.UpdateContactRequest,
         response_model=models.ActionResult,
@@ -538,7 +498,8 @@ TOOL_SPECS: list[ToolSpec] = [
     ),
     ToolSpec(
         "delete_contact",
-        "Delete a personal contact",
+        "Delete a personal contact. Moves it to Deleted Items (recoverable) unless "
+        "hard_delete is set",
         delete_contact,
         request_model=models.DeleteContactRequest,
         response_model=models.ActionResult,

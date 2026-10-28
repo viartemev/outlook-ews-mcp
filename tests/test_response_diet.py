@@ -17,7 +17,6 @@ from outlook_mcp.exchange_client import EWSExchangeBackend
 from outlook_mcp.exchange_client.calendar import _EVENT_SUMMARY_FIELDS
 from outlook_mcp.exchange_client.email import _EMAIL_SUMMARY_FIELDS, _THREAD_CANDIDATE_FIELDS
 from outlook_mcp.models import (
-    DeleteEmailRequest,
     EmailFull,
     EmailSummary,
     GetEmailRequest,
@@ -224,23 +223,6 @@ def test_fetch_thread_bodies_surfaces_any_other_error(settings) -> None:
 
 
 # --- projected single-item fetches for mutations --------------------------------
-
-
-def test_delete_email_fetches_only_the_folder_field(settings) -> None:
-    """delete only invokes a method on the item; downloading the full body and
-    attachment metadata first was pure wire cost."""
-    captured: dict = {}
-
-    def fetch(**kwargs):
-        captured.update(kwargs)
-        return iter([SimpleNamespace(id="email-1", move_to_trash=lambda: None)])
-
-    backend = EWSExchangeBackend(settings)
-    backend._account = SimpleNamespace(fetch=fetch)
-
-    backend.delete_email(DeleteEmailRequest(id="email-1"))
-
-    assert captured["only_fields"] == ["parent_folder_id"]
 
 
 def test_fetch_thread_bodies_skips_the_fetch_when_only_the_anchor_survived(settings) -> None:

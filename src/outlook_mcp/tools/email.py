@@ -13,13 +13,10 @@ from ..models import (
     DeleteAttachmentRequest,
     BulkDeleteEmailsRequest,
     BulkMoveEmailsRequest,
-    CategorizeEmailRequest,
     CreateFolderRequest,
-    DeleteEmailRequest,
     DeleteFolderRequest,
     DraftEmailRequest,
     CreateReplyDraftRequest,
-    FolderActionRequest,
     GetAttachmentRequest,
     GetEmailMimeRequest,
     GetEmailRequest,
@@ -27,7 +24,6 @@ from ..models import (
     ListCategoriesRequest,
     ListEmailsRequest,
     ListFoldersRequest,
-    MarkEmailRequest,
     RenameFolderRequest,
     ReplyEmailRequest,
     SearchEmailsRequest,
@@ -69,15 +65,10 @@ reply_email = tool_handler("reply_email", ReplyEmailRequest, before=_validate_ou
 forward_email = tool_handler(
     "forward_email", ForwardEmailRequest, before=_validate_outgoing_attachments
 )
-move_email = tool_handler("move_email", FolderActionRequest)
 move_emails = tool_handler("move_emails", BulkMoveEmailsRequest)
 copy_emails = tool_handler("copy_emails", BulkMoveEmailsRequest)
 delete_emails = tool_handler("delete_emails", BulkDeleteEmailsRequest)
-copy_email = tool_handler("copy_email", FolderActionRequest)
-delete_email = tool_handler("delete_email", DeleteEmailRequest)
-mark_email = tool_handler("mark_email", MarkEmailRequest)
 mark_emails = tool_handler("mark_emails", BulkMarkEmailsRequest)
-categorize_email = tool_handler("categorize_email", CategorizeEmailRequest)
 categorize_emails = tool_handler("categorize_emails", BulkCategorizeEmailsRequest)
 list_categories = tool_handler("list_categories", ListCategoriesRequest)
 list_folders = tool_handler("list_folders", ListFoldersRequest)

@@ -20,7 +20,6 @@ from ..models import (
     CalendarEvent,
     ContactFull,
     ContactSummary,
-    CategorizeEmailRequest,
     CategoryUsage,
     CreateEventRequest,
     CreateEventResult,
@@ -30,8 +29,6 @@ from ..models import (
     DelegateInfo,
     DeleteAttachmentRequest,
     DeleteContactRequest,
-    DeleteEmailRequest,
-    DeleteEventRequest,
     DeleteFolderRequest,
     DeleteInboxRuleRequest,
     DraftEmailRequest,
@@ -39,7 +36,6 @@ from ..models import (
     EmailFull,
     EmailMimeResult,
     EmailSummary,
-    FolderActionRequest,
     FolderInfo,
     FindFreeSlotsRequest,
     ForwardEmailRequest,
@@ -57,12 +53,10 @@ from ..models import (
     ListFoldersRequest,
     ListRoomsRequest,
     MailboxInfo,
-    MarkEmailRequest,
     OutOfOfficeSettings,
     PingResult,
     RenameFolderRequest,
     ReplyEmailRequest,
-    RespondToInviteRequest,
     RoomInfo,
     RoomListInfo,
     SearchContactsRequest,
@@ -135,18 +129,6 @@ class UnconfiguredExchangeBackend:
     def forward_email(self, request: ForwardEmailRequest) -> SendResult:
         self._raise()
 
-    def move_email(self, request: FolderActionRequest) -> ActionResult:
-        self._raise()
-
-    def copy_email(self, request: FolderActionRequest) -> ActionResult:
-        self._raise()
-
-    def delete_email(self, request: DeleteEmailRequest) -> ActionResult:
-        self._raise()
-
-    def mark_email(self, request: MarkEmailRequest) -> ActionResult:
-        self._raise()
-
     def move_emails(self, request: BulkMoveEmailsRequest) -> BulkResult:
         self._raise()
 
@@ -160,9 +142,6 @@ class UnconfiguredExchangeBackend:
         self._raise()
 
     def categorize_emails(self, request: BulkCategorizeEmailsRequest) -> BulkResult:
-        self._raise()
-
-    def categorize_email(self, request: CategorizeEmailRequest) -> ActionResult:
         self._raise()
 
     def list_categories(self, request: ListCategoriesRequest) -> list[CategoryUsage]:
@@ -214,12 +193,6 @@ class UnconfiguredExchangeBackend:
         self._raise()
 
     def update_event(self, request: UpdateEventRequest) -> ActionResult:
-        self._raise()
-
-    def delete_event(self, request: DeleteEventRequest) -> ActionResult:
-        self._raise()
-
-    def respond_to_invite(self, request: RespondToInviteRequest) -> ActionResult:
         self._raise()
 
     def find_free_slots(self, request: FindFreeSlotsRequest) -> list[FreeSlot]:

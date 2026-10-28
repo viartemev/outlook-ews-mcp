@@ -137,17 +137,17 @@ def test_state_replacing_tools_are_marked_destructive(client, settings) -> None:
         "send_email",
         "reply_email",
         "forward_email",
-        "move_email",
-        "mark_email",
+        "move_emails",
+        "mark_emails",
         "send_draft",
         "create_event",
         "update_event",
-        "respond_to_invite",
+        "respond_to_invites",
         "update_contact",
     ]:
         assert server._tool_manager._tools[name].annotations.destructiveHint is True
 
-    for name in ["list_emails", "copy_email", "create_folder", "create_contact"]:
+    for name in ["list_emails", "copy_emails", "create_folder", "create_contact"]:
         assert server._tool_manager._tools[name].annotations.destructiveHint is False
 
 

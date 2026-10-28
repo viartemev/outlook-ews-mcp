@@ -46,13 +46,11 @@ from ..models import (
     CategoryUsage,
     CreateFolderRequest,
     CreateReplyDraftRequest,
-    DeleteEmailRequest,
     DeleteFolderRequest,
     DraftEmailRequest,
     EmailFull,
     EmailMimeResult,
     EmailSummary,
-    FolderActionRequest,
     FolderInfo,
     ForwardEmailRequest,
     GetAttachmentRequest,
@@ -825,45 +823,6 @@ class EmailOperationsMixin(BaseEWSBackend):
         self._attach_files(message, attachments)
         message.send(copy_to_folder=self.account.sent)
         return SendResult(id=None, status="submitted")
-
-    def move_email(self, request: FolderActionRequest) -> ActionResult:
-        item = self._fetch_item(request.id, expected_type=Message)
-        destination = self._resolve_folder(request.folder)
-        try:
-            # item.move() returns None and mutates item.id/changekey in place.
-            item.move(to_folder=destination)
-            return ActionResult(id=item.id or request.id, status="moved", new_folder=request.folder)
-        except Exception as exc:  # noqa: BLE001
-            raise self._map_exception(exc, item_id=request.id) from exc
-
-    def copy_email(self, request: FolderActionRequest) -> ActionResult:
-        item = self._fetch_item(request.id, expected_type=Message)
-        destination = self._resolve_folder(request.folder)
-        try:
-            # item.copy() returns an (id, changekey) tuple for the new item, unlike item.move().
-            result = item.copy(to_folder=destination)
-            new_id = result[0] if result else None
-            return ActionResult(
-                id=request.id,
-                status="copied",
-                new_folder=request.folder,
-                new_id=new_id,
-            )
-        except Exception as exc:  # noqa: BLE001
-            raise self._map_exception(exc, item_id=request.id) from exc
-
-    def delete_email(self, request: DeleteEmailRequest) -> ActionResult:
-        item = self._fetch_item(
-            request.id, expected_type=Message, only_fields=("parent_folder_id",)
-        )
-        try:
-            if request.hard_delete:
-                item.delete()
-            else:
-                item.move_to_trash()
-            return ActionResult(id=request.id, status="deleted")
-        except Exception as exc:  # noqa: BLE001
-            raise self._map_exception(exc, item_id=request.id) from exc
 
     def mark_email(self, request: MarkEmailRequest) -> ActionResult:
         item = self._fetch_item(request.id, expected_type=Message)
