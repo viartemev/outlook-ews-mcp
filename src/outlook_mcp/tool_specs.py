@@ -396,7 +396,11 @@ TOOL_SPECS: list[ToolSpec] = [
         get_attachment,
         request_model=models.GetAttachmentRequest,
         response_model=models.AttachmentResult,
-        read_only=True,
+        # Not read_only: it writes a new file to local disk, and readOnlyHint tells
+        # clients the tool leaves its environment untouched (some auto-approve on
+        # it). Not destructive either: it never overwrites, only creates. It
+        # still leaves the mailbox alone, so it runs in parallel with reads.
+        mailbox_read_only=True,
     ),
     ToolSpec(
         "list_events",

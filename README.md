@@ -113,7 +113,7 @@ that never modify the mailbox — they get more concurrency (see
 | `send_draft` | Submit a draft and confirm its copy in Sent Items | |
 | `add_attachment` | Attach a local file to a message, typically a draft — the file must live under `EXCHANGE_ATTACHMENT_ROOT` | |
 | `delete_attachment` | Remove one attachment from a message by id | |
-| `get_attachment` | Save an attachment to disk | ✅ |
+| `get_attachment` | Save an attachment to disk | |
 
 ### Calendar
 
