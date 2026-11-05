@@ -156,7 +156,7 @@ class Settings(BaseSettings):
         return self
 
     @model_validator(mode="after")
-    def _require_http_auth_token(self) -> "Settings":
+    def _require_http_auth_token(self) -> Settings:
         if self.mcp_transport != "stdio" and self.mcp_http_auth_token is None:
             raise ValueError(
                 f"MCP_TRANSPORT={self.mcp_transport} exposes the mailbox over HTTP and "
