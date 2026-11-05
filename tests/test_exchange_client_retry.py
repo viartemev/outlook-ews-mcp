@@ -1,10 +1,11 @@
 from __future__ import annotations
 
+import pytest
+
 from outlook_mcp.config import Settings
 from outlook_mcp.errors import APIError
 from outlook_mcp.exchange_client import ExchangeClient
 from outlook_mcp.models import PingResult, SendResult
-import pytest
 
 
 def _settings(**overrides) -> Settings:

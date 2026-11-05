@@ -169,3 +169,19 @@ def test_tls_verify_disabled_ignores_ca_bundle(tmp_path):
 def test_missing_ca_bundle_is_rejected(tmp_path):
     with pytest.raises(ValidationError, match="EXCHANGE_CA_BUNDLE file not found"):
         Settings(_env_file=None, **_kwargs(EXCHANGE_CA_BUNDLE=str(tmp_path / "nope.pem")))
+
+
+@pytest.mark.parametrize("transport", ["streamable-http", "sse"])
+def test_http_transports_require_an_auth_token(transport):
+    with pytest.raises(ValidationError, match="MCP_HTTP_AUTH_TOKEN"):
+        Settings(**_kwargs(MCP_TRANSPORT=transport))
+
+
+def test_blank_http_auth_token_counts_as_missing():
+    # .env.example ships `MCP_HTTP_AUTH_TOKEN=`; an empty token must not pass.
+    with pytest.raises(ValidationError, match="MCP_HTTP_AUTH_TOKEN"):
+        Settings(**_kwargs(MCP_TRANSPORT="streamable-http", MCP_HTTP_AUTH_TOKEN=""))
+
+
+def test_stdio_transport_needs_no_auth_token():
+    assert Settings(**_kwargs(MCP_TRANSPORT="stdio")).mcp_http_auth_token is None

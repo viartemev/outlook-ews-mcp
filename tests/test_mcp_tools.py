@@ -14,6 +14,7 @@ from outlook_mcp.server import build_mcp_server, build_registry
 @pytest.mark.parametrize("extra", [{}, {"body": None}])
 def test_fastmcp_preserves_omission(model_name, extra) -> None:
     from mcp.server.fastmcp.tools.base import Tool
+
     from outlook_mcp import models
 
     model = getattr(models, model_name)

@@ -8,11 +8,11 @@ import re
 import stat
 import tempfile
 import time
-from uuid import uuid4
 from collections import Counter
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
+from uuid import uuid4
 
 from exchangelib import Account, FileAttachment, Folder, HTMLBody, ItemAttachment, Message, Q
 from exchangelib.errors import (
@@ -31,21 +31,21 @@ from ..errors import APIError, NotFoundError
 from ..mentions import render_mentions
 from ..models import (
     ActionResult,
-    Attachment,
     AddAttachmentRequest,
+    Attachment,
     AttachmentResult,
     BulkCategorizeEmailsRequest,
     BulkDeleteEmailsRequest,
-    BulkMarkEmailsRequest,
-    DeleteAttachmentRequest,
     BulkItemFailure,
     BulkItemResult,
+    BulkMarkEmailsRequest,
     BulkMoveEmailsRequest,
     BulkResult,
     CategorizeEmailRequest,
     CategoryUsage,
     CreateFolderRequest,
     CreateReplyDraftRequest,
+    DeleteAttachmentRequest,
     DeleteEmailRequest,
     DeleteFolderRequest,
     DraftEmailRequest,
@@ -137,9 +137,10 @@ _UNSUPPORTED_RESTRICTION = (
     InvalidFieldForVersion,
 )
 
-#: Fields EmailSummary actually reads -- restricting the fetch to these avoids
-#: exchangelib issuing an extra GetItem per message and loading full body/
-#: attachments/headers just to render a one-line summary.
+#: Fields EmailSummary actually reads -- restricting the fetch to these keeps
+#: attachments, headers and recipient lists out of a listing. author/sender/
+#: categories are complex fields, so exchangelib still follows FindItem with one
+#: batched GetItem; what matters is what that GetItem carries.
 _EMAIL_SUMMARY_FIELDS = (
     "subject",
     "author",
@@ -149,11 +150,21 @@ _EMAIL_SUMMARY_FIELDS = (
     "datetime_created",
     "is_read",
     "has_attachments",
-    "text_body",
     "importance",
     "categories",
     "conversation_id",
 )
+
+
+def _summary_fields(include_preview: bool) -> tuple[str, ...]:
+    """The listing projection, plus the body only when a preview was asked for.
+
+    EWS has no preview-sized body field exchangelib can request, so a preview
+    means downloading every listed message's *entire* text body only to keep its
+    first 200 characters -- megabytes for a page of long threads or newsletters.
+    """
+    return (*_EMAIL_SUMMARY_FIELDS, "text_body") if include_preview else _EMAIL_SUMMARY_FIELDS
+
 
 #: What get_thread's candidate pass actually reads: enough to dedup across
 #: folders, sort by arrival and match subjects. Bodies come later, in one bulk
@@ -394,7 +405,8 @@ class EmailOperationsMixin(BaseEWSBackend):
                     details=[
                         {
                             "field": "attachments",
-                            "reason": f"combined size exceeds EXCHANGE_ATTACHMENT_MAX_TOTAL_SIZE_MB="
+                            "reason": "combined size exceeds "
+                            "EXCHANGE_ATTACHMENT_MAX_TOTAL_SIZE_MB="
                             f"{self.settings.attachment_max_total_size_mb}",
                         }
                     ],
@@ -502,11 +514,16 @@ class EmailOperationsMixin(BaseEWSBackend):
 
     def list_emails(self, request: ListEmailsRequest) -> list[EmailSummary]:
         folder = self._resolve_folder(request.folder)
-        qs = folder.all().only(*_EMAIL_SUMMARY_FIELDS).order_by("-datetime_received")
+        qs = (
+            folder.all()
+            .only(*_summary_fields(request.include_preview))
+            .order_by("-datetime_received")
+        )
         filters: dict[str, Any] = {}
         if request.from_address:
-            # 'author' is a MailboxField, not an IndexedField, so EWS only supports filtering the field
-            # as a whole (exact match against the address) -- '__email_address' is not a valid subfield path.
+            # 'author' is a MailboxField, not an IndexedField, so EWS only supports filtering
+            # the field as a whole (exact match against the address) -- '__email_address' is
+            # not a valid subfield path.
             filters["author__iexact"] = str(request.from_address)
         if request.subject:
             filters["subject__icontains"] = request.subject
@@ -683,7 +700,7 @@ class EmailOperationsMixin(BaseEWSBackend):
             if request.aqs:
                 # A QueryString is sent to EWS as its own FindItem element and cannot
                 # be combined with a Restriction, so no other filter is added here.
-                items = self._search_items(searchable, Q(request.aqs), request.limit)
+                items = self._search_items(searchable, Q(request.aqs), request)
             else:
                 query = (
                     Q(subject__icontains=request.query)
@@ -691,7 +708,7 @@ class EmailOperationsMixin(BaseEWSBackend):
                     | Q(author__icontains=request.query)
                 )
                 try:
-                    items = self._search_items(searchable, query, request.limit)
+                    items = self._search_items(searchable, query, request)
                 except ErrorUnsupportedPathForQuery:
                     # Exchange 2019 on-prem rejects a substring restriction on
                     # item:TextBody outright ("The property can not be used with
@@ -703,16 +720,20 @@ class EmailOperationsMixin(BaseEWSBackend):
                         "searching subject and sender only"
                     )
                     query = Q(subject__icontains=request.query) | Q(author__icontains=request.query)
-                    items = self._search_items(searchable, query, request.limit)
+                    items = self._search_items(searchable, query, request)
         except Exception as exc:  # noqa: BLE001
             raise self._map_exception(exc) from exc
         return [self._to_email_summary(item) for item in items]
 
     def _search_items(
-        self, searchable: Folder | FolderCollection, query: Q, limit: int
+        self, searchable: Folder | FolderCollection, query: Q, request: SearchEmailsRequest
     ) -> list[Any]:
-        qs = searchable.filter(query).only(*_EMAIL_SUMMARY_FIELDS).order_by("-datetime_received")
-        return list(qs[:limit])
+        qs = (
+            searchable.filter(query)
+            .only(*_summary_fields(request.include_preview))
+            .order_by("-datetime_received")
+        )
+        return list(qs[: request.limit])
 
     def send_email(self, request: SendEmailRequest) -> SendResult:
         # A shared mailbox is addressed as its own delegate Account, so both the
@@ -899,7 +920,7 @@ class EmailOperationsMixin(BaseEWSBackend):
             results = list(results) + [None] * (len(ids) - len(results))
         succeeded: list[BulkItemResult] = []
         failed: list[BulkItemFailure] = []
-        for item_id, result in zip(ids, results):
+        for item_id, result in zip(ids, results, strict=False):
             # Some Exchange versions successfully delete meeting-response items
             # but still return ErrorItemNotFound for them. Delete is idempotent,
             # so an already-absent item has reached the requested final state.
@@ -1378,7 +1399,8 @@ class EmailOperationsMixin(BaseEWSBackend):
                     if isinstance(attachment, ItemAttachment):
                         raise APIError(
                             "validation_error",
-                            "attachment is an embedded Exchange item and cannot be downloaded as a file",
+                            "attachment is an embedded Exchange item and cannot be "
+                            "downloaded as a file",
                         )
                     self._check_attachment_size(getattr(attachment, "size", None), max_size_bytes)
                     filename = self._sanitize_attachment_filename(getattr(attachment, "name", None))

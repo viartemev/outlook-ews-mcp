@@ -1,12 +1,15 @@
 from __future__ import annotations
 
 import logging
+import secrets
 import sys
 import time
 import traceback
 from typing import Any
 
+import uvicorn
 from pydantic import TypeAdapter
+from starlette.responses import PlainTextResponse
 
 from . import telemetry
 from .config import Settings, get_settings
@@ -42,6 +45,31 @@ def configure_logging(settings: Settings) -> None:
     # whatever level the operator picks for LOG_LEVEL.
     logging.getLogger("exchangelib.util").setLevel(logging.CRITICAL)
     logging.getLogger("exchangelib.util.xml").setLevel(logging.CRITICAL)
+
+
+class BearerTokenMiddleware:
+    """Raw ASGI middleware gating every HTTP request behind a static bearer token.
+
+    Deliberately not Starlette's BaseHTTPMiddleware: that buffers the whole
+    response, which breaks the long-lived event streams both HTTP transports
+    use. Lifespan scopes pass through, so the streamable-http session manager
+    still starts and stops.
+    """
+
+    def __init__(self, app: Any, token: str) -> None:
+        self._app = app
+        self._expected = f"Bearer {token}".encode()
+
+    async def __call__(self, scope: dict[str, Any], receive: Any, send: Any) -> None:
+        if scope["type"] == "http":
+            presented = dict(scope.get("headers") or []).get(b"authorization", b"")
+            if not secrets.compare_digest(presented, self._expected):
+                response = PlainTextResponse(
+                    "Unauthorized", status_code=401, headers={"WWW-Authenticate": "Bearer"}
+                )
+                await response(scope, receive, send)
+                return
+        await self._app(scope, receive, send)
 
 
 class ToolRegistry:
@@ -82,6 +110,11 @@ class ToolRegistry:
             return result, False
         except Exception as exc:  # noqa: BLE001
             api_error = normalize_exception(exc)
+            # The backend wraps unexpected exceptions in InternalError; the
+            # innermost cause is the one whose type and frames point at the bug.
+            root = exc
+            while root.__cause__ is not None:
+                root = root.__cause__  # type: ignore[assignment]
             duration_ms = round((time.perf_counter() - started) * 1000)
             logger.warning(
                 "tool=%s status=error duration_ms=%s ews_requests=%s ews_ms=%s error=%s "
@@ -91,12 +124,12 @@ class ToolRegistry:
                 ews.requests,
                 round(ews.total_ms),
                 api_error.code,
-                type(exc).__name__,
+                type(root).__name__,
             )
-            if not isinstance(exc, APIError):
+            if api_error.code == "internal_error":
                 # Preserve actionable code locations without formatting the raw
                 # exception value, which may contain SOAP, addresses or hostnames.
-                frames = traceback.extract_tb(exc.__traceback__)
+                frames = traceback.extract_tb(root.__traceback__)
                 logger.error(
                     "tool=%s internal_trace=%s",
                     name,
@@ -124,7 +157,7 @@ def build_mcp_server(settings: Settings | None = None, client: ExchangeClient | 
 
     settings = settings or get_settings()
     registry = build_registry(settings=settings, client=client)
-    server = FastMCP("outlook-ews-mcp", host=settings.mcp_sse_host, port=settings.mcp_sse_port)
+    server = FastMCP("outlook-ews-mcp", host=settings.mcp_http_host, port=settings.mcp_http_port)
     register_mcp_tools(server, registry, TOOL_SPECS, ToolGateway(settings))
     return server
 
@@ -138,8 +171,12 @@ def main() -> None:
         server.run()
         return
 
-    if transport == "sse":
-        server.run(transport="sse")
-        return
-
-    raise RuntimeError(f"unsupported transport: {transport}")
+    # FastMCP.run() has no hook for authentication, so the HTTP transports are
+    # served here: the transport's ASGI app, wrapped in the token check.
+    app = server.streamable_http_app() if transport == "streamable-http" else server.sse_app()
+    assert settings.mcp_http_auth_token is not None  # enforced by Settings
+    uvicorn.run(
+        BearerTokenMiddleware(app, settings.mcp_http_auth_token.get_secret_value()),
+        host=settings.mcp_http_host,
+        port=settings.mcp_http_port,
+    )

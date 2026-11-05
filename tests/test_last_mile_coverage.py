@@ -4,10 +4,10 @@ from datetime import UTC, datetime
 from types import SimpleNamespace
 
 import pytest
+from conftest import FakeExchangeBackend
 from exchangelib.errors import ErrorAccessDenied, UnauthorizedError, UnknownTimeZone
 from exchangelib.ewsdatetime import EWSTimeZone
 
-from conftest import FakeExchangeBackend
 from outlook_mcp.auth import build_auth_context
 from outlook_mcp.config import Settings, get_settings
 from outlook_mcp.errors import APIError, NotFoundError
@@ -122,8 +122,9 @@ def test_timezone_fallback_reraises_non_guid_ids(settings) -> None:
 
 
 def test_resolve_archive_falls_back_to_root_on_a_scoped_fault(settings, monkeypatch) -> None:
-    import outlook_mcp.exchange_client.base as base_module
     from exchangelib.errors import ResponseMessageError
+
+    import outlook_mcp.exchange_client.base as base_module
 
     class EmptyIdLookup:
         def __init__(self, account, folders):
@@ -677,17 +678,6 @@ def test_configure_logging_writes_to_a_file(tmp_path, settings, monkeypatch) -> 
     assert log_file.exists()
 
 
-def test_main_refuses_an_unknown_transport(monkeypatch, settings) -> None:
-    import outlook_mcp.server as server_module
-
-    monkeypatch.setattr(settings, "mcp_transport", "carrier-pigeon")
-    monkeypatch.setattr(server_module, "get_settings", lambda: settings)
-    monkeypatch.setattr(server_module, "build_mcp_server", lambda settings=None: SimpleNamespace())
-
-    with pytest.raises(RuntimeError, match="unsupported transport"):
-        server_module.main()
-
-
 def test_added_attachment_hook_resolves_relative_paths(tmp_path, settings, monkeypatch) -> None:
     from outlook_mcp.exchange_client import ExchangeClient
     from outlook_mcp.tools.email import _validate_added_attachment
@@ -733,6 +723,67 @@ def test_update_event_remove_attendees_alone_still_saves_the_field(settings) -> 
 
     assert saves[0]["update_fields"] == ["required_attendees"]
     assert item.required_attendees == []
+
+
+def _attendee(address):
+    return SimpleNamespace(mailbox=SimpleNamespace(email_address=address), response_type=None)
+
+
+def _attendee_backend(settings, **attendees):
+    item = _item(
+        start=datetime(2026, 4, 8, 9, 0, tzinfo=UTC),
+        end=datetime(2026, 4, 8, 10, 0, tzinfo=UTC),
+        **attendees,
+    )
+    saves: list[dict] = []
+    item.save = lambda **kwargs: saves.append(kwargs)
+    backend = _backend(
+        settings, calendar=SimpleNamespace(id="folder-1"), fetch=lambda **kwargs: iter([item])
+    )
+    return backend, item, saves
+
+
+def test_update_event_removes_optional_attendees_too(settings) -> None:
+    from outlook_mcp.models import UpdateEventRequest
+
+    backend, item, saves = _attendee_backend(
+        settings,
+        required_attendees=[_attendee("keep@example.com")],
+        optional_attendees=[_attendee("Old@Example.com"), _attendee(None)],
+    )
+
+    backend.update_event(UpdateEventRequest(id="event-1", remove_attendees=["old@example.com"]))
+
+    assert saves[0]["update_fields"] == ["optional_attendees"]
+    assert [a.mailbox.email_address for a in item.optional_attendees] == [None]
+    assert [a.mailbox.email_address for a in item.required_attendees] == ["keep@example.com"]
+
+
+def test_update_event_does_not_invite_someone_twice(settings) -> None:
+    from outlook_mcp.models import UpdateEventRequest
+
+    backend, item, saves = _attendee_backend(
+        settings,
+        required_attendees=[_attendee("a@example.com")],
+        optional_attendees=[_attendee("b@example.com")],
+    )
+
+    backend.update_event(
+        UpdateEventRequest(id="event-1", add_attendees=["A@example.com", "b@example.com"])
+    )
+
+    # Nothing changed, so nothing is saved -- and no update goes out to attendees.
+    assert saves == []
+    assert len(item.required_attendees) == 1
+
+
+def test_update_event_rejects_an_address_both_added_and_removed() -> None:
+    from outlook_mcp.models import UpdateEventRequest
+
+    with pytest.raises(ValueError, match="both added and removed"):
+        UpdateEventRequest(
+            id="event-1", add_attendees=["x@example.com"], remove_attendees=["X@example.com"]
+        )
 
 
 def test_bulk_copy_and_bulk_delete_map_wholesale_failures(settings) -> None:

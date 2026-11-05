@@ -3,6 +3,7 @@ from __future__ import annotations
 from datetime import UTC, datetime
 
 import pytest
+from pydantic import ValidationError
 
 from outlook_mcp.errors import APIError, NotFoundError
 from outlook_mcp.exchange_client import EWSExchangeBackend
@@ -129,7 +130,7 @@ def test_respond_to_invites_delegates_to_respond_to_invite_per_id(monkeypatch) -
 
 
 def test_bulk_mark_emails_rejects_due_date_before_start_date() -> None:
-    with pytest.raises(Exception):
+    with pytest.raises(ValidationError):
         BulkMarkEmailsRequest(
             ids=["a"],
             flag_start_date=datetime(2026, 4, 2, tzinfo=UTC),
@@ -138,17 +139,17 @@ def test_bulk_mark_emails_rejects_due_date_before_start_date() -> None:
 
 
 def test_bulk_mark_emails_rejects_dates_combined_with_flag_none() -> None:
-    with pytest.raises(Exception):
+    with pytest.raises(ValidationError):
         BulkMarkEmailsRequest(
             ids=["a"], flag="none", flag_start_date=datetime(2026, 4, 1, tzinfo=UTC)
         )
 
 
 def test_bulk_categorize_emails_rejects_empty_categories_for_add() -> None:
-    with pytest.raises(Exception):
+    with pytest.raises(ValidationError):
         BulkCategorizeEmailsRequest(ids=["a"], mode="add", categories=[])
 
 
 def test_bulk_categorize_emails_rejects_blank_category_names() -> None:
-    with pytest.raises(Exception):
+    with pytest.raises(ValidationError):
         BulkCategorizeEmailsRequest(ids=["a"], categories=["  "])

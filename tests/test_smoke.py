@@ -49,8 +49,9 @@ def test_env_flag(monkeypatch) -> None:
 def test_main_prints_a_sanitized_payload(monkeypatch, capsys, settings) -> None:
     import json
 
-    import outlook_mcp.smoke as smoke
     from conftest import FakeExchangeBackend
+
+    import outlook_mcp.smoke as smoke
 
     monkeypatch.setattr(smoke, "get_settings", lambda: settings)
     monkeypatch.setattr(smoke, "build_default_backend", lambda s: FakeExchangeBackend())
@@ -69,8 +70,9 @@ def test_main_prints_a_sanitized_payload(monkeypatch, capsys, settings) -> None:
 def test_main_includes_real_data_only_on_explicit_opt_in(monkeypatch, capsys, settings) -> None:
     import json
 
-    import outlook_mcp.smoke as smoke
     from conftest import FakeExchangeBackend
+
+    import outlook_mcp.smoke as smoke
 
     monkeypatch.setattr(smoke, "get_settings", lambda: settings)
     monkeypatch.setattr(smoke, "build_default_backend", lambda s: FakeExchangeBackend())

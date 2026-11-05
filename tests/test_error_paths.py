@@ -4,10 +4,12 @@ from datetime import UTC, datetime
 from types import SimpleNamespace
 
 import pytest
+import requests
 from exchangelib import HTMLBody
 from exchangelib.errors import (
     ErrorAccessDenied,
     ErrorFolderSavePropertyError,
+    EWSError,
     ResponseMessageError,
     UnauthorizedError,
 )
@@ -103,6 +105,36 @@ def test_resolve_folder_root_value_returns_root(settings, monkeypatch) -> None:
     assert backend._resolve_folder("//") is root
 
 
+class _OnlyInboxShared(SimpleNamespace):
+    """A delegate mailbox where only the Inbox is shared with us."""
+
+    inbox = _FOLDER
+
+    def __getattr__(self, name):
+        if name in {"sent", "drafts", "trash", "junk", "calendar", "contacts"}:
+            raise ErrorAccessDenied(f"{name} is not shared")
+        raise AttributeError(name)
+
+
+def test_resolve_folder_looks_up_only_the_requested_well_known_folder(settings) -> None:
+    # Resolving every well-known folder up front cost a GetFolder each and failed
+    # "inbox" whenever any other one of them was not shared.
+    backend = _backend(settings)
+    backend._account = _OnlyInboxShared()
+
+    assert backend._resolve_folder("Inbox") is _FOLDER
+
+
+def test_resolve_folder_maps_an_unreadable_well_known_folder(settings) -> None:
+    backend = _backend(settings)
+    backend._account = _OnlyInboxShared()
+
+    with pytest.raises(APIError) as excinfo:
+        backend._resolve_folder("junk")
+
+    assert excinfo.value.code == "permission_denied"
+
+
 def test_walk_child_folders_survives_an_unreadable_folder(settings) -> None:
     class Unreadable:
         @property
@@ -193,8 +225,22 @@ def test_map_exception_covers_the_remaining_branches(settings) -> None:
     timeout = backend._map_exception(TimeoutError("socket timed out"))
     assert timeout.code == "timeout"
 
-    unmapped = backend._map_exception(RuntimeError("who knows"))
+    unmapped = backend._map_exception(EWSError("who knows"))
     assert unmapped.code == "exchange_unavailable"
+
+    network = backend._map_exception(requests.ConnectionError("connection refused"))
+    assert network.code == "exchange_unavailable"
+
+
+@pytest.mark.parametrize(
+    "exc", [AttributeError("'NoneType' object has no attribute 'id'"), OSError(28, "No space")]
+)
+def test_map_exception_reports_non_exchange_failures_as_internal(settings, exc) -> None:
+    # A bug here or a local disk error is not Exchange being down; reporting it as
+    # exchange_unavailable sends callers retrying and hides the traceback.
+    mapped = _backend(settings)._map_exception(exc)
+
+    assert mapped.code == "internal_error"
 
 
 def test_ping_maps_an_inbox_failure(settings) -> None:

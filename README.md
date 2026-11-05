@@ -49,7 +49,7 @@ testable Python service — no direct mailbox scripting required.
 - **Contacts** — search, read, create, update, delete
 - **Folders & attachments** — folder CRUD and attachment download
 - **Auth** — `NTLM` and `Basic` against on-prem Exchange
-- **Transport** — `stdio` and `SSE`
+- **Transport** — `stdio`, Streamable HTTP and (deprecated) SSE; HTTP requires a bearer token
 - **Architecture** — centralized error mapping through a single `ExchangeClient`
   abstraction (see [Project notes](#project-notes))
 - **Safety** — a privacy-safer smoke check by default (see [Smoke check](#smoke-check))
@@ -84,11 +84,11 @@ that never modify the mailbox — they get more concurrency (see
 
 | Tool | Description | Read-only |
 | --- | --- | --- |
-| `list_emails` | List emails in a folder | ✅ |
+| `list_emails` | List emails in a folder; `include_preview=true` adds a 200-char body preview (downloads full bodies) | ✅ |
 | `get_email` | Get a full email by id | ✅ |
 | `get_email_mime` | Export a message's raw RFC 822 MIME content, base64-encoded | ✅ |
 | `get_thread` | Get every message of a conversation in order, bodies included | ✅ |
-| `search_emails` | Search by substring (subject/body/sender) or server-side Advanced Query Syntax | ✅ |
+| `search_emails` | Search by substring (subject/body/sender) or server-side Advanced Query Syntax; `include_preview` as in `list_emails` | ✅ |
 | `send_email` | Send a new email; `from_mailbox` sends from a shared mailbox (needs Send As) | |
 | `reply_email` | Reply to an email | |
 | `forward_email` | Forward an email | |
@@ -113,7 +113,7 @@ that never modify the mailbox — they get more concurrency (see
 | `send_draft` | Submit a draft and confirm its copy in Sent Items | |
 | `add_attachment` | Attach a local file to a message, typically a draft — the file must live under `EXCHANGE_ATTACHMENT_ROOT` | |
 | `delete_attachment` | Remove one attachment from a message by id | |
-| `get_attachment` | Save an attachment to disk | ✅ |
+| `get_attachment` | Save an attachment to disk | |
 
 ### Calendar
 
@@ -200,8 +200,13 @@ cp .env.example .env
 outlook-ews-mcp
 ```
 
-By default the server runs in `stdio` mode. Set `MCP_TRANSPORT=sse` to start an HTTP
-server instead.
+By default the server runs in `stdio` mode. Set `MCP_TRANSPORT=streamable-http` (or the
+deprecated `sse`, for clients that don't support Streamable HTTP yet) to start an HTTP
+server instead; the endpoint is `/mcp` (`/sse` for SSE). HTTP mode requires
+`MCP_HTTP_AUTH_TOKEN`, which clients send as `Authorization: Bearer <token>` — every
+request without it gets `401`. The token is a static shared secret, not per-user auth:
+anyone holding it gets full access to the mailbox (read, send, delete), so keep TLS
+termination (and ideally an IP allowlist) in front of the server when it leaves loopback.
 
 ## Configuration
 
@@ -240,9 +245,10 @@ A fully commented copy of every variable lives in [`.env.example`](.env.example)
 | `EXCHANGE_EMAIL_MIME_MAX_SIZE_MB` | `25` | Cap on raw MIME export size before base64 expansion (1–100) |
 | `EXCHANGE_SIGNATURE_TEXT` | unset | Appended to outgoing text bodies and replies/forwards. No EWS signature API exists, so this is configuration, not the mailbox's Outlook signature |
 | `EXCHANGE_SIGNATURE_HTML` | unset | Appended to outgoing HTML bodies. Same caveat as above; no cross-conversion between the two. Either can be skipped per call with `include_signature: false` |
-| `MCP_TRANSPORT` | `stdio` | `stdio` or `sse` |
-| `MCP_SSE_HOST` | `127.0.0.1` | Bind host when `MCP_TRANSPORT=sse` |
-| `MCP_SSE_PORT` | `8080` | Bind port when `MCP_TRANSPORT=sse` |
+| `MCP_TRANSPORT` | `stdio` | `stdio`, `streamable-http`, or the deprecated `sse` |
+| `MCP_HTTP_HOST` | `127.0.0.1` | Bind host for the HTTP transports |
+| `MCP_HTTP_PORT` | `8080` | Bind port for the HTTP transports |
+| `MCP_HTTP_AUTH_TOKEN` | — | Required for the HTTP transports: bearer token clients must send (e.g. `openssl rand -hex 32`) |
 | `MCP_MAX_CONCURRENCY` | `4` | Concurrent read-only tool calls (1–8); mutating calls always run exclusively. See [Request queue](#request-queue) |
 | `MCP_MAX_QUEUE_SIZE` | `20` | Max calls admitted at once, running + waiting (1–1000); beyond that, calls get an immediate `server_busy` error |
 | `LOG_LEVEL` | `INFO` | `DEBUG`, `INFO`, `WARNING`, or `ERROR` |

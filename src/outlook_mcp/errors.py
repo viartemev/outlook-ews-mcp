@@ -63,6 +63,17 @@ class TimeoutAPIError(APIError):
         )
 
 
+class InternalError(APIError):
+    """A failure in this codebase or the local OS, not something Exchange reported.
+
+    Raised with the original exception chained as __cause__; ToolRegistry logs that
+    cause's code locations, never its message (see server.py).
+    """
+
+    def __init__(self) -> None:
+        super().__init__("internal_error", "an unexpected internal error occurred")
+
+
 class ConflictError(APIError):
     def __init__(self, message: str = "item changed remotely") -> None:
         super().__init__("conflict", message)
@@ -86,4 +97,4 @@ def normalize_exception(exc: Exception) -> APIError:
     # exc may carry internal details (hostnames, EWS payloads, stack info) that
     # must not reach the client; callers are expected to log the original
     # exception server-side for diagnostics.
-    return APIError("internal_error", "an unexpected internal error occurred")
+    return InternalError()
