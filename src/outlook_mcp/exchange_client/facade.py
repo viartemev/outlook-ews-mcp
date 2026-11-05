@@ -20,7 +20,6 @@ from ..models import (
     BulkResult,
     CalendarEvent,
     CalendarInfo,
-    CategorizeEmailRequest,
     CategoryUsage,
     ContactFull,
     ContactSummary,
@@ -33,8 +32,6 @@ from ..models import (
     DelegateInfo,
     DeleteAttachmentRequest,
     DeleteContactRequest,
-    DeleteEmailRequest,
-    DeleteEventRequest,
     DeleteFolderRequest,
     DeleteInboxRuleRequest,
     DraftEmailRequest,
@@ -42,7 +39,6 @@ from ..models import (
     EmailMimeResult,
     EmailSummary,
     FindFreeSlotsRequest,
-    FolderActionRequest,
     FolderInfo,
     ForwardEmailRequest,
     FreeSlot,
@@ -59,12 +55,10 @@ from ..models import (
     ListFoldersRequest,
     ListRoomsRequest,
     MailboxInfo,
-    MarkEmailRequest,
     OutOfOfficeSettings,
     PingResult,
     RenameFolderRequest,
     ReplyEmailRequest,
-    RespondToInviteRequest,
     RoomInfo,
     RoomListInfo,
     SearchContactsRequest,
@@ -179,18 +173,6 @@ class ExchangeClient:
     def forward_email(self, request: ForwardEmailRequest) -> SendResult:
         return self.backend.forward_email(request)
 
-    def move_email(self, request: FolderActionRequest) -> ActionResult:
-        return self.backend.move_email(request)
-
-    def copy_email(self, request: FolderActionRequest) -> ActionResult:
-        return self.backend.copy_email(request)
-
-    def delete_email(self, request: DeleteEmailRequest) -> ActionResult:
-        return self.backend.delete_email(request)
-
-    def mark_email(self, request: MarkEmailRequest) -> ActionResult:
-        return self.backend.mark_email(request)
-
     def move_emails(self, request: BulkMoveEmailsRequest) -> BulkResult:
         return self.backend.move_emails(request)
 
@@ -205,9 +187,6 @@ class ExchangeClient:
 
     def categorize_emails(self, request: BulkCategorizeEmailsRequest) -> BulkResult:
         return self.backend.categorize_emails(request)
-
-    def categorize_email(self, request: CategorizeEmailRequest) -> ActionResult:
-        return self.backend.categorize_email(request)
 
     def list_categories(self, request: ListCategoriesRequest) -> list[CategoryUsage]:
         return self._retry_read(lambda: self.backend.list_categories(request))
@@ -262,12 +241,6 @@ class ExchangeClient:
 
     def update_event(self, request: UpdateEventRequest) -> ActionResult:
         return self.backend.update_event(request)
-
-    def delete_event(self, request: DeleteEventRequest) -> ActionResult:
-        return self.backend.delete_event(request)
-
-    def respond_to_invite(self, request: RespondToInviteRequest) -> ActionResult:
-        return self.backend.respond_to_invite(request)
 
     def find_free_slots(self, request: FindFreeSlotsRequest) -> list[FreeSlot]:
         return self._retry_read(lambda: self.backend.find_free_slots(request))

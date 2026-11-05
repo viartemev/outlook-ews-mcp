@@ -37,8 +37,6 @@ def _sample_request(method_name: str):
         models.ForwardEmailRequest: models.ForwardEmailRequest(
             id="email-1", to=["user@example.com"]
         ),
-        models.FolderActionRequest: models.FolderActionRequest(id="email-1", folder="inbox"),
-        models.DeleteEmailRequest: models.DeleteEmailRequest(id="email-1"),
         models.MarkEmailRequest: models.MarkEmailRequest(id="email-1"),
         models.CategorizeEmailRequest: models.CategorizeEmailRequest(id="email-1"),
         models.ListCategoriesRequest: models.ListCategoriesRequest(),

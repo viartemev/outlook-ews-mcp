@@ -265,16 +265,6 @@ class ForwardEmailRequest(ExchangeModel):
     include_signature: bool = True
 
 
-class FolderActionRequest(ExchangeModel):
-    id: str
-    folder: str = Field(min_length=1)
-
-
-class DeleteEmailRequest(ExchangeModel):
-    id: str
-    hard_delete: bool = False
-
-
 class MarkEmailRequest(ExchangeModel):
     id: str
     read: bool | None = None
@@ -321,7 +311,7 @@ class InboxRuleConditions(ExchangeModel):
 
 
 class InboxRuleActions(ExchangeModel):
-    #: Folder name, path or id, resolved the same way move_email resolves it.
+    #: Folder name, path or id, resolved the same way move_emails resolves it.
     move_to_folder: str | None = None
     assign_categories: list[str] = Field(default_factory=list)
     mark_as_read: bool | None = None

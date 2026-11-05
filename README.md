@@ -92,16 +92,11 @@ that never modify the mailbox — they get more concurrency (see
 | `send_email` | Send a new email; `from_mailbox` sends from a shared mailbox (needs Send As) | |
 | `reply_email` | Reply to an email | |
 | `forward_email` | Forward an email | |
-| `move_email` | Move an email to another folder | |
-| `copy_email` | Copy an email to another folder | |
-| `move_emails` | Bulk move, with per-item results — one bad id doesn't fail the rest | |
-| `copy_emails` | Bulk copy, with per-item results | |
-| `delete_emails` | Bulk delete, with per-item results (soft-deletes unless `hard_delete`) | |
-| `delete_email` | Delete an email | |
-| `mark_email` | Update read state, importance, or the follow-up flag | |
-| `categorize_email` | Set, add, or remove Outlook categories (the coloured labels) | |
-| `mark_emails` | Bulk version of `mark_email`, with per-item results | |
-| `categorize_emails` | Bulk version of `categorize_email`, with per-item results | |
+| `move_emails` | Move one or more emails, with per-item results — one bad id doesn't fail the rest | |
+| `copy_emails` | Copy one or more emails, with per-item results | |
+| `delete_emails` | Delete one or more emails, with per-item results (soft-deletes unless `hard_delete`) | |
+| `mark_emails` | Update read state, importance, or the follow-up flag on one or more emails | |
+| `categorize_emails` | Set, add, or remove Outlook categories (the coloured labels) on one or more emails | |
 | `list_categories` | List categories in use with counts, sampled from recent messages (not the mailbox master category list) | ✅ |
 | `list_folders` | List mailbox folders | ✅ |
 | `create_folder` | Create a mailbox folder | |
@@ -123,11 +118,9 @@ that never modify the mailbox — they get more concurrency (see
 | `get_event` | Get a calendar event by id; pass `mailbox` for a colleague's calendar | ✅ |
 | `create_event` | Create a calendar event | |
 | `update_event` | Update a calendar event | |
-| `delete_event` | Delete a calendar event | |
-| `respond_to_invite` | Accept, decline, or tentatively respond to an invite | |
 | `find_free_slots` | Find open meeting time slots | ✅ |
-| `delete_events` | Bulk delete events, with per-item results | |
-| `respond_to_invites` | Bulk respond to invites, with per-item results | |
+| `delete_events` | Delete one or more calendar events, with per-item results | |
+| `respond_to_invites` | Accept, decline, or tentatively accept one or more invites | |
 | `get_my_availability` | Get free/busy slots; pass `mailbox` for a colleague's calendar | ✅ |
 | `list_calendars` | List calendars | ✅ |
 | `list_room_lists` | List Room Finder room lists (groups of meeting rooms) | ✅ |
