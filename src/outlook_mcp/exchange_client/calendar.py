@@ -564,7 +564,7 @@ class CalendarOperationsMixin(BaseEWSBackend):
 
         merged_per_attendee = [
             (str(address), getattr(view, "merged", "") or "")
-            for address, view in zip(request.attendees, views)
+            for address, view in zip(request.attendees, views, strict=True)
         ]
         work_hours = self._parse_work_hours(request.work_hours)
         slots: list[FreeSlot] = []

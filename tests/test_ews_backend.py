@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import itertools
 import os
 import threading
 from datetime import datetime, timedelta, timezone
@@ -282,7 +283,7 @@ def test_find_free_slots_offers_non_overlapping_slots(settings) -> None:
 
     slots = backend.find_free_slots(_free_slots_request())
 
-    assert all(a.end <= b.start for a, b in zip(slots, slots[1:]))
+    assert all(a.end <= b.start for a, b in itertools.pairwise(slots))
 
 
 def test_find_free_slots_treats_tentative_as_blocking(settings) -> None:
