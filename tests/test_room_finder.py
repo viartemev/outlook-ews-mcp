@@ -4,6 +4,7 @@ from types import SimpleNamespace
 
 import pytest
 
+from outlook_mcp.errors import APIError
 from outlook_mcp.exchange_client import EWSExchangeBackend
 from outlook_mcp.models import ListRoomsRequest, RoomInfo, RoomListInfo
 
@@ -51,7 +52,7 @@ def test_list_room_lists_maps_exceptions() -> None:
 
     backend._account = SimpleNamespace(protocol=SimpleNamespace(get_roomlists=get_roomlists))
 
-    with pytest.raises(Exception):
+    with pytest.raises(APIError):
         backend.list_room_lists()
 
 
@@ -63,5 +64,5 @@ def test_list_rooms_maps_exceptions() -> None:
 
     backend._account = SimpleNamespace(protocol=SimpleNamespace(get_rooms=get_rooms))
 
-    with pytest.raises(Exception):
+    with pytest.raises(APIError):
         backend.list_rooms(ListRoomsRequest(room_list="buildinga@example.com"))

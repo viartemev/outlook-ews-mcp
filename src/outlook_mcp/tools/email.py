@@ -9,14 +9,15 @@ from ..exchange_client import ExchangeClient
 from ..models import (
     AddAttachmentRequest,
     BulkCategorizeEmailsRequest,
-    BulkMarkEmailsRequest,
-    DeleteAttachmentRequest,
     BulkDeleteEmailsRequest,
+    BulkMarkEmailsRequest,
     BulkMoveEmailsRequest,
     CreateFolderRequest,
+    CreateReplyDraftRequest,
+    DeleteAttachmentRequest,
     DeleteFolderRequest,
     DraftEmailRequest,
-    CreateReplyDraftRequest,
+    ForwardEmailRequest,
     GetAttachmentRequest,
     GetEmailMimeRequest,
     GetEmailRequest,
@@ -29,7 +30,6 @@ from ..models import (
     SearchEmailsRequest,
     SendDraftRequest,
     SendEmailRequest,
-    ForwardEmailRequest,
     UpdateDraftRequest,
 )
 from .common import tool_handler

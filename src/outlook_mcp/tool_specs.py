@@ -23,25 +23,25 @@ from .tools.contacts import (
     update_contact,
 )
 from .tools.email import (
+    add_attachment,
     categorize_emails,
+    copy_emails,
     create_draft,
-    create_reply_draft,
     create_folder,
+    create_reply_draft,
+    delete_attachment,
     delete_emails,
     delete_folder,
-    delete_attachment,
     forward_email,
     get_attachment,
     get_email,
     get_email_mime,
     get_thread,
-    add_attachment,
     list_categories,
     list_emails,
     list_folders,
     mark_emails,
     move_emails,
-    copy_emails,
     rename_folder,
     reply_email,
     search_emails,
@@ -57,8 +57,13 @@ from .tools.system import (
     list_delegates,
     list_inbox_rules,
     ping_exchange,
-    update_inbox_rule,
     set_out_of_office,
+    update_inbox_rule,
+)
+
+_RULES_WARNING = (
+    " WARNING: managing rules over EWS removes the client-side rule blob desktop "
+    "Outlook keeps, which can wipe rules created in Outlook itself."
 )
 
 #: The single source of truth for every Outlook MCP tool: name, description,
@@ -98,7 +103,7 @@ TOOL_SPECS: list[ToolSpec] = [
     ToolSpec(
         "create_inbox_rule",
         "Create a server-side inbox rule, e.g. 'from this sender -> move to "
-        "folder'. WARNING: managing rules over EWS removes the client-side rule blob desktop Outlook keeps, which can wipe rules created in Outlook itself.",
+        "folder'." + _RULES_WARNING,
         create_inbox_rule,
         request_model=models.CreateInboxRuleRequest,
         response_model=models.InboxRule,
@@ -107,7 +112,7 @@ TOOL_SPECS: list[ToolSpec] = [
     ToolSpec(
         "update_inbox_rule",
         "Enable/disable an inbox rule or change its priority. Other fields are "
-        "deliberately not updatable here. WARNING: managing rules over EWS removes the client-side rule blob desktop Outlook keeps, which can wipe rules created in Outlook itself.",
+        "deliberately not updatable here." + _RULES_WARNING,
         update_inbox_rule,
         request_model=models.UpdateInboxRuleRequest,
         response_model=models.InboxRule,
@@ -115,7 +120,7 @@ TOOL_SPECS: list[ToolSpec] = [
     ),
     ToolSpec(
         "delete_inbox_rule",
-        "Delete a server-side inbox rule by id. WARNING: managing rules over EWS removes the client-side rule blob desktop Outlook keeps, which can wipe rules created in Outlook itself.",
+        "Delete a server-side inbox rule by id." + _RULES_WARNING,
         delete_inbox_rule,
         request_model=models.DeleteInboxRuleRequest,
         response_model=models.ActionResult,
@@ -364,7 +369,11 @@ TOOL_SPECS: list[ToolSpec] = [
         get_attachment,
         request_model=models.GetAttachmentRequest,
         response_model=models.AttachmentResult,
-        read_only=True,
+        # Not read_only: it writes a new file to local disk, and readOnlyHint tells
+        # clients the tool leaves its environment untouched (some auto-approve on
+        # it). Not destructive either: it never overwrites, only creates. It
+        # still leaves the mailbox alone, so it runs in parallel with reads.
+        mailbox_read_only=True,
     ),
     ToolSpec(
         "list_events",

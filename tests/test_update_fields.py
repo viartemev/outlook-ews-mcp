@@ -14,7 +14,6 @@ from outlook_mcp.models import (
     UpdateEventRequest,
 )
 
-
 #: Shared folder id used by FakeSavableItem.parent_folder_id and _fake_folder(),
 #: so _fetch_item's real-vs-fake-folder scoping check (item.parent_folder_id.id ==
 #: folder.id) matches, the way a real fetch against that real folder would.

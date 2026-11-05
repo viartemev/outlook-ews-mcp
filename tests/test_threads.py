@@ -50,11 +50,11 @@ class FakeQuerySet:
         self.items = items
         self.only_fields: tuple = ()
 
-    def only(self, *fields) -> "FakeQuerySet":
+    def only(self, *fields) -> FakeQuerySet:
         self.only_fields = fields
         return self
 
-    def order_by(self, *fields) -> "FakeQuerySet":
+    def order_by(self, *fields) -> FakeQuerySet:
         return self
 
     def __getitem__(self, key):

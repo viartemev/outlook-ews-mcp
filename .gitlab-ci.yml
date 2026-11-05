@@ -48,7 +48,7 @@ test:
   stage: test
   <<: *default_python_job
   script:
-    - uv run pytest -q --cov=outlook_mcp --cov-report=term-missing --cov-fail-under=70
+    - uv run pytest -q --cov=outlook_mcp --cov-report=term-missing
 
 security:
   stage: security

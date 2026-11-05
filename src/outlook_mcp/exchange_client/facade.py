@@ -18,28 +18,28 @@ from ..models import (
     BulkMoveEmailsRequest,
     BulkRespondToInvitesRequest,
     BulkResult,
-    CalendarInfo,
     CalendarEvent,
+    CalendarInfo,
+    CategoryUsage,
     ContactFull,
     ContactSummary,
-    CategoryUsage,
+    CreateContactRequest,
     CreateEventRequest,
     CreateEventResult,
-    CreateContactRequest,
     CreateFolderRequest,
     CreateInboxRuleRequest,
+    CreateReplyDraftRequest,
     DelegateInfo,
     DeleteAttachmentRequest,
     DeleteContactRequest,
     DeleteFolderRequest,
     DeleteInboxRuleRequest,
     DraftEmailRequest,
-    CreateReplyDraftRequest,
     EmailFull,
     EmailMimeResult,
     EmailSummary,
-    FolderInfo,
     FindFreeSlotsRequest,
+    FolderInfo,
     ForwardEmailRequest,
     FreeSlot,
     GetAttachmentRequest,
@@ -222,10 +222,9 @@ class ExchangeClient:
         return self.backend.delete_attachment(request)
 
     def get_attachment(self, request: GetAttachmentRequest) -> AttachmentResult:
-        # Not retried despite being read-only: it writes the downloaded content to
-        # local disk, so a retried call after a partial download risks leaving an
-        # orphaned file behind (_create_new_file never overwrites, it picks a new
-        # suffixed name each attempt).
+        # Not retried: it writes the downloaded content to local disk, so a retried
+        # call after a partial download risks leaving an orphaned file behind
+        # (_create_new_file never overwrites, it picks a new suffixed name each attempt).
         return self.backend.get_attachment(request)
 
     def get_email_mime(self, request: GetEmailMimeRequest) -> EmailMimeResult:

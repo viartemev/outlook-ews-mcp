@@ -134,6 +134,29 @@ def test_read_only_calls_overlap_up_to_the_concurrency_setting() -> None:
     assert registry.max_active == 3
 
 
+def test_a_tool_that_only_writes_locally_still_runs_alongside_reads() -> None:
+    """get_attachment is not read_only for clients (it writes to disk) but leaves
+    the mailbox alone, so the gateway must not serialize it like a mailbox write."""
+    registry = SlowRegistry()
+    spec = ToolSpec(
+        "get_attachment",
+        "Save an attachment",
+        lambda c, a: None,
+        request_model=GetEmailRequest,
+        mailbox_read_only=True,
+    )
+    tool_fn = bind_mcp_tool(registry.call, spec, ToolGateway(_settings(MCP_MAX_CONCURRENCY=3)))
+
+    async def run_all() -> None:
+        async with anyio.create_task_group() as tg:
+            for index in range(6):
+                tg.start_soon(lambda i=index: tool_fn(id=f"email-{i}"))
+
+    anyio.run(run_all)
+
+    assert registry.max_active == 3
+
+
 def test_every_tool_shares_one_queue() -> None:
     """A per-tool semaphore would let N tools run N calls at once."""
     registry = SlowRegistry()
@@ -358,8 +381,8 @@ def test_reads_and_writes_share_the_admission_cap() -> None:
 
 
 def test_the_read_only_flag_agrees_with_the_facade_retry_classification() -> None:
-    """spec.read_only now drives scheduling, not just the readOnlyHint shown to
-    clients. ExchangeClient keeps its own independent idempotency classification:
+    """spec.read_only is the readOnlyHint shown to clients and drives scheduling.
+    ExchangeClient keeps its own independent idempotency classification:
     only calls that are safe to repeat go through _retry_read. A tool the gateway
     parallelizes as a read but the facade refuses to retry (or vice versa) means
     one of the two classifications is wrong."""
@@ -368,14 +391,7 @@ def test_the_read_only_flag_agrees_with_the_facade_retry_classification() -> Non
     from outlook_mcp.exchange_client import ExchangeClient
     from outlook_mcp.tool_specs import TOOL_SPECS
 
-    # Read-only for the mailbox but not idempotent for the local machine: it
-    # writes the download to disk, and a retry after a partial download would
-    # leave an orphaned file (see the comment on ExchangeClient.get_attachment).
-    retry_exempt = {"get_attachment"}
-
     for spec in TOOL_SPECS:
-        if spec.name in retry_exempt:
-            continue
         method = getattr(ExchangeClient, spec.handler.__name__)
         retries = "_retry_read" in inspect_module.getsource(method)
         assert retries == spec.read_only, (

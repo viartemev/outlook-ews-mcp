@@ -11,9 +11,9 @@ from outlook_mcp.exchange_client import EWSExchangeBackend
 from outlook_mcp.models import (
     CreateInboxRuleActions,
     CreateInboxRuleConditions,
-    InboxRule,
     CreateInboxRuleRequest,
     DeleteInboxRuleRequest,
+    InboxRule,
     InboxRuleActions,
     InboxRuleConditions,
     UpdateInboxRuleRequest,

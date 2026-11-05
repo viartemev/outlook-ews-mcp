@@ -11,23 +11,21 @@ from typing import Any, Literal
 from urllib.parse import urlparse
 
 import requests
-from exchangelib import version as ews_version
 from exchangelib import (
-    Account,
     BASIC,
+    DELEGATE,
+    IMPERSONATION,
+    NTLM,
+    Account,
     Configuration,
     Credentials,
-    DELEGATE,
     EWSTimeZone,
     Folder,
     HTMLBody,
-    IMPERSONATION,
     Mailbox,
-    NTLM,
 )
-from exchangelib.ewsdatetime import EWSDateTime
+from exchangelib import version as ews_version
 from exchangelib.errors import (
-    EWSError,
     ErrorAccessDenied,
     ErrorExceededConnectionCount,
     ErrorFolderSavePropertyError,
@@ -38,12 +36,14 @@ from exchangelib.errors import (
     ErrorServerBusy,
     ErrorTimeoutExpired,
     ErrorTooManyObjectsOpened,
+    EWSError,
     RateLimitError,
     ResponseMessageError,
     TransportError,
-    UnknownTimeZone,
     UnauthorizedError,
+    UnknownTimeZone,
 )
+from exchangelib.ewsdatetime import EWSDateTime
 from exchangelib.folders import FolderCollection
 from exchangelib.items import Item
 from exchangelib.properties import ItemId
@@ -115,6 +115,23 @@ _GUID_TIMEZONE_RE = re.compile(
 _active_timezone_fallback: ContextVar[str | None] = ContextVar(
     "_active_timezone_fallback", default=None
 )
+
+#: Folder names callers may use for well-known folders -> the Account attribute
+#: that resolves them. Looked up one at a time: each attribute is its own
+#: GetFolder round trip on first access, and resolving all of them up front made
+#: "inbox" cost seven extra requests -- and fail outright on a delegate mailbox
+#: where any one of those folders is not shared.
+_BUILTIN_FOLDERS = {
+    "inbox": "inbox",
+    "sent": "sent",
+    "sentitems": "sent",
+    "drafts": "drafts",
+    "deleted": "trash",
+    "trash": "trash",
+    "junk": "junk",
+    "calendar": "calendar",
+    "contacts": "contacts",
+}
 
 
 class BaseEWSBackend:
@@ -278,8 +295,10 @@ class BaseEWSBackend:
                         "conflicting settings for a shared Exchange protocol",
                         details=[
                             {
-                                "field": "EXCHANGE_TIMEOUT/EXCHANGE_VERIFY_SSL/EXCHANGE_CA_BUNDLE/MCP_MAX_CONCURRENCY",
-                                "reason": "the same endpoint and credentials are already active with different settings",
+                                "field": "EXCHANGE_TIMEOUT/EXCHANGE_VERIFY_SSL/"
+                                "EXCHANGE_CA_BUNDLE/MCP_MAX_CONCURRENCY",
+                                "reason": "the same endpoint and credentials are already "
+                                "active with different settings",
                             }
                         ],
                     )
@@ -347,19 +366,8 @@ class BaseEWSBackend:
         if not value or value == "root":
             return account.root
         normalized = value.strip("/").lower()
-        builtin = {
-            "inbox": account.inbox,
-            "sent": account.sent,
-            "sentitems": account.sent,
-            "drafts": account.drafts,
-            "deleted": account.trash,
-            "trash": account.trash,
-            "junk": account.junk,
-            "calendar": account.calendar,
-            "contacts": account.contacts,
-        }
-        if normalized in builtin:
-            return builtin[normalized]
+        if normalized in _BUILTIN_FOLDERS:
+            return self._builtin_folder(account, normalized)
         if normalized == "archive":
             # "Archive" most commonly means the user's named Archive folder under
             # Top of Information Store, not the separate personal-archive mailbox
@@ -389,8 +397,8 @@ class BaseEWSBackend:
         # whose children are Top of Information Store plus dozens of hidden system
         # folders -- user folders hang off TOIS itself.
         candidates: list[tuple[Folder, list[str]]] = []
-        if parts[0].lower() in builtin:
-            candidates.append((builtin[parts[0].lower()], parts[1:]))
+        if parts[0].lower() in _BUILTIN_FOLDERS:
+            candidates.append((self._builtin_folder(account, parts[0].lower()), parts[1:]))
         if parts[0].lower() == "archive":
             named = self._find_named_folder(parts[0])
             if named is not None:
@@ -407,6 +415,12 @@ class BaseEWSBackend:
             if found is not None:
                 return found
         raise NotFoundError(value)
+
+    def _builtin_folder(self, account: Account, name: str) -> Folder:
+        try:
+            return getattr(account, _BUILTIN_FOLDERS[name])
+        except Exception as exc:  # noqa: BLE001
+            raise self._map_exception(exc) from exc
 
     def _walk_child_folders(self, start: Folder, parts: list[str]) -> Folder | None:
         current = start
