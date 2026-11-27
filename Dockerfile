@@ -4,7 +4,7 @@
 FROM ghcr.io/astral-sh/uv:latest@sha256:4a1f3666816dafadd20ceb71eac9a7d56d7ef30279f7d64048519ab901ada336 AS uv
 
 # python:3.12-slim -- the newest version the CI test matrix covers; keep in sync.
-FROM python:3.12-slim@sha256:5e2bdb1b0d542d5039cffb8181c65930093949194a65c365dfb1b0fe13a4fa5b AS builder
+FROM python:3.12-slim@sha256:191083cdf6c7bda8c76158983163ead5d5cf7b77cf3033e805bb0f5296f51b4b AS builder
 COPY --from=uv /uv /uvx /bin/
 
 WORKDIR /app
@@ -15,7 +15,7 @@ COPY src ./src
 # image always installs exactly what CI tested and pip-audit scanned.
 RUN uv sync --frozen --no-dev --no-editable
 
-FROM python:3.12-slim@sha256:5e2bdb1b0d542d5039cffb8181c65930093949194a65c365dfb1b0fe13a4fa5b
+FROM python:3.12-slim@sha256:191083cdf6c7bda8c76158983163ead5d5cf7b77cf3033e805bb0f5296f51b4b
 RUN groupadd --gid 1000 outlook-mcp && useradd --uid 1000 --gid outlook-mcp --create-home outlook-mcp
 
 WORKDIR /app
