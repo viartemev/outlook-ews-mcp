@@ -24,7 +24,7 @@ from exchangelib.errors import (
 from exchangelib.extended_properties import ExtendedProperty, Flag
 from exchangelib.fields import InvalidField, InvalidFieldForVersion
 from exchangelib.folders import FolderCollection
-from exchangelib.items import HARD_DELETE, MOVE_TO_DELETED_ITEMS
+from exchangelib.items import HARD_DELETE, MOVE_TO_DELETED_ITEMS, MeetingRequest
 from exchangelib.properties import ConversationId, ItemId
 
 from ..errors import APIError, NotFoundError
@@ -803,7 +803,9 @@ class EmailOperationsMixin(BaseEWSBackend):
             raise self._map_exception(exc, item_id=request.id) from exc
 
     def forward_email(self, request: ForwardEmailRequest) -> SendResult:
-        item = self._fetch_item(request.id, expected_type=Message)
+        # Meeting invites arrive as IPM.Schedule.Meeting.* (MeetingRequest, not
+        # Message); EWS ForwardItem handles them natively, so accept both here.
+        item = self._fetch_item(request.id, expected_type=(Message, MeetingRequest))
         try:
             response = item.create_forward(
                 subject=forward_subject(item.subject),

@@ -22,7 +22,7 @@ from exchangelib.errors import (
 )
 from exchangelib.ewsdatetime import EWSTimeZone
 from exchangelib.folders import Inbox
-from exchangelib.items import HARD_DELETE, MOVE_TO_DELETED_ITEMS
+from exchangelib.items import HARD_DELETE, MOVE_TO_DELETED_ITEMS, MeetingRequest
 from exchangelib.restriction import Q, Restriction
 from exchangelib.version import EXCHANGE_2016, Version
 
@@ -1196,6 +1196,36 @@ def test_forward_email_does_not_stack_forward_prefixes(settings, original, expec
     backend.forward_email(ForwardEmailRequest(id="msg-1", to=["user@example.com"]))
 
     assert captured == [expected]
+
+
+def test_forward_email_accepts_meeting_request(settings) -> None:
+    """Meeting invites fetch as MeetingRequest (IPM.Schedule.Meeting.*), not
+    Message, and _fetch_item's expected_type gate must not reject them."""
+    backend = EWSExchangeBackend(settings)
+    captured: list[str] = []
+
+    class FakeResponse:
+        def send(self):
+            pass
+
+    # Bypass __init__ (it wants a live Account) while keeping isinstance real:
+    # the type gate only fires for genuine exchangelib Items, which is why the
+    # plain-FakeItem tests above never exercised it.
+    meeting = object.__new__(MeetingRequest)
+    meeting.subject = "Weekly team sync"
+    meeting.create_forward = lambda subject, body, to_recipients: (
+        captured.append(subject),
+        FakeResponse(),
+    )[1]
+
+    def fetch(ids, folder=None):
+        yield meeting
+
+    backend._account = SimpleNamespace(fetch=fetch)
+
+    backend.forward_email(ForwardEmailRequest(id="evt-1", to=["user@example.com"]))
+
+    assert captured == ["Fwd: Weekly team sync"]
 
 
 def test_forward_email_saves_draft_attaches_files_then_sends(settings, tmp_path) -> None:
